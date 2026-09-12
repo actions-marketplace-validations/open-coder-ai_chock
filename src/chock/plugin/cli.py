@@ -1,26 +1,4 @@
-"""`chock plugin` -- package policies as installable plugin directories.
-
-Five formats from one source, one enforcement system. Every hook-carrying format ships the
-byte-identical guard and adapter; only the envelope each vendor reads differs.
-
-- `agent-plugins` (the default) emits the Agent Plugins 1.0.0 manifest and skill in place,
-  the spec authors' own add-portability-first migration. Hookless: the standard carries no
-  hooks, so this package is advisory by construction.
-- `claude` emits Claude Code's plugin layout, read natively by Claude Code, Copilot CLI,
-  VS Code and Grok Build.
-- `copilot` emits the Agent Plugins layout with the enforcing hook under
-  `com.github.copilot/` -- the shape spec-validating marketplaces (awesome-copilot's
-  `vally`) accept, which the Claude layout is not.
-- `cursor` emits `.cursor-plugin/` with a `beforeShellExecution` hook. Cursor ignores Agent
-  Plugins hooks entirely, so this is the only format that enforces there.
-- `codex` emits `.codex-plugin/` with a `PreToolUse` hook. Codex can discover an
-  Agent-Plugins-format package but DISCARDS its hooks at load time, so the legacy
-  `.codex-plugin/` manifest is the only shape whose enforcement survives.
-
-The hook-carrying formats always build into a distribution tree (`--out-dir`), never in
-place: hook files dropped inside a policy folder would be discovered by any client pointed
-at the repo and read as a plugin nobody published.
-"""
+"""`chock plugin` -- package policies as installable plugin directories."""
 
 from __future__ import annotations
 
@@ -31,6 +9,7 @@ from pathlib import Path
 
 from chock.compile.compiler import _load_manifest
 from chock.manifest import CANONICAL_MANIFEST
+from chock.output import error
 from chock.plugin.build import (
     NAMESPACE,
     PluginNameError,
@@ -46,12 +25,8 @@ from chock.scaffold.recompile import discover_policy_dirs
 
 FORMATS = ("agent-plugins", "claude", "copilot", "cursor", "codex")
 
-#: Formats that can ship hooks and are therefore refused in place: discovery risk.
 HOOK_FORMATS = frozenset({"claude", "copilot", "cursor", "codex"})
 
-#: Per-format (check, build) pair. A table rather than a chain of conditionals: each
-#: vendor's envelope differs, and one lookup keyed by the format name is what stops a
-#: new format from being silently routed to another vendor's emitter.
 HOOK_EMITTERS = {
     "claude": (claude_plugin_differences, build_claude_plugin),
     "copilot": (copilot_plugin_differences, build_copilot_plugin),
@@ -61,20 +36,33 @@ HOOK_EMITTERS = {
 
 
 def resolve_policy_dirs(repo_root: Path, policies_dir: str | None) -> list[Path]:
-    """Policy directories to package.
-
-    `--policies-dir` exists because a catalog is not an adopter. An adopter's policies live
-    in `.agents/policies/` (what this repo enforces); a catalog's live in `base/` (what it
-    publishes), and the catalog installs only a subset of what it ships. Defaulting to
-    discovery and packaging only the installed six would have silently shipped half a
-    catalog.
-    """
+    """Policy directories to package."""
     if policies_dir is None:
         return discover_policy_dirs(repo_root)
     root = repo_root / policies_dir
     if not root.is_dir():
         return []
     return sorted(p.parent for p in root.glob(f"*/{CANONICAL_MANIFEST}"))
+
+
+def _select_policy_dirs(policy_dirs: list[Path], wanted: list[str]) -> tuple[list[Path], list[str]]:
+    """`policy_dirs` narrowed to those matching a wanted manifest id or directory name.
+
+    Same match rule as `toggles._find_policy_manifest`: id first, directory name second.
+    Returns the narrowed list plus any wanted id that matched nothing.
+    """
+    remaining = list(wanted)
+    selected: list[Path] = []
+    for policy_dir in policy_dirs:
+        manifest = _load_manifest(policy_dir)
+        policy_id = str(manifest.get("id") or policy_dir.name) if manifest else policy_dir.name
+        if policy_id not in remaining and policy_dir.name not in remaining:
+            continue
+        selected.append(policy_dir)
+        for match in (policy_id, policy_dir.name):
+            if match in remaining:
+                remaining.remove(match)
+    return selected, remaining
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -101,34 +89,54 @@ def main(argv: list[str] | None = None) -> int:
         help="Distribution root: plugins are written to <out-dir>/<format>/<id>/ (required for every hook-carrying format)",
     )
     parser.add_argument(
+        "--policy",
+        dest="policies",
+        action="append",
+        default=None,
+        metavar="ID",
+        help="Package only this policy (manifest id or directory name); repeat for more than one",
+    )
+    parser.add_argument(
+        "--out",
+        default=None,
+        help="Write the selected policy's plugin directly to this path, instead of <out-dir>/<format>/<id>/. "
+        "Requires exactly one --policy.",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="Report policies whose packaged output is missing or stale, and exit non-zero. Writes nothing.",
     )
     args = parser.parse_args(argv)
 
+    if args.out is not None and len(args.policies or []) != 1:
+        parser.error("--out requires exactly one --policy")
+
     formats = list(FORMATS) if args.format == "all" else [args.format]
     hook_formats = sorted(HOOK_FORMATS.intersection(formats))
-    if hook_formats and args.out_dir is None:
+    if hook_formats and args.out_dir is None and args.out is None:
         print(
-            f"--format {hook_formats[0]} requires --out-dir; see `chock plugin --help` for why in-place is refused.",
+            f"--format {hook_formats[0]} requires --out-dir (or --out); see `chock plugin --help` for why "
+            "in-place is refused.",
             file=sys.stderr,
         )
         return 2
 
     repo_root = Path(args.repo).resolve()
     out_root = Path(args.out_dir).resolve() if args.out_dir else None
+    explicit_out = Path(args.out).resolve() if args.out else None
     policy_dirs = resolve_policy_dirs(repo_root, args.policies_dir)
+    if args.policies:
+        policy_dirs, missing = _select_policy_dirs(policy_dirs, args.policies)
+        if missing:
+            print(f"Unknown --policy id(s): {', '.join(missing)}", file=sys.stderr)
+            return 2
     if not policy_dirs:
         print("No policies found to package.")
         return 0
 
     differences: list[str] = []
     written = 0
-    # Two policy folders can declare the same manifest id -- the id is not required to match
-    # the folder name in every catalog layout. They would map to one distribution directory,
-    # the second silently overwriting the first while the run reported both as packaged, and
-    # the index would list one package built from a mixture of two policies' files.
     seen: dict[str, Path] = {}
     for policy_dir in policy_dirs:
         manifest = _load_manifest(policy_dir)
@@ -146,20 +154,19 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             seen[name] = policy_dir
             for fmt in formats:
-                # One subtree per format, never a shared directory. The formats disagree by
-                # design: a Claude package that ships hooks says the policy is enforced here,
-                # while the same policy in the hookless Agent Plugins format is advisory. Both
-                # statements are true of their own package and false of the other, so sharing
-                # `skills/<id>/SKILL.md` would force one of them to lie -- and a generic client
-                # reading a shared tree would see an enforcement claim for hooks it ignores.
-                target = out_root / fmt / name if out_root else None
+                if explicit_out is not None:
+                    target = explicit_out
+                elif out_root is not None:
+                    target = out_root / fmt / name
+                else:
+                    target = None
                 if fmt == "agent-plugins":
                     if args.check:
                         differences.extend(plugin_differences(policy_dir, manifest, repo_root, target))
                     else:
                         build_plugin(policy_dir, manifest, repo_root, out_dir=target)
                 else:
-                    assert target is not None  # enforced above: hook formats require --out-dir
+                    assert target is not None  # noqa: S101 -- hook_formats requiring --out-dir/--out was checked above
                     differ, build = HOOK_EMITTERS[fmt]
                     if args.check:
                         differences.extend(differ(policy_dir, manifest, repo_root, target))
@@ -168,14 +175,13 @@ def main(argv: list[str] | None = None) -> int:
             if not args.check:
                 written += 1
         except PluginNameError as exc:
-            print(f"[ERROR] {policy_dir}: {exc}", file=sys.stderr)
+            error(f"{policy_dir}: {exc}")
             return 2
 
-    # A policy removed or renamed upstream leaves its directory behind. Nothing would rebuild
-    # it, nothing would report it, and `marketplace build` would keep indexing it -- so a
-    # withdrawn policy stays installable forever, which is the yank procedure failing
-    # silently. Only formats that were actually built are reconciled.
-    if out_root is not None:
+    if out_root is not None and not args.policies:
+        # Staleness can only be judged against the full policy set; a --policy-narrowed
+        # run has not seen every policy that should still exist under out_root, so it
+        # must not treat the ones it skipped as removed.
         for fmt in formats:
             tree = out_root / fmt
             if not tree.is_dir():

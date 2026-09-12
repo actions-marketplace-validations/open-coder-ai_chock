@@ -1,33 +1,27 @@
-"""The per-agent surface table says it comes from surfaces.py. It has to.
-
-`docs/enforcement-surfaces.md` publishes a matrix of which surfaces each agent supports and
-cites `src/chock/compile/surfaces.py` as its source. Nothing checked that, and it
-drifted: adding `tabnine` and `vscode` to SURFACE_AGENTS left the table naming eleven agents
-while the code supported thirteen.
-
-A table of what is enforced where is the page a reader trusts most, so it is the worst one
-to let rot.
-"""
+"""Every per-agent surface table says it comes from surfaces.py. Each one has to."""
 
 from __future__ import annotations
 
 import re
 from pathlib import Path
 
+import pytest
+
+from chock.compile.levels import COVERAGE_LEVELS, IN_AGENT_LEVELS, level_rank
 from chock.compile.surfaces import SURFACE_AGENTS, Surface
 
-DOC = Path(__file__).resolve().parents[1] / "docs" / "enforcement-surfaces.md"
+ROOT = Path(__file__).resolve().parents[1]
+DOC = ROOT / "docs" / "enforcement-surfaces.md"
+README = ROOT / "README.md"
 COLUMNS = [
     Surface.AMBIENT_RULE,
     Surface.GIT_HOOK,
     Surface.CI_GATE,
     Surface.PRE_TOOL_USE,
     Surface.MANAGED_SETTING,
-    # agent-hooks joined the table with 0.4.0's docs sweep; listing it here means
-    # test_every_cell_matches_the_code now verifies that column against surfaces.py too.
     Surface.AGENT_HOOKS,
 ]
-#: Display names that differ from the agent key.
+HEADING = {Surface.AMBIENT_RULE: "ambient"}
 ALIAS = {
     "claude code": "claude",
     "kimi code": "kimi-code",
@@ -36,40 +30,193 @@ ALIAS = {
 }
 
 
-def _rows() -> dict[str, list[bool]]:
-    text = DOC.read_text(encoding="utf-8")
-    table = text.split("| Agent | ambient")[1].split("\n\n")[0]
+def _rows(path: Path, columns: list[Surface]) -> dict[str, list[bool]]:
+    """Parse one published matrix into {agent: [supported, per column in `columns`]}."""
+    text = path.read_text(encoding="utf-8")
+    start = "| Agent | ambient"
+    table = start + text.split(start)[1].split("\n\n")[0]
+    header, *body = table.splitlines()
+    named = [c.strip() for c in header.strip().strip("|").split("|")][1:]
+    expected = [HEADING.get(c, c.value) for c in columns]
+    assert named == expected, (
+        f"{path.name} heads its columns {named}, not {expected}; "
+        "the cells beneath them now mean something other than what this test checks"
+    )
     rows: dict[str, list[bool]] = {}
-    for line in table.splitlines():
+    for line in body:
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        if len(cells) != len(COLUMNS) + 1 or not cells[0] or cells[0].startswith(":-"):
+        if len(cells) != len(columns) + 1 or not cells[0] or cells[0].startswith(":-"):
             continue
         name = re.sub(r"\*+", "", cells[0]).lower()
         rows[ALIAS.get(name, name)] = [c == "✅" for c in cells[1:]]
-    assert rows, "matrix not parsed -- header or column count changed without updating COLUMNS"
+    assert rows, f"{path.name} matrix not parsed -- header or column count changed without updating COLUMNS"
     return rows
 
 
-def test_table_names_exactly_the_agents_the_code_supports() -> None:
-    assert set(_rows()) == set(SURFACE_AGENTS)
+TABLES = [(DOC, COLUMNS)]
 
 
-def test_every_cell_matches_the_code() -> None:
+@pytest.mark.parametrize(("path", "columns"), TABLES, ids=lambda v: getattr(v, "name", ""))
+def test_table_names_exactly_the_agents_the_code_supports(path: Path, columns: list[Surface]) -> None:
+    """The full matrix lists every supported agent and no others."""
+    assert set(_rows(path, columns)) == set(SURFACE_AGENTS)
+
+
+@pytest.mark.parametrize(("path", "columns"), TABLES, ids=lambda v: getattr(v, "name", ""))
+def test_every_cell_matches_the_code(path: Path, columns: list[Surface]) -> None:
+    """Every checkmark in the full matrix is a claim `surfaces.py` still makes."""
     wrong = [
         f"{agent}/{surface.value}: table={marked}, code={surface in SURFACE_AGENTS[agent]}"
-        for agent, marks in _rows().items()
+        for agent, marks in _rows(path, columns).items()
         if agent in SURFACE_AGENTS
-        for surface, marked in zip(COLUMNS, marks)
+        for surface, marked in zip(columns, marks)
         if marked != (surface in SURFACE_AGENTS[agent])
     ]
-    assert not wrong, "enforcement-surfaces.md disagrees with surfaces.py:\n  " + "\n  ".join(wrong)
+    assert not wrong, f"{path.name} disagrees with surfaces.py:\n  " + "\n  ".join(wrong)
+
+
+def _readme_rows() -> dict[str, str]:
+    """{agent: "what it enforces" cell} for every row across README's visible and <details> tables."""
+    text = README.read_text(encoding="utf-8")
+    rows: dict[str, str] = {}
+    for line in text.splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) != 3 or cells[0].startswith(":-") or cells[0] == "Agent" or not cells[0].startswith("**"):
+            continue
+        name = re.sub(r"\*+", "", cells[0]).lower()
+        rows[ALIAS.get(name, name)] = cells[1]
+    assert rows, "README.md Supported agents table not parsed -- its shape changed"
+    return rows
+
+
+def test_readme_table_names_exactly_the_agents_the_code_supports() -> None:
+    """README's condensed table (visible six + <details>) lists every supported agent, no others."""
+    assert set(_readme_rows()) == set(SURFACE_AGENTS)
+
+
+def test_readme_enforces_column_matches_the_code() -> None:
+    """README's "What it enforces" cell says native-hook exactly when surfaces.py agrees."""
+    wrong = []
+    for agent, cell in _readme_rows().items():
+        supported = SURFACE_AGENTS[agent]
+        has_pre_tool = Surface.PRE_TOOL_USE in supported
+        has_agent_hooks = Surface.AGENT_HOOKS in supported
+        claims_pre_tool = "pre-tool-use hook" in cell
+        claims_agent_hooks = "agent hook" in cell and "pre-tool-use" not in cell
+        claims_floor_only = "git hook + CI gate only" in cell
+        if claims_pre_tool != has_pre_tool or claims_agent_hooks != has_agent_hooks:
+            wrong.append(f"{agent}: cell={cell!r}, pre_tool={has_pre_tool}, agent_hooks={has_agent_hooks}")
+        elif not (has_pre_tool or has_agent_hooks) and not claims_floor_only:
+            wrong.append(f"{agent}: cell={cell!r} does not say 'git hook + CI gate only'")
+    assert not wrong, "README Supported agents table disagrees with surfaces.py:\n  " + "\n  ".join(wrong)
+
+
+def _omission_caveat() -> str:
+    """The one README paragraph that says why three surfaces are missing from its table."""
+    paragraphs = [" ".join(p.split()) for p in README.read_text(encoding="utf-8").split("\n\n")]
+    found = [p for p in paragraphs if "surfaces are absent" in p]
+    assert len(found) == 1, f"expected exactly one omission caveat, found {len(found)}"
+    return found[0]
+
+
+def _reason_for(caveat: str, surface: Surface) -> str:
+    """The slice of `caveat` that belongs to `surface`: its name up to the next surface named."""
+    marks = sorted(
+        (caveat.index(f"`{s.value}`"), s) for s in (Surface.MANAGED_SETTING, Surface.GATEWAY, Surface.MCP_GATEWAY)
+    )
+    for i, (start, at) in enumerate(marks):
+        if at is surface:
+            return caveat[start : marks[i + 1][0] if i + 1 < len(marks) else len(caveat)]
+    raise AssertionError(f"{surface.value} is not named in the caveat")
+
+
+def test_readme_says_why_the_absent_surfaces_are_absent() -> None:
+    """Dropping a column is a claim of its own: the reader has to be told, not left to notice."""
+    from chock.compile.compiler import EMITTERS
+    from chock.compile.surfaces import INSTALLED_SURFACES, coverage_level
+
+    omitted = {
+        Surface.MANAGED_SETTING: "compiled but not installed",
+        Surface.GATEWAY: "modelled but not yet emitted",
+        Surface.MCP_GATEWAY: "per-client witness",
+    }
+    caveat = _omission_caveat()
+    for surface, phrase in omitted.items():
+        assert phrase in _reason_for(caveat, surface), (
+            f"the caveat no longer gives `{surface.value}` the reason {phrase!r}"
+        )
+    for surface in omitted:
+        crediting = [a for a in SURFACE_AGENTS if coverage_level({surface}, a) != "none"]
+        assert not crediting, f"{surface.value} now credits {crediting}; the README owes it a column"
+
+    assert Surface.MANAGED_SETTING not in INSTALLED_SURFACES, "an installer landed; 'not installed' is now false"
+    assert Surface.GATEWAY not in EMITTERS, "gateway emits now; 'not yet emitted' is now false"
+    supporting = [a for a, s in SURFACE_AGENTS.items() if Surface.MCP_GATEWAY in s]
+    assert not supporting, f"mcp-gateway is now supported by {supporting}; the per-client wording is stale"
+
+
+def test_the_page_publishes_the_cap_the_code_applies() -> None:
+    """The cap table is the honesty anchor; a doc that drifts from it advertises a stronger claim."""
+    from chock.compile.levels import BASIS_CAP
+
+    text = DOC.read_text(encoding="utf-8")
+    start = "| Weakest basis under the grade | May back at most |"
+    assert start in text, "the basis-cap table is gone or its header changed"
+
+    published = {}
+    for line in (start + text.split(start)[1].split("\n\n")[0]).splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) != 2 or cells[0].startswith(":-") or cells[0].startswith("Weakest"):
+            continue
+        for basis in re.findall(r"`([^`]+)`", cells[0]):
+            published[basis] = re.findall(r"`([^`]+)`", cells[1])[0]
+
+    assert published == BASIS_CAP, f"the page publishes {published}, the code applies {BASIS_CAP}"
+
+
+def _published_levels() -> list[str]:
+    """The level names the doc's `| Level | Meaning |` table publishes, in the order it lists them."""
+    text = DOC.read_text(encoding="utf-8")
+    start = "| Level | Meaning |"
+    assert start in text, "the coverage-level table is gone or its header changed"
+    table = start + text.split(start)[1].split("\n\n")[0]
+    levels = []
+    for line in table.splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) != 2 or cells[0].startswith(":-") or cells[0] == "Level":
+            continue
+        found = re.findall(r"`([^`]+)`", cells[0])
+        assert len(found) == 1, f"level cell {cells[0]!r} does not name exactly one level"
+        levels.append(found[0])
+    assert levels, "coverage-level table not parsed -- the row shape changed"
+    return levels
+
+
+def test_the_page_names_every_level_the_code_can_report() -> None:
+    """The level vocabulary is what every other claim on the page is worded in."""
+    assert set(_published_levels()) == set(COVERAGE_LEVELS), (
+        f"the page publishes {sorted(_published_levels())}, the code reports {sorted(COVERAGE_LEVELS)}"
+    )
+
+
+def test_the_page_lists_the_in_agent_ladder_strongest_first() -> None:
+    """The table's ORDER is a claim about strength, so it is bound to `level_rank`."""
+    ranked = [level for level in _published_levels() if level in IN_AGENT_LEVELS]
+    ranks = [level_rank(level) for level in ranked]
+    assert ranks == sorted(ranks, reverse=True), (
+        f"the page lists the ladder as {ranked}, which is not strongest-first by level_rank"
+    )
+
+
+def test_the_page_states_the_ladder_order_the_code_returns() -> None:
+    """The page prints the ladder as one line; it has to be the line `level_rank` produces."""
+    rendered = "  <  ".join(sorted(IN_AGENT_LEVELS, key=level_rank))
+    flattened = " ".join(DOC.read_text(encoding="utf-8").split())
+    assert " ".join(rendered.split()) in flattened, f"the page does not state the ladder as: {rendered}"
 
 
 def test_managed_setting_is_disclosed_as_not_installed() -> None:
-    """The table marks it supported; nothing installs it, and the page must say so.
-
-    Without the caveat a reader takes the checkmark as a control that is switched on.
-    """
+    """The table marks it supported; nothing installs it, and the page must say so."""
     assert Surface.MANAGED_SETTING in SURFACE_AGENTS["claude"], "table caveat is now stale"
     from chock.compile.surfaces import INSTALLED_SURFACES
 
@@ -78,17 +225,7 @@ def test_managed_setting_is_disclosed_as_not_installed() -> None:
 
 
 def test_ci_gate_is_disclosed_as_needing_its_installer() -> None:
-    """`ci-gate` is the surface this page was most wrong about, so it stays pinned.
-
-    It was once documented as the "hard, un-bypassable" backstop and listed in
-    INSTALLED_SURFACES while nothing installed it and the step it emitted could not fail.
-    It now emits a step that can fail and has an installer, so the earlier assertion --
-    that it must NOT be emitted -- has been satisfied out of existence.
-
-    What replaces it is the claim that is true today and could drift tomorrow: emitting is
-    not enforcing. `install-ci` has to have written the workflow before coverage credits
-    the surface, and the page has to say so, exactly as it does for `pre-tool-use`.
-    """
+    """`ci-gate` is the surface this page was most wrong about, so it stays pinned."""
     from chock.compile.compiler import EMITTERS
     from chock.compile.surfaces import INSTALLED_SURFACES, coverage_level
 
@@ -96,7 +233,6 @@ def test_ci_gate_is_disclosed_as_needing_its_installer() -> None:
     assert Surface.CI_GATE in INSTALLED_SURFACES, "an installer exists; the constant must reflect it"
     assert "install-ci" in DOC.read_text(encoding="utf-8"), "the page must name what wires the surface up"
 
-    # The witness itself: a CI-only policy claims nothing until the workflow is installed.
     ci_only = {Surface.CI_GATE}
-    assert coverage_level(ci_only, "cursor", ci_gate_installed=False) == "unsupported"
+    assert coverage_level(ci_only, "cursor", ci_gate_installed=False) == "none"
     assert coverage_level(ci_only, "cursor", ci_gate_installed=True) == "enforced-at-commit"

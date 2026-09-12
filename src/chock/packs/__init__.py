@@ -1,8 +1,4 @@
-"""Packaged content for distribution in the chock wheel/binary.
-
-Authoring skills and their template assets only -- no policies. `packs_root()` returns a
-concrete Path to it, in a normal wheel/editable install and in a frozen PyInstaller build.
-"""
+"""Packaged content for distribution in the chock wheel/binary."""
 
 from __future__ import annotations
 
@@ -28,4 +24,4 @@ def to_path(traversable: Traversable) -> Path:
     return Path(str(traversable))
 
 
-__all__ = ["packs_root", "to_path", "Traversable"]
+__all__ = ["Traversable", "packs_root", "to_path"]

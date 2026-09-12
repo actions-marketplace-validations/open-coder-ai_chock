@@ -10,11 +10,13 @@ Everything you need to understand, use, and extend Chock. New here? Start with
 
 | Guide | Read it to… |
 | :--- | :--- |
+| [Why](why.md) | The problem Chock solves, and the case for open-source maintainers |
 | [Getting Started](getting-started.md) | Install, onboard a repo, and author your first policy |
 | [Architecture](architecture.md) | Understand the *author → compile → enforce* model |
 | [Core Concepts](concepts.md) | Learn the vocabulary: artifacts, manifests, surfaces, coverage |
 | [CLI Reference](cli-reference.md) | Look up every command, flag, and example |
 | [Authoring Policies](authoring-policies.md) | Write rules, hooks, skills, and subagents |
+| [Script-Backed Gates](script-backed-gates.md) | Declare a check no gate `kind` can express, and the contract its script runs under |
 | [Enforcement Surfaces](enforcement-surfaces.md) | See the eight surfaces and the per-agent coverage matrix |
 | [Agentic-Risk Coverage](agentic-risk-coverage.md) | Problem-first index: what Chock stops, at which honest tier — and what it doesn't |
 | [Agent Plugins](agent-plugins.md) | Package policies for the open standard — and what that does not buy you |
@@ -26,6 +28,8 @@ Everything you need to understand, use, and extend Chock. New here? Start with
 | [Policies](baseline-policies.md) | What the base catalog offers, and how to install and customise it |
 | [Adopting](adopting.md) | Fork, merge upstream, and keep consumer customizations safe |
 | [Adapters](adapters/README.md) | Per-agent wrapper notes |
+| [Ecosystem](ecosystem.md) | The sibling repositories, what each is, and where a contribution goes |
+| [Roadmap](roadmap.md) | Milestones shipped and planned, and the issues that track direction |
 
 ## 🧭 The 60-second mental model
 

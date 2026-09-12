@@ -1,10 +1,4 @@
-"""The documented adopter flow (init + add + sync) must fully wire the guards.
-
-PreToolUse installation used to live only behind the `install-hooks` alias, so the flow
-every doc teaches left compiled fragments uninstalled: coverage honestly said `advisory`
-while the docs said sync "rewires the repo". These tests pin that one plain `chock sync`
-ends with the guard installed on every wired agent and coverage claiming it.
-"""
+"""The documented adopter flow (init + add + sync) must fully wire the guards."""
 
 from __future__ import annotations
 
@@ -38,7 +32,10 @@ def _fresh_repo() -> Path:
     env = {**os.environ, "PYTHONPATH": str(FRAMEWORK_ROOT / "src")}
     subprocess.run(["git", "init", "-q", "."], cwd=repo, check=True)
     subprocess.run(
-        [sys.executable, "-m", "chock.cli", "init", ".", "--skip-hooks"], cwd=repo, capture_output=True, env=env
+        [sys.executable, "-m", "chock.cli", "init", ".", "--skip-hooks", "--agents", "claude", "cursor"],
+        cwd=repo,
+        capture_output=True,
+        env=env,
     )
     shutil.copytree(
         baseline_policy("block-destructive-commands"),
@@ -63,13 +60,11 @@ def test_one_sync_wires_and_claims_every_guard_surface() -> None:
 
     coverage = json.loads((repo / ".chock" / "coverage.json").read_text(encoding="utf-8"))
     row = coverage["block-destructive-commands"]
-    assert row["claude"] == "enforced", f"coverage must reflect the wiring sync just did: {row}"
-    assert row.get("cursor", "enforced") == "enforced", row
+    assert row["claude"]["level"] == "best-effort", f"coverage must reflect the wiring sync just did: {row}"
+    assert row["cursor"]["level"] == "enforceable", row
 
 
 def test_second_sync_is_stable() -> None:
-    # The re-derivation must fire only when wiring changes: a second sync leaves
-    # settings, hooks config and coverage byte-identical.
     repo = _fresh_repo()
     _sync(repo)
     paths = [

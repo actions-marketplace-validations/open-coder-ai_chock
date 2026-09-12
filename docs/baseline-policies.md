@@ -46,6 +46,7 @@ These block risky actions at commit/push time and compile into agent-native cont
 | **`block-invisible-unicode`** | Bidi override/isolate controls and Unicode tag-block characters in staged changes — Trojan Source (CVE-2021-42574) and instructions hidden from reviewers but legible to agents. ZWJ and RTL marks pass by design (emoji, internationalised text). |
 | **`protect-agent-config`** | Shell writes to the agent's own instruction, permission and vendored-enforcement files (`AGENTS.md`, `.claude/settings.json`, `.mcp.json`, `.chock/bin/` …) — self-modification refused before it runs; regenerate through `chock sync` instead. |
 | **`block-wildcard-agent-permissions`** | Committed everything-grants in agent settings and MCP configs — bare-wildcard shell grants and allow-everything tool lists. Scoped grants pass; the twin of the catalog's `block-wildcard-iam`. |
+| **`test-integrity`** | A change that wins green CI by weakening the tests instead of fixing the code: a deleted test file, a net loss of assertions across the change, or a vacuous assertion (`assert True`, `expect(true)`) added in their place. The pragma `chock: test-removal-reviewed` on the removing line is the reviewed escape hatch. |
 
 > These are **best-effort friction, not a security boundary.** Known bypasses (aliases, quoting,
 > non-standard clients) are documented on each policy. Pair them with the CI-gate backstop.
@@ -67,6 +68,15 @@ Always-on guidance, surfaced through `.agents/policies/INDEX.md`:
 | **`minimal-content`** | Compress: prefer schemas and short structured forms over prose and speculative depth. |
 | **`pre-generated-scripts`** | Prefer deterministic pre-written scripts over generating code at run time. |
 
+### CI-native checks (opt-in)
+
+Not a compiled `hook.gate` — a CLI subcommand run as its own required status check, because it
+depends on `chock.review` and the vendored, stdlib-only gate runner must never import it.
+
+| Policy | What it requires |
+| :--- | :--- |
+| **`require-review-evidence`** | `chock review require --base <ref>` re-derives a PR's claimed checks instead of trusting them: evidence must be present, valid (`chock review verify` holds), sufficient (`command_set_hash` matches this repository's `required_checks` as currently defined — catches a shrunk set or a redefined check, not just an omission), passing (no required check recorded `fail`), and attested where `attestation_floor` demands it. Needs curated `chock.review.required_checks` config and a required-status-check wired in branch protection (see [Adopting Chock](adopting.md#the-branch-protection-gap)); see [Reviewer Evidence](reviewer-evidence.md#chock-review-require----is-this-pr-merge-ready) for wiring it via `action.yml`. |
+
 ### Repo-local policies
 
 A policy does not have to come from a catalog: anything under `.agents/policies/` is
@@ -79,7 +89,7 @@ own the same way: a folder, a manifest, and (optionally) an
 
 ## Cross-platform & tested
 
-`scan-secrets`, `protect-main-branch` and `verify-dependency-exists` are **declarative**
+`scan-secrets`, `protect-main-branch`, `verify-dependency-exists` and `test-integrity` are **declarative**
 (`hook.gate` in `manifest.yaml`); `chock compile` emits the cross-platform git-hook shims and
 a self-contained, stdlib-only Python runner. The remaining guards ship bash implementations invoked
 through the PreToolUse adapter. `.gitattributes` pins scripts to LF so their hashes — and therefore

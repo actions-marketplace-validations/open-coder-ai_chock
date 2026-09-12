@@ -1,13 +1,4 @@
-"""PreToolUse enforcement: the adapter, the installer, and the end-to-end path.
-
-`compile` emitted PreToolUse fragments that nothing installed, in a shape Claude Code would
-never have read, invoking guards that read argv while Claude sends JSON on stdin. Three
-independent breaks, and `coverage.json` reported the policies as `enforced` throughout.
-
-Wiring up the installer alone would have been *worse* than leaving it: the hooks would fire,
-the guards would receive no arguments, every destructive command would be allowed, and the
-enforcement claim would finally have looked justified.
-"""
+"""PreToolUse enforcement: the vendored runtime, the installer, and the end-to-end path."""
 
 from __future__ import annotations
 
@@ -21,93 +12,116 @@ from pathlib import Path
 import pytest
 from conftest import baseline_policy
 
+from chock.gate import runtime_bundle
+from chock.gate.guard_runner import find_bash
+
 FRAMEWORK_ROOT = Path(__file__).resolve().parents[1]
-ADAPTER = FRAMEWORK_ROOT / "src" / "chock" / "gate" / "pretooluse.py"
 GUARD = baseline_policy("block-destructive-commands") / "implementations" / "block-destructive.sh"
 
 
+@pytest.fixture(scope="module")
+def claude_code_runtime(tmp_path_factory) -> Path:
+    path = tmp_path_factory.mktemp("runtime") / "claude_code.py"
+    path.write_text(runtime_bundle.render("claude_code"), encoding="utf-8")
+    return path
+
+
 def _payload(command: str) -> str:
-    return json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
+    return json.dumps(
+        {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "hook_event_name": "PreToolUse",
+            "session_id": "s",
+            "transcript_path": "/t",
+            "permission_mode": "default",
+        }
+    )
 
 
-def _adapter(command: str, guard: Path = GUARD) -> subprocess.CompletedProcess:
+def _adapter(claude_code_runtime: Path, command: str, guard: Path = GUARD) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(ADAPTER), "--guard", str(guard)],
+        [sys.executable, str(claude_code_runtime), "--guard", str(guard)],
         input=_payload(command),
         capture_output=True,
         text=True,
     )
 
 
-# ----------------------------------------------------------------- the adapter contract
+def _denied(result: subprocess.CompletedProcess) -> bool:
+    """Claude Code's deny rides entirely in the JSON body on a clean exit -- see"""
+    if result.returncode != 0 or not result.stdout.strip():
+        return False
+    decision = json.loads(result.stdout)
+    return decision.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
+
+
 @pytest.mark.parametrize(
     "command",
     ["rm -rf /", "git push --force origin main", "git reset --hard HEAD~1"],
 )
-def test_dangerous_commands_block(command: str) -> None:
-    """Exit 2 is what Claude Code treats as a block."""
-    result = _adapter(command)
-    assert result.returncode == 2, f"{command!r} was allowed:\n{result.stdout}{result.stderr}"
+def test_dangerous_commands_block(command: str, claude_code_runtime: Path) -> None:
+    result = _adapter(claude_code_runtime, command)
+    assert _denied(result), f"{command!r} was allowed:\n{result.stdout}{result.stderr}"
     assert "BLOCKED" in result.stderr
 
 
 @pytest.mark.parametrize("command", ["ls -la", "git push --force-with-lease origin main", "git status"])
-def test_safe_commands_are_allowed(command: str) -> None:
-    assert _adapter(command).returncode == 0
+def test_safe_commands_are_allowed(command: str, claude_code_runtime: Path) -> None:
+    result = _adapter(claude_code_runtime, command)
+    assert result.returncode == 0
+    assert not _denied(result)
 
 
-def test_argv_guard_receives_the_stdin_command() -> None:
-    """The original defect: guards read argv, Claude sends JSON on stdin.
-
-    Invoking the guard directly with no argv -- which is what an installed hook would have
-    done before the adapter existed -- allows `rm -rf /`.
-    """
-    sys.path.insert(0, str(ADAPTER.parent))
-    from pretooluse import find_bash  # the same resolver the adapter uses
-
+def test_argv_guard_receives_the_stdin_command(claude_code_runtime: Path) -> None:
+    """The original defect: guards read argv, Claude sends JSON on stdin."""
     bash = find_bash(GUARD)
     assert bash, "no usable bash on this machine; cannot exercise the guard"
     direct = subprocess.run([bash, str(GUARD)], input=_payload("rm -rf /"), capture_output=True, text=True)
     assert direct.returncode == 0, "precondition: the bare guard ignores stdin"
-    assert _adapter("rm -rf /").returncode == 2, "the adapter must bridge stdin to argv"
+    assert _denied(_adapter(claude_code_runtime, "rm -rf /")), "the runtime must bridge stdin to argv"
 
 
-def test_unparseable_input_allows_and_says_so() -> None:
+def test_unparseable_input_allows(claude_code_runtime: Path) -> None:
     """Failing closed here would block every Bash call on a malformed payload."""
     result = subprocess.run(
-        [sys.executable, str(ADAPTER), "--guard", str(GUARD)],
+        [sys.executable, str(claude_code_runtime), "--guard", str(GUARD)],
         input="not json",
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0
-    assert "not checked" in result.stderr
+    assert result.stdout.strip() == ""
 
 
-def test_missing_guard_allows_and_says_so(tmp_path: Path) -> None:
-    result = _adapter("rm -rf /", guard=tmp_path / "absent.sh")
+def test_missing_guard_allows(tmp_path: Path, claude_code_runtime: Path) -> None:
+    result = _adapter(claude_code_runtime, "rm -rf /", guard=tmp_path / "absent.sh")
     assert result.returncode == 0
-    assert "not checked" in result.stderr
+    assert not _denied(result)
 
 
-def test_non_command_tool_input_is_ignored() -> None:
+def test_non_command_tool_input_is_ignored(claude_code_runtime: Path) -> None:
     result = subprocess.run(
-        [sys.executable, str(ADAPTER), "--guard", str(GUARD)],
-        input=json.dumps({"tool_name": "Read", "tool_input": {"file_path": "/tmp/x"}}),
+        [sys.executable, str(claude_code_runtime), "--guard", str(GUARD)],
+        input=json.dumps(
+            {
+                "tool_name": "Read",
+                "tool_input": {"file_path": "/tmp/x"},
+                "hook_event_name": "PreToolUse",
+                "session_id": "s",
+                "transcript_path": "/t",
+                "permission_mode": "default",
+            }
+        ),
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0
+    assert not _denied(result)
 
 
-# ------------------------------------------------------------------------- the installer
 def _fresh_repo() -> tuple[Path, dict]:
-    """A scaffolded repo holding the two policies that compile a PreToolUse guard.
-
-    `init` installs no policies, so they are copied in explicitly -- the same
-    copy-a-folder step an adopter takes. Without them there is nothing to install and the
-    installer would be asserted against an empty input.
-    """
+    """A scaffolded repo holding the two policies that compile a PreToolUse guard."""
     import shutil
 
     repo = Path(tempfile.mkdtemp()) / "r"
@@ -132,7 +146,7 @@ def _fresh_repo() -> tuple[Path, dict]:
 
 
 def test_install_writes_claude_settings_schema() -> None:
-    from chock.hooks.pretooluse_install import install_pretooluse_hooks
+    from chock.hooks.in_agent_install import install_hooks
 
     repo, env = _fresh_repo()
     subprocess.run(
@@ -141,7 +155,7 @@ def test_install_writes_claude_settings_schema() -> None:
         capture_output=True,
         env=env,
     )
-    install_pretooluse_hooks(repo)
+    install_hooks(repo, "claude_code")
 
     settings = json.loads((repo / ".claude" / "settings.json").read_text(encoding="utf-8"))
     entries = settings["hooks"]["PreToolUse"]
@@ -151,12 +165,12 @@ def test_install_writes_claude_settings_schema() -> None:
         hook = entry["hooks"][0]
         assert hook["type"] == "command"
         assert "${CLAUDE_PROJECT_DIR}" in hook["command"], "paths must survive a repo move"
-    assert (repo / ".chock" / "bin" / "pretooluse.py").exists()
+    assert (repo / ".chock" / "bin" / "claude_code.py").exists()
 
 
 def test_install_preserves_unrelated_settings() -> None:
     """The settings file is the adopter's; only our own entries may be rewritten."""
-    from chock.hooks.pretooluse_install import install_pretooluse_hooks
+    from chock.hooks.in_agent_install import install_hooks
 
     repo, env = _fresh_repo()
     settings_path = repo / ".claude" / "settings.json"
@@ -179,7 +193,7 @@ def test_install_preserves_unrelated_settings() -> None:
         capture_output=True,
         env=env,
     )
-    install_pretooluse_hooks(repo)
+    install_hooks(repo, "claude_code")
 
     settings = json.loads(settings_path.read_text(encoding="utf-8"))
     assert settings["permissions"] == {"allow": ["Bash(ls *)"]}
@@ -189,7 +203,7 @@ def test_install_preserves_unrelated_settings() -> None:
 
 
 def test_reinstall_is_idempotent() -> None:
-    from chock.hooks.pretooluse_install import install_pretooluse_hooks
+    from chock.hooks.in_agent_install import install_hooks
 
     repo, env = _fresh_repo()
     subprocess.run(
@@ -198,9 +212,9 @@ def test_reinstall_is_idempotent() -> None:
         capture_output=True,
         env=env,
     )
-    install_pretooluse_hooks(repo)
+    install_hooks(repo, "claude_code")
     first = (repo / ".claude" / "settings.json").read_text(encoding="utf-8")
-    install_pretooluse_hooks(repo)
+    install_hooks(repo, "claude_code")
     assert (repo / ".claude" / "settings.json").read_text(encoding="utf-8") == first
 
 
@@ -208,7 +222,7 @@ def test_removing_the_fragments_removes_the_hooks() -> None:
     """A disabled or deleted policy must stop enforcing."""
     import shutil as sh
 
-    from chock.hooks.pretooluse_install import install_pretooluse_hooks
+    from chock.hooks.in_agent_install import install_hooks
 
     repo, env = _fresh_repo()
     subprocess.run(
@@ -217,14 +231,14 @@ def test_removing_the_fragments_removes_the_hooks() -> None:
         capture_output=True,
         env=env,
     )
-    install_pretooluse_hooks(repo)
+    install_hooks(repo, "claude_code")
     for path in (repo / ".chock" / "compiled").glob("*/pre-tool-use"):
         sh.rmtree(path)
-    install_pretooluse_hooks(repo)
+    install_hooks(repo, "claude_code")
 
     settings = json.loads((repo / ".claude" / "settings.json").read_text(encoding="utf-8"))
     assert not settings.get("hooks", {}).get("PreToolUse")
-    assert not (repo / ".chock" / "bin" / "pretooluse.py").exists()
+    assert not (repo / ".chock" / "bin" / "claude_code.py").exists()
 
 
 def test_end_to_end_installed_hooks_block_real_commands() -> None:
@@ -241,7 +255,7 @@ def test_end_to_end_installed_hooks_block_real_commands() -> None:
             proc = subprocess.run(
                 cmd, cwd=repo, shell=True, env=env, capture_output=True, text=True, input=_payload(command)
             )
-            if proc.returncode == 2:
+            if _denied(proc):
                 return True
         return False
 

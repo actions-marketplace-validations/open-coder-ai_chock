@@ -1,16 +1,10 @@
-"""Umbrella lifecycle commands: sync, check, status.
-
-The adopter surface follows the verbs the Python toolchain already taught people
-(`uv init/add/sync`, `poetry check`, `git status`). Each umbrella translates one
-`--repo` flag into the per-tool conventions of the commands it wraps; the wrapped
-entrypoints stay importable and are still exposed as hidden aliases for one
-pre-launch cycle.
-"""
+"""Umbrella lifecycle commands: sync, check, status."""
 
 from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 
 def _run(label: str, fn, argv: list[str]) -> int:
@@ -53,14 +47,46 @@ def sync_main(argv: list[str] | None) -> int:
     return rc
 
 
-# Matrix reads the cwd by design, which is why it ignores --repo; `chock check`
-# documents that it must run from the repo root, exactly as CI already does. Every
-# member is read-only: `check` never regenerates what it measures.
-CHECKS = ("validate", "verify", "evals", "matrix", "index")
+CHECKS = ("validate", "verify", "evals", "matrix", "mechanisms", "index", "conflicts")
+
+
+def _run_validate(args: argparse.Namespace) -> int:
+    from chock.validation.engine import main as validate_main
+
+    validate_argv = [args.repo]
+    if args.mode:
+        validate_argv += ["--mode", args.mode]
+    if args.event:
+        validate_argv += ["--event", args.event]
+    return _run("validate", validate_main, validate_argv)
+
+
+def _run_matrix(args: argparse.Namespace) -> int:
+    from chock.validation.checks_matrix_mechanisms import MATRIX_RELATIVE_PATH
+
+    matrix_file = Path(args.repo) / MATRIX_RELATIVE_PATH
+    if not matrix_file.exists() and not args.only:
+        print(f"== enforcement matrix (skipped: no {MATRIX_RELATIVE_PATH} in this repo)")
+        return 0
+    from chock.authoring.matrix import main as matrix_main
+
+    return _run("enforcement matrix", matrix_main, [])
+
+
+def _run_mechanisms(args: argparse.Namespace) -> int:
+    from chock.validation.checks_matrix_mechanisms import MATRIX_RELATIVE_PATH
+    from chock.validation.checks_matrix_mechanisms import main as mechanisms_main
+
+    matrix_file = Path(args.repo) / MATRIX_RELATIVE_PATH
+    if not matrix_file.exists() and not args.only:
+        print(f"== matrix mechanisms (skipped: no {MATRIX_RELATIVE_PATH} in this repo)")
+        return 0
+
+    return _run("matrix mechanisms", mechanisms_main, ["--repo", args.repo])
 
 
 def check_main(argv: list[str] | None) -> int:
-    """Run every truth check: validate, verify, evals, matrix, index freshness."""
+    """Run every truth check: validate, verify, evals, matrix, index freshness, conflicts."""
     parser = argparse.ArgumentParser(prog="chock check")
     parser.add_argument("--repo", default=".", help="Repo root")
     parser.add_argument("--only", default=None, help=f"Comma-separated subset of: {', '.join(CHECKS)}")
@@ -76,14 +102,7 @@ def check_main(argv: list[str] | None) -> int:
 
     rc = 0
     if "validate" in selected:
-        from chock.validation.engine import main as validate_main
-
-        validate_argv = [args.repo]
-        if args.mode:
-            validate_argv += ["--mode", args.mode]
-        if args.event:
-            validate_argv += ["--event", args.event]
-        rc = max(rc, _run("validate", validate_main, validate_argv))
+        rc = max(rc, _run_validate(args))
     if "verify" in selected:
         from chock.lock import main as verify_main
 
@@ -93,23 +112,17 @@ def check_main(argv: list[str] | None) -> int:
 
         rc = max(rc, _run("policy evals", eval_main, ["--repo", args.repo]))
     if "matrix" in selected:
-        from pathlib import Path
-
-        # The enforcement matrix is a framework-authoring artifact (spec/). Adopter
-        # repos have no spec/ tree, and the default `chock check` must not fail them
-        # for lacking one -- that is this framework's homework, not theirs. Asking for
-        # it explicitly (--only matrix) still fails loudly when it is missing.
-        matrix_file = Path(args.repo) / "spec" / "enforcement-matrix.md"
-        if matrix_file.exists() or args.only:
-            from chock.authoring.matrix import main as matrix_main
-
-            rc = max(rc, _run("enforcement matrix", matrix_main, []))
-        else:
-            print("== enforcement matrix (skipped: no spec/enforcement-matrix.md in this repo)")
+        rc = max(rc, _run_matrix(args))
+    if "mechanisms" in selected:
+        rc = max(rc, _run_mechanisms(args))
     if "index" in selected:
         from chock.index.cli import cmd_refresh
 
         rc = max(rc, _run("index freshness", cmd_refresh, ["--repo", args.repo, "--check"]))
+    if "conflicts" in selected:
+        from chock.validation.checks_conflicts import main as conflicts_main
+
+        rc = max(rc, _run("ambient conflicts", conflicts_main, ["--repo", args.repo]))
     return rc
 
 

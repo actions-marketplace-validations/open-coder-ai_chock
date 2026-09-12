@@ -1,10 +1,4 @@
-"""Documentation must describe the software that exists.
-
-Every fact here is checked against the code rather than proof-read. The drift these catch
-was all real and all silent: `--help` carried a hand-maintained command list that omitted
-`refresh` from the day it was added, and `concepts.md` documented six artifact types when
-the schema accepts four.
-"""
+"""Documentation must describe the software that exists."""
 
 from __future__ import annotations
 
@@ -23,12 +17,7 @@ def _docs_blob() -> str:
 
 
 def test_help_lists_every_advertised_command_and_hides_aliases() -> None:
-    """--help shows the Everyday and Authoring sections, generated from the tables.
-
-    The pre-launch ALIASES are dispatchable but deliberately unadvertised: an adopter's
-    first `chock --help` should teach the 8-verb surface, not the 21-command history.
-    This asserts the hiding too, so an alias cannot quietly climb back into the help.
-    """
+    """--help shows the Everyday and Authoring sections, generated from the tables."""
     from chock.cli import ALIASES, AUTHORING, EVERYDAY
 
     out = subprocess.run([sys.executable, "-m", "chock", "--help"], capture_output=True, text=True).stdout
@@ -51,15 +40,7 @@ def test_help_lists_every_advertised_command_and_hides_aliases() -> None:
 
 
 def test_every_command_answers_help_without_doing_work(tmp_path) -> None:
-    """`<command> --help` must explain itself, from anywhere, without side effects.
-
-    `check-matrix` took no arguments, so it parsed none, and `chock check --only matrix --help`
-    ran the check and exited 1 with `enforcement matrix not found`. Outside the framework repo
-    that reads like a broken install rather than a misunderstanding about flags.
-
-    Run from a directory that is not a Chock repo, because that is where someone
-    reaching for `--help` usually is.
-    """
+    """`<command> --help` must explain itself, from anywhere, without side effects."""
     from chock.cli import COMMANDS
 
     failures = []
@@ -78,19 +59,7 @@ def test_every_command_answers_help_without_doing_work(tmp_path) -> None:
 
 
 def test_every_command_that_takes_a_repo_root_accepts_repo(tmp_path) -> None:
-    """One spelling for "which repo", across the whole CLI.
-
-    `chock check --only verify --repo .` failed with `unrecognized arguments: --repo .` while
-    eighteen other call sites took exactly that flag. `verify`, `registry` and `new` had
-    settled on `--root` instead, and nothing compared them -- so the quickstart's shape
-    worked everywhere except the command that checks the install.
-
-    `--root` still works on all three; this asserts the alias, not a rename, because the
-    flag appears in `review/evidence.py`'s builtin check commands and in people's scripts.
-
-    Read out of `--help` rather than by importing each parser: the parsers are built inside
-    `main()` behind subcommand dispatch, and what a user can type is the actual claim.
-    """
+    """One spelling for "which repo", across the whole CLI."""
     from chock.cli import COMMANDS
 
     missing = []
@@ -108,11 +77,7 @@ def test_every_command_that_takes_a_repo_root_accepts_repo(tmp_path) -> None:
 
 
 def test_documented_artifact_types_match_the_schema() -> None:
-    """concepts.md listed `subagent` and `command` as manifest artifact values.
-
-    `command` was removed from the schema entirely; `subagent` is valid only in
-    subagent.yaml, which has its own schema. Both were wrong in the manifest table.
-    """
+    """concepts.md listed `subagent` and `command` as manifest artifact values."""
     schema = json.loads(
         (FRAMEWORK_ROOT / "src" / "chock" / "validation" / "schemas" / "manifest.schema.json").read_text(
             encoding="utf-8"
@@ -133,7 +98,6 @@ def test_documented_gate_kinds_match_the_code() -> None:
     for kind in KIND_PARAM_SCHEMAS:
         assert f"`{kind}`" in spec, f"gate kind {kind} is not documented in spec/gate-dsl.md"
 
-    # And nothing documented that does not exist.
     documented = set(re.findall(r"### `kind: (\w+)`", spec))
     unknown = documented - set(KIND_PARAM_SCHEMAS)
     assert not unknown, f"spec/gate-dsl.md documents nonexistent gate kinds: {sorted(unknown)}"
@@ -156,28 +120,17 @@ def test_every_installed_policy_is_documented() -> None:
 
 
 def test_docs_name_no_command_that_does_not_exist() -> None:
-    """Prose describing a deleted command is drift nothing else catches.
-
-    The existing checks compare docs to code fact-by-fact, so they cannot notice a paragraph
-    about a subsystem that was removed. `sync-packs` was documented in four files after it
-    was deleted, and every test stayed green.
-    """
+    """Prose describing a deleted command is drift nothing else catches."""
     from chock.cli import COMMANDS
 
-    # Commands the docs are allowed to mention: the real ones, plus subcommands and the
-    # deliberately-unimplemented `eval --mode agent`.
-    known = set(COMMANDS) | {"scan", "list", "resolve", "get", "report", "init", "upgrade", "add", "remove"}
+    known = set(COMMANDS) | {"scan", "list", "resolve", "get", "report", "init", "upgrade", "add", "remove", "attest"}
     referenced = set(re.findall(r"`chock ([a-z][a-z-]+)", _docs_blob()))
     unknown = sorted(referenced - known)
     assert not unknown, f"docs reference commands that do not exist: {unknown}"
 
 
 def test_docs_name_no_repo_path_that_does_not_exist() -> None:
-    """The same class, for paths.
-
-    After the framework stopped bundling policies, nine files still described
-    `.agents/policies/_baseline/` and `src/chock/packs/_baseline/`. Both were gone.
-    """
+    """The same class, for paths."""
     tracked = {
         ".agents/policies/",
         ".chock/",
@@ -191,7 +144,6 @@ def test_docs_name_no_repo_path_that_does_not_exist() -> None:
 
     missing = []
     for ref in sorted(referenced):
-        # Only judge concrete paths: placeholders like <id> are not filesystem claims.
         if any(ch in ref for ch in "<>*") or ref.endswith("/"):
             continue
         if not any(ref.startswith(prefix) for prefix in tracked):
@@ -202,13 +154,7 @@ def test_docs_name_no_repo_path_that_does_not_exist() -> None:
 
 
 def test_no_positional_repo_reaches_the_flag_only_verbs() -> None:
-    """`sync`, `check` and `status` take `--repo`, never a positional (uv-sync semantics).
-
-    `init .` teaches the positional shape, and it leaked: the `add` success hint and three
-    quickstarts all said `chock sync .`, so the documented install's final paste failed with
-    `unrecognized arguments: .`. Scan every surface an adopter copies from -- docs, README,
-    promo sources, and hints printed by the CLI itself.
-    """
+    """`sync`, `check` and `status` take `--repo`, never a positional (uv-sync semantics)."""
     sources = [
         *DOCS,
         FRAMEWORK_ROOT / "README.md",
@@ -238,3 +184,31 @@ def test_enable_and_disable_agree_on_unknown_policies(tmp_path: Path) -> None:
     disable = sp.run([*base, "disable", "no-such-policy"], cwd=env_root, capture_output=True, env=env)
     assert enable.returncode != 0, "enable accepted an unknown policy id"
     assert disable.returncode != 0, "disable accepted an unknown policy id"
+
+
+def test_readme_agents_md_sample_is_the_block_the_code_writes() -> None:
+    """The README shows the compiled `AGENTS.md` block and calls it verbatim. It has to be."""
+    from chock.scaffold.agents_md import POINTER_BLOCK
+
+    lines = [ln for ln in POINTER_BLOCK.splitlines() if ln.startswith(("before(", "fresh_clone:", "scope:"))]
+    assert len(lines) == 3, "POINTER_BLOCK's shape changed; the README sample needs rewriting, not re-anchoring"
+
+    readme = (FRAMEWORK_ROOT / "README.md").read_text(encoding="utf-8")
+    missing = [ln for ln in lines if ln not in readme]
+    assert not missing, "README's AGENTS.md sample no longer matches POINTER_BLOCK:\n  " + "\n  ".join(missing)
+    assert "\n".join(lines) in readme, "the README's sample has the right lines in the wrong shape"
+
+
+def test_readme_policy_example_points_at_a_policy_that_exists() -> None:
+    """The `.agents/policies/scan-secrets/` walkthrough is this repo's own installed policy."""
+    import yaml
+
+    policy = FRAMEWORK_ROOT / ".agents" / "policies" / "scan-secrets"
+    readme = (FRAMEWORK_ROOT / "README.md").read_text(encoding="utf-8")
+    assert ".agents/policies/scan-secrets/" in readme, "walkthrough moved; re-point this test"
+    assert (policy / "manifest.yaml").is_file(), "README shows manifest.yaml for a policy that has none"
+    assert (policy / "evals").is_dir(), "README shows an evals/ directory that does not exist"
+
+    gate = yaml.safe_load((policy / "manifest.yaml").read_text(encoding="utf-8"))["hook"]["gate"]
+    quoted = f"kind: {gate['kind']} · on: {gate['on']} · action: {gate['action']}".replace("'", "")
+    assert quoted in readme, f"README describes a gate the manifest no longer declares; it now reads {quoted!r}"

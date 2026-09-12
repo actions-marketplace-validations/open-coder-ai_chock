@@ -22,27 +22,18 @@ def load_config(repo_root: Path | str) -> dict[str, Any]:
 
 
 def agents_from_config(repo_root: Path) -> list[str]:
-    """The agent list a repo compiles for: configured, or every supported agent.
-
-    Configured names are validated here because this is the one funnel every
-    config-sourced selection passes through. A typo'd `supported_agents` entry used to
-    compile a silent `unsupported` coverage row and skip the wrapper with a clean exit,
-    while the identical typo on `--agents` dies loudly -- the config path must be as
-    loud as the flag path. Raises ValueError; CLI callers turn it into exit 2.
-    """
+    """The agent list a repo compiles for: configured, or every supported agent."""
     config = load_config(repo_root)
     configured = config.get("chock", {}).get("supported_agents")
     if not configured:
         return sorted(SURFACE_AGENTS)
     unknown = [a for a in configured if a not in SURFACE_AGENTS]
     if unknown:
-        raise ValueError(
+        msg = (
             f".chock/config.yaml supported_agents: unknown agent(s): {', '.join(unknown)}"
             f" -- valid: {', '.join(sorted(SURFACE_AGENTS))}"
         )
-    # Dedup like parse_agent_selection: the two entry points share the whole contract,
-    # not half. A duplicated entry once compiled the wrapper twice and re-persisted the
-    # duplicate on the next write.
+        raise ValueError(msg)
     deduped: list[str] = []
     for name in configured:
         if name not in deduped:
@@ -63,14 +54,7 @@ def policy_status(
     policy_id: str,
     manifest: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Resolve effective state for a policy from config + manifest.
-
-    Returns:
-        {state: str, targets: list[str] | None, mandatory: bool}
-        state is one of: "enabled", "overridden", "disabled".
-        targets is a list of Surface values to emit, or None when disabled.
-        mandatory is taken from manifest.get("mandatory").
-    """
+    """Resolve effective state for a policy from config + manifest."""
     manifest = manifest or {}
     disabled = _disabled_list(config)
     override = _policy_overrides(config).get(policy_id, {})
@@ -92,7 +76,7 @@ def policy_status(
     }
 
 
-def set_disabled(repo_root: Path | str, policy_id: str, disabled: bool) -> None:
+def set_disabled(repo_root: Path | str, policy_id: str, *, disabled: bool) -> None:
     """Add or remove a policy from policies.disabled; round-trip the config file."""
     path = Path(repo_root) / CONFIG_DIR / CONFIG_NAME
     config = load_config(repo_root) or {}

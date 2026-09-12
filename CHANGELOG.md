@@ -1,5 +1,448 @@
 # Chock changelog
 
+## Unreleased
+
+- **CI/docs: launch prep -- smaller hero GIF, no star history, split workflows.**
+  `docs/assets/demo.gif` recompressed with gifsicle (2.37 MB -> 955 KB) for mobile,
+  verified legible at the 760px width the README renders at; the README's Star history
+  section is removed for now (the owner restores it after launch). `render-demo.yml`
+  is renamed to `demo-gif.yml` and gains a `push`-on-`docs/assets/demo.tape` trigger
+  (any branch but `main`) that commits the regenerated GIF back to that branch, so a
+  tape change carries its GIF into the same pull request; the `workflow_dispatch` path
+  is unchanged. The `quickstart` job moves out of `ci.yml` into its own
+  `.github/workflows/quickstart.yml`, which also generates and diff-checks the
+  committed `docs/quickstart.sh` against the README's Quick start block.
+
+- **Docs: rebuilt the README as a landing page.** Shared section order (Quick start · What you
+  get · How it works · Author your own policy · Supported agents · For open-source maintainers ·
+  Contributing · Part of open-coder-ai · Security · License), the Why/Roadmap/doc-index prose
+  moved verbatim to `docs/why.md` and `docs/roadmap.md`, the hero GIF re-recorded as the
+  `scan-secrets` demo, and the Quick start block now runs for real in CI
+  (`tools/quickstart_block.py` + the `quickstart` job in `ci.yml`).
+
+- **Added `chock plugin build --policy` and `--out`** (#12). `--policy <id>` (repeatable) builds
+  only the named policies, matched by manifest `id` or directory name -- the same rule
+  `toggles._find_policy_manifest` uses, not a third one -- instead of always rebuilding every
+  policy under `--policies-dir`; an id that matches nothing exits non-zero naming it, rather than
+  printing `Packaged 0 policies` and exiting 0. `--out <path>` writes that one policy's plugin
+  directly to `<path>` instead of `<out-dir>/<format>/<id>/`; it is an argparse error with any
+  count of `--policy` other than exactly one. Both flags are respected by `--check`. A
+  `--policy`-narrowed build also no longer treats every other policy's package under `--out-dir`
+  as stale and deletes it -- staleness can only be judged against the full policy set, so that
+  cleanup pass now runs only on an unfiltered build.
+
+- **Fixed: `chock sync` doubled `PreToolUse`/`SessionStart`/Cursor entries in a repo whose
+  committed config predated the per-vendor `.chock/bin/` runtime split** (#84). Ownership of a
+  hook entry was decided by matching the *current* runtime filename only
+  (`.chock/bin/claude_code.py`, `.chock/bin/cursor.py`); an entry still pointing at
+  `.chock/bin/pretooluse.py` or `.chock/bin/sessionstart.py` -- names chock wrote before that
+  split -- was not recognised as chock's own, so it was kept and a fresh, current-named entry
+  was appended beside it. `runtime_vendor.owned_markers()` now also matches every basename in
+  the new `chock.hooks.data/legacy_runtime_basenames.json`, so a legacy entry is replaced in
+  place instead of doubled. An explicit list, not a `.chock/bin/` prefix match, so a script an
+  adopter happens to keep in that directory is never claimed as chock's. `in_agent_install.py`
+  and `sessionstart_install.py` both use it. Added `tests/test_sync_legacy_runtime_names.py`.
+
+- **Added `chock eval export --format context-report`**, moving chock's knowledge of its own
+  policy format (which eval cases have no `execute` block, and how a policy's rule text renders
+  for an agent) into chock as an exporter, so `open-coder-ai/context-report` can measure whether
+  a policy's ambient rule changes agent behaviour without chock depending on it. Writes one
+  `subjects/<id>.md` per policy via `chock.compile.emitters.advisory.advisory_lines` (the same
+  function the ambient/plugin emitters use, never re-derived), one `claude plugin eval` case
+  directory per tier-3 case tagged `rule:<id>`, and a `run.json` run manifest (`models`/`judge`
+  left for the caller to fill in). A policy with no tier-3 cases is skipped with a one-line
+  notice; the pre-`suite:` `eval_suite:`/`test_cases:` shape is a distinct, named error. See
+  [`docs/cli-reference.md`](docs/cli-reference.md#eval-export--hand-tier-3-cases-to-context-report).
+
+- **SEC-3 named a field/value pair the schema cannot express; corrected, and the class closed**
+  (`chock-g1`). `spec/policy-spec.md` §10 required `gate.message` "for every hook with
+  `action: block` or `action: verify`". `manifest.hook.json`'s `gate.action` is a `const: block` --
+  it has never accepted `verify`. The `advise`/`verify`/`block` distinction belongs to
+  `enforcement`, a different field (EFF-1), and no hook has ever used `verify` there either. The
+  spec's conditional was also *weaker* than what is enforced: `message` sits in `gate.required`
+  under `additionalProperties: false`, so it is required whenever a `gate` is declared, full stop.
+  SEC-3 now says that. Adds `tests/test_spec_field_values.py`, which extracts every
+  `` `field: value` `` the spec asserts and checks it against the schema that owns the field, so
+  prose cannot again claim a value no artifact could carry. Found by
+  `chock check --only mechanisms` (#112) while verifying SEC-3's mechanism, and recorded rather
+  than fixed there because it changes what a check enforces.
+
+- **CI now runs `mechanisms` and `conflicts`, and a test keeps that list honest** (`chock-g1`).
+  `.github/workflows/ci.yml` runs each sub-check as its own `chock check --only <x>` step rather
+  than the umbrella `chock check`, so the two most recently added checks -- `mechanisms` and
+  `conflicts` (AMB-2) -- were in `lifecycle.py`'s `CHECKS` but had no CI step, and therefore
+  gated nothing on a pull request. Added both steps, and
+  `test_every_lifecycle_check_has_its_own_ci_step` so the next check added to `CHECKS` fails the
+  suite until it is listed. The gap is the same shape as the one `mechanisms` itself was built to
+  catch: a control that runs somewhere is not a control that runs where the ledger says it does.
+
+- **Added `chock check --only mechanisms`, a matrix-vs-code check** (`chock-g1`). Three rows in
+  `spec/enforcement-matrix.md` were found, in one day, whose claim outran its implementation --
+  every one by accident, none by a standing check
+  (`discovery/2026-09-04-enforcement-matrix-audit.md` in org-plan). The existing `matrix`
+  sub-check only asserted that every invariant ID *appears*; presence is not the same as being
+  real. `mechanisms` (`chock.validation.checks_matrix_mechanisms`) parses every row naming a
+  `` `function()` `` mechanism and, via AST over `src/`, verifies: the function is defined; it is
+  invoked on the `engine` (`chock validate`) or `lifecycle` (`chock check`-only sub-check) dispatch
+  path -- both, since checking one only is how the audit produced its own false positives, e.g.
+  `check_ambient_conflicts` is lifecycle-only and invisible from `engine.py` alone; and it can
+  emit the severity the row claims, by walking the (transitive) call graph for literal
+  `"error"`/`"warning"`/`"info"` findings, or treating a bare CLI entrypoint's nonzero exit as
+  `error`-equivalent (it has no other vocabulary). A row that cannot be made true this way is not
+  weakened to pass: it is marked `unautomated` (no code path) or `eval` (enforced by the eval
+  suite instead), and the check skips it knowingly -- reported as an `info` finding, not silently.
+  Wired into `chock check` beside `matrix` in `lifecycle.py`'s `CHECKS`.
+  **Also repoints SEC-7** (a repointing, not a redesign -- the record's invariant, "the compiled
+  ambient surface is what policies produce, nobody hand-edits it," was already enforced,
+  blocking, by `chock check --only index` when `AGENTS.md` became a pointer; the row just named the
+  wrong mechanism): SEC-7 now names `chock check --only index` (`cmd_refresh()`, on the `lifecycle`
+  path) instead of `check_ambient_rule_blocks()`, which is a secondary, warning-level helper and
+  was never a byte-match -- every one of its findings is `"warning"`, so it structurally could
+  not fail a build. **Also fixes SEC-4, SEC-1, SEC-2, SEC-6, INT-1, INT-2** to name the real
+  functions that enforce them (`_scan_text_surfaces`, `check_security_baseline`,
+  `check_eval_first`, `validate_yaml_against_schema`) instead of prose with no `function()`
+  the check could verify, and marks **TPL-1 and SCH-1 `unautomated`**: no code compares the
+  template mirror or re-derives the installed schema copy, so their previous `warning`/`error`
+  severities were claims nothing could ever produce. Every row now carries a `Dispatch` column
+  (`engine`/`lifecycle`/`n/a`) recording which path enforces it, removing the ambiguity that
+  produced the audit's own false positives. Also fixes an unescaped `|` in DET-1's Check column
+  (`code|hybrid`, a pre-existing markdown-table bug this check's row parser exposed -- it split
+  the row into a bogus extra column) and teaches the row parser to respect `\|`-escaped pipes
+  already in use elsewhere in the file (e.g. EFF-1's `verify\|block`).
+- **Added AMB-2, deterministic conflict detection over the compiled ambient rule surface**
+  (`chock-g1`). `chock sync` compiles every enabled policy's rule into one attention surface
+  (`.agents/policies/INDEX.md`, the file `AGENTS.md` points agents to read -- see the AMB-1
+  correction below); nobody reviews those independently authored policies together, so a
+  contradiction there is worse than a missing rule, because the agent silently picks one and
+  neither is enforced. Arbiter ([arXiv:2603.08993](https://arxiv.org/abs/2603.08993)) finds
+  that the agent that resolves instruction conflicts cannot be the agent that detects them --
+  detection needs a different vantage point -- so this is not a model-based check: it is a new
+  parser (`chock.validation.ambient_parser`) over the compiled key/value DSL, retaining which
+  policy emitted each line, and a new check (`chock.validation.checks_conflicts`) doing set
+  arithmetic over a closed, catalog-derived verb vocabulary (`never`/`block` vs.
+  `prefer`/`require_approval`). Flags, as errors naming both policies and both lines: direct
+  contradictions, modality conflicts, and scope overlaps (an `outer(paths): verb(target)` call
+  flattened into per-path synthetic clauses, so a path claimed by two policies with opposing
+  verdicts falls out of the same mechanism). Redundant or shadowed rules are a warning naming
+  their token cost against the AMB-1 budget. A declared, reviewed override
+  (`# chock: conflict-reviewed <key>` in a policy's `rule.text`) suppresses exactly that
+  finding. New invariant AMB-2 in `spec/enforcement-matrix.md` and `spec/policy-spec.md` §16,
+  and `chock check --only conflicts` for the authoring loop.
+  **Also fixes an AMB-1 discrepancy**: the matrix and `spec/policy-spec.md` described AMB-1 as
+  measuring `chock:rules` blocks inlined in `AGENTS.md`. That architecture no longer exists --
+  `test_ambient_wiring.py::test_this_repo_carries_no_inlined_blocks` asserts `AGENTS.md` never
+  carries per-policy blocks at all, only a pointer to `.agents/policies/INDEX.md`. The
+  implementation (`check_ambient_token_budget()`, which reads `INDEX.md`) was already correct;
+  the docs were stale. Corrected, not rearchitected.
+- **Added `chock review require --base <ref>` and the `require-review-evidence` catalog policy**
+  (`chock-g1`), closing the two holes left in `chock review`: a contributor could name a trivial
+  subset of checks and have it verify cleanly (H1), and "evidence holds" was never the same claim
+  as "the checks passed" (H2). `emit` now records a `command_set_hash` over the repository's
+  `required_checks`, resolved to their actual registry commands; `require` recomputes that hash
+  from repo config -- never from the evidence -- and rejects any mismatch, catching a shrunk set
+  or a redefined check, not just an omission. New `chock.review.attestation_floor` and
+  `applies_to` config. `require` runs as its own CI step via `action.yml`, not a compiled
+  git-hook or ci-gate, because it depends on `chock.review` and the vendored gate runner must stay
+  stdlib-only. Documents the branch-protection gap: `ci-gate`'s "un-bypassable" claim rests on a
+  server-side required-status-check setting nothing in the repository can edit
+  (`docs/adopting.md#the-branch-protection-gap`). Re-derives the mechanism *Proof-or-Stop: Don't
+  Trust the Agent, Trust the Evidence* ([arXiv:2607.14890](https://arxiv.org/abs/2607.14890))
+  already publishes, for chock's anonymous-fork threat model. Coverage row:
+  `enforced-in-ci` -- re-derives claimed checks, does not deepen review.
+- **Added the `test_integrity` gate kind, closing the `agentic-risk-coverage.md` row on an
+  agent deleting tests or assertions to get green** (catalog policy `test-integrity`,
+  `chock-g1`). Blocks a deleted test file, a net loss of assertions across the whole
+  change, and a vacuous assertion (`assert True`, `expect(true)`) added in its place;
+  `chock: test-removal-reviewed` on the removing line is the reviewed escape hatch.
+  Declarative (`hook.gate` in `manifest.yaml`), `enforced-at-commit` with the `ci-gate`
+  backstop so it holds for an inbound contributor whose agent never ran a local hook. The
+  coverage row moves from `advisory` to `enforced-at-commit`.
+- **Fixed a dead `import shutil` in every vendored runtime bundle except `claude_code`'s.**
+  `chock.gate.runtime_bundle.render()` spliced its fixed `_chock_`-renamed stdlib import
+  block into every agent's bundle regardless of which of those names the assembled handler
+  actually used -- `shutil` is only referenced by `sessionstart`, extracted for
+  `claude_code` alone, so every other vendor's `.chock/bin/<agent>.py` carried an unused
+  import (flagged by CodeQL in every adopter that compiles the full vendor set, e.g.
+  chock-catalog#56). `render()` now filters the import block per agent against what its
+  handler source actually references. Runtime goldens regenerated; only the dead import
+  line moved, confirmed by diff.
+
+## 0.8.0 — Derive from agentseam's vendor config; externalize templates; adopt the Sonar/Checkstyle/FindBugs lint bar
+
+- **Adopted the Sonar/Checkstyle/FindBugs-class ruff rule bar** (owner standard,
+  `plan/coding-standards.md` §3) across `src/`: `C90 N PLR PLW PLC ERA T201 ARG RET SIM
+  PIE FBT A B S BLE TRY RUF`, with mccabe max-complexity 10 and pylint max-args 5 /
+  max-branches 12 / max-returns 6 / max-statements 50. Fixed the measured `src/` baseline
+  category by category in bisectable commits -- mechanical/safe, magic values plus a new
+  literal-duplication guard (`tools/check_literal_duplication.py`), exception hygiene,
+  boolean traps (keyword-only, including the vendored gate runtime), unused arguments,
+  asserts, subprocess hardening, 65 of 71 lazy imports hoisted to module top (6 kept lazy
+  for documented reasons), and `print` centralized into a new `chock/output.py`
+  `warn`/`error` surface for the 31 call sites that matched its convention (the ~183
+  genuine CLI/render call sites are per-file-ignored). Complexity splits (37 findings
+  across 21 functions) are deliberately deferred to a follow-up wave via scoped
+  `TODO(lint-adoption)` per-file-ignores, never a blanket one. No behaviour change: full
+  suite, `chock check`, `sync --check`, the acceptance suite, and a full before/after
+  artifact diff all pass unchanged; the standard is recorded in `AGENTS.md`.
+- **Emitted-artifact templates move out of Python source into template files, and the
+  CLI command table becomes data** (owner standard `externalize, don't hardcode`,
+  `plan/coding-standards.md` §2). Every non-Python template previously held as a Python
+  string literal -- the CI-gate step and git-hook shim (`compile/emitters/ci.py`,
+  `git_hook.py`), the in-agent bash/PowerShell one-liners (`in_agent.py`), the git-hook
+  dispatcher and wrapper scripts (`hooks/installers.py`), the scaffolded CI workflow and
+  config-file scaffolds (`scaffold/install_ci.py`, `templates.py`, `agents_md.py`), and
+  the vendored-runtime Python-source fragments (`gate/runtime_bundle.py`, as `.py.tmpl`)
+  -- now lives under each package's own `data/` directory, loaded via
+  `chock.resources.package_data_dir` and rendered with `__TOKEN__` + `str.replace` (never
+  `.format()`), so every template file is valid in its own language as committed and CI
+  lints it that way (`shellcheck`, `actionlint`). Emitted bytes are unchanged: proven by
+  the existing emitter-stability goldens, new token round-trip tests
+  (`tests/test_template_tokens.py`), and this repo's own `chock sync --check` staying
+  clean. `cli.py`'s `COMMANDS` table (name -> module/help/alias) moves to
+  `data/commands.json`, read at import time; `chock --help` output is unchanged
+  (`tests/test_commands_data.py` goldens it). New package-data and PyInstaller
+  (`collect_data_files`) coverage tests guard every new `data/` directory. AGENTS.md
+  gains a compact `externalized_text` hard rule recording the standard.
+
+- **In-agent membership derives from agentseam's capability matrix, and the surface
+  extends to seven new vendors** (design C3, `docs/design/derive-from-vendor-config.md`).
+  `IN_AGENT_TODAY`, `SURFACE_AGENTS`, `RUNTIME_AGENTS` and `VENDORED_RUNTIMES` stop being
+  hand lists: membership is `matrix.can_block(V, PRE_TOOL)` capped by what the repo-scoped
+  installer may touch (a repo-relative JSON config), computed in `chock.vendors`.
+  antigravity, codex_cli (repo-level, beside its existing plugin store), devin, gemini_cli,
+  grok, tabnine and windsurf now get per-policy pre-tool fragments rendered by agentseam's
+  own `hook_config` (`compile/emitters/in_agent.py`), one shape-agnostic config-merge
+  installer (`hooks/in_agent_generic.py`: strip-ours/deep-merge keyed on the vendored
+  runtime path, interpreter baking as before), and vendored runtimes from `bundle()`.
+  junie and kimi_code can block per the matrix but their recorded hook configs are
+  home-anchored (`~/.junie/...`, `~/.kimi-code/config.toml` -- TOML at that), outside what
+  `chock sync --repo` may write, so they stay advisory-only; a pinned test fails the day
+  upstream records repo-level JSON configs for them. junie (absent from chock entirely
+  before) joins the alias table, advisory surfaces and both published matrices. Day-one
+  coverage for every new vendor is the matrix word under its per-claim basis cap --
+  `best-effort (vendor-docs|vendor-source|third-party-install|live-run-partial)`,
+  `witnessed: false` everywhere (no live run exists) -- and the four previously enforced
+  vendors' artifacts are byte-identical (before/after tree diff; only new-vendor
+  coverage cells moved). New evidence: six `honours_ask` claim rows tested against the
+  bundled runtimes (`block` and `exit-2` join the wire-verdict vocabulary for
+  devin's spelling and windsurf's G5 exit-code grammar). New goldens: per-vendor fragment
+  fixtures in the emitter-stability tree and frozen per-vendor runtime bytes
+  (`tests/fixtures/runtime_goldens/`, regenerated only via `CHOCK_REGEN_GOLDENS=1`).
+  Fragment commands for the new vendors use repo-relative paths -- no repo-root token is
+  recorded upstream for them (the `${CLAUDE_PROJECT_DIR}` gap, filed) -- so the hooks
+  resolve where the vendor runs them from the repo root, and installs stay unwitnessed
+  best-effort claims until a real client run lands in the witness ledger.
+
+- **Per-vendor wire facts are now reads of agentseam 0.2.0's vendor config, and the vendor
+  emitters/installers collapse into one of each.** Config paths (`.claude/settings.json`,
+  `.cursor/hooks.json`, the `.github/hooks/` directory), pre-tool event spellings
+  (`PreToolUse`, `beforeShellExecution`), the cursor `version: 1` envelope, the SessionStart
+  event name, and the Claude shell matcher (`Bash`, from `tools.shell`) come from
+  `agentseam.vendor_config` / `agentseam.adapters` through `chock.vendors`, so those facts
+  are recorded once, upstream. The two vendor emitters (`claude_pretooluse`, `agent_hooks`)
+  become one `compile/emitters/in_agent.py`; the three installers (`pretooluse_install`,
+  `cursor_install`, `agenthooks_install`) become one `hooks/in_agent_install.py` with the
+  per-vendor differences reduced to a small wiring table; the plugin packagers render their
+  hooks files through the same two shape builders. **Emitted bytes are unchanged** -- proven
+  by a full before/after build of every artifact (compiled fragments, installed configs,
+  vendored runtimes, all five plugin formats, marketplace index): 450/450 files sha256-equal.
+  Three witnessed facts stay chock-recorded because agentseam 0.2.0 disagrees or records
+  nothing: the agent-hooks `preToolUse` spelling and entry keys (live deny witnessed;
+  upstream says `PreToolUse` + `{type, command, windows}`), the agent-hooks shell matcher,
+  and the `${CLAUDE_PROJECT_DIR}` token (no schema field). `tests/test_vendor_wire_facts.py`
+  binds each override to its witness row and to the upstream value it disagrees with, so the
+  moment upstream ingests the witnessed shape the suite says "delete the override and
+  derive". Cursor's `failClosed` stays unset: agentseam's accessor exists (`fail_closed`),
+  but flipping it is an enforcement-behaviour change that needs an owner decision and a
+  witnessed run, and a test now pins that no cursor wire byte carries the flag.
+
+- **agentseam 0.2.0, and the claim table now separates wire words from semantics.** The
+  dependency pin moves from 0.1.1 to 0.2.0 (the post-ACS release: canonical outcome
+  `escalate`, `ask` kept only as a deprecated alias). Under 0.1.1 chock's claim table
+  validated its `verdict` field against agentseam's canonical constants and derived the
+  fail-to-ask lift by `verdict == ASK` -- correct only because canonical and wire words
+  coincided. Each `src/chock/data/claims.json` row now records BOTH the word witnessed on
+  the vendor's wire (`verdict`, validated against a chock-owned wire vocabulary that a
+  live-runtime test recomputes from fixtures) and an explicit `honours` boolean; the lift
+  derives from `honours` alone, and a mutation test pins that equality with any verdict
+  constant fails. The vendored runtimes speak agentseam's canonical words
+  (`guard_runner.VERDICT_ESCALATE`, `Decision.escalate`) and every runtime fixture runs
+  with `-W error::DeprecationWarning`, so a deprecated spelling cannot ship silently.
+  No behavior change: a crashed guard still asks where it asked and codex still gets its
+  deny, and no coverage word moves.
+
+- **Coverage cells now carry their evidence, and a witness ledger replaces hand-asserted
+  posture prose.** Each `.chock/coverage.json` cell is `{level, basis, witnessed}` rather than
+  a bare word, and every report prints the pair -- `best-effort (live-run)`. The level is
+  `min(matrix word, cap(weakest basis the grade rests on))`, so a strong word can never sit on
+  weak evidence: `vendor-docs` backs `best-effort` at most, `inherited` backs nothing
+  reportable. **No day-one word changes** -- every basis chock grades on today clears its cap;
+  the cap's bite is the future case. Evidence is a ceiling, never a source: capability is read
+  from `agentseam.matrix` alone, so no evidence record can grant a gate a matrix row denies.
+  chock's own live observations move out of the packagers' prose into
+  `src/chock/data/witnesses.json` (`{agent, surface, client, date, method}`, partial rows
+  refused at load), and the "witnessed blocking on ..." phrase in a package posture is now
+  rendered from that row -- delete the row and the claim disappears with it. Cursor's posture
+  therefore names the client and date it was witnessed on instead of "a real install".
+  `tested` (our suite against our runtime, `src/chock/data/claims.json`) stays distinct from
+  `witnessed`: the `fail-to-ask` lift now requires a TESTED honours-ask claim naming the
+  fixture that proves it, which is also the table the runtime test parametrizes over, so a
+  claim cannot be edited up without that test failing.
+
+- **Runtime: a guard that RAN and could not decide now asks for confirmation instead of
+  allowing silently.** `gate.guard_runner` had five "could not determine" paths and answered
+  all five the same way -- allow, with a line on stderr the agent sees and the developer
+  usually does not. Two of them are now an `ask`: the guard crashed (any exit code that is
+  neither 0 nor 1) and the guard hit its 30-second timeout. Both mean the control was
+  installed, reachable and runnable and still produced no answer, which is anomalous rather
+  than routine.
+  The other three still allow, deliberately: a command POSIX `shlex` will not tokenize is
+  common and usually benign, an empty command has nothing to check, and a machine with no
+  usable `bash` is uniform across every command rather than a fact about this one. Oversight
+  capacity is finite, and a control that prompts on all five would train a developer to click
+  through the prompts that matter.
+  What an `ask` becomes is per-client and no client turns it into a silent allow: Claude Code
+  and VS Code agent mode prompt (VS Code's `ask` overrides its own auto-approve), Cursor's
+  `beforeShellExecution` honours `permission: "ask"`, and Codex CLI -- whose parser rejects
+  `ask` outright and then fails open on the response it rejected -- gets a deny instead. The
+  per-client evidence is cited to vendor source and vendor docs at named refs in
+  `docs/enforcement-surfaces.md`.
+  **No coverage grade moves.** A control is only as strong as its worst degradation and three
+  paths still allow. The plugin descriptions, the marketplace README text and
+  `docs/enforcement-surfaces.md` are corrected to state the split rather than a flat
+  "fails open"; `gate.guard_runner.evaluate` now returns `(outcome, reason)` or `None`.
+
+- **Fixed: a guard that timed out wrote the command it was gating -- credentials included
+  -- to stderr.** `subprocess.TimeoutExpired.__str__` embeds the argv it was given, which
+  for `gate.guard_runner.run_guard` is bash, the guard script, and every token of the
+  command. Printing it reached the agent's own transcript, which is exactly what the same
+  function's parse-failure branch and `log_outcome` both refuse to do, and for the same
+  reason: commands routinely carry bearer tokens and passwords. The timeout branch now
+  reports the timeout alone. `OSError` and `UnicodeError` keep their detail -- those name
+  the interpreter and an offset, not the command.
+- **Coverage taxonomy: a fourth in-agent level, `fail-to-ask`, and an ordering.** The
+  vocabulary graded on one axis -- what the HOST does when our hook never runs -- so a
+  control that degrades to silently allowing and one that degrades to prompting a human
+  both read `best-effort`. Those are not the same promise, and a grading layer that cannot
+  rank a control above ours is not measuring anything. The grade is now derived from two
+  inputs: the host's block behaviour and fail mode (agentseam's matrix) and the control's
+  own degradation (`compile.levels.CONTROL_DEGRADES_TO`). `compile.levels.level_rank`
+  orders the in-agent ladder (`none` < `detect` < `best-effort` < `fail-to-ask` <
+  `enforceable` < `enforced`) and deliberately refuses to rank `enforced-at-commit`,
+  `advisory` and `disabled` against it -- different mechanisms, no honest common scale.
+  **No existing grade changed**, and none moves with the ask above either: a mixed control
+  is declared at its weakest path, and three of the guard's five undecided paths still
+  allow, so `pre-tool-use` and `agent-hooks` stay at `best-effort`. The ladder carries a
+  word for something chock does not fully do, which is the point.
+- **Docs: stale enforcement grades corrected.** `docs/agentic-risk-coverage.md`,
+  `docs/concepts.md`, `docs/architecture.md` and `docs/compatibility.md` still published
+  `enforced` for an installed in-agent control and `unsupported` for the empty verdict --
+  both superseded by 0.7.0's finer vocabulary and neither checked by anything. The level
+  table in `docs/enforcement-surfaces.md` and its ordering are now bound to
+  `compile.levels` by `tests/test_surface_doc_matches_code.py`, so this class of drift
+  fails a test instead of aging in place.
+- **Internal: the level vocabulary moved to `chock.compile.levels`.** `surfaces.py` says
+  which surfaces exist per agent; how strong a control on one of them is, is a different
+  question and now a different module.
+- **Packaging: every published plugin package now carries its own `LICENSE`.** The
+  distribution repos hold a licence at the root only, so a plugin directory copied out of one
+  arrived with no terms attached. The notice is derived entirely from the policy's own
+  `provenance` -- licence from `license`, holder from `author`, year from `created_at` (or
+  `updated_at`) -- never from this project's own `LICENSE`, because `chock plugin build` runs
+  on anybody's policies and stamping open-coder-ai's copyright into a third party's package
+  would be a false claim in the one file where it matters. Nothing is written when the notice
+  cannot be derived (a licence whose text chock does not ship, or no year): a missing
+  `LICENSE` is a visible gap, an invented one is not. Emitted for `claude`, `codex`,
+  `cursor`, `copilot`, and for `agent-plugins` when it builds into a distribution directory
+  -- never for the in-place `agent-plugins` build, whose target is the adopter's own
+  `.agents/policies/<id>/`.
+- **Packaging: the Codex manifest gains its `interface` block.** `.codex-plugin/plugin.json`
+  now carries `interface{displayName, shortDescription, composerIcon}`, which directory
+  listings render and score. Every field is derived: `displayName` from the policy's own
+  `name`, `shortDescription` from the first sentence of its description (the full ones run
+  past 900 characters, and the manifest `description` additionally carries the posture
+  suffix, which is an enforcement claim rather than a summary), and `composerIcon` from the
+  icon this emitter now writes into the package at `assets/icon.svg`. No other field in the
+  block has a source in a policy manifest, so none is emitted.
+- **Packaging: the emitted icon ships as package data.** `chock/plugin/data/icon.svg`,
+  byte-identical to `docs/assets/logo.svg` and 512x512 by its viewBox, pinned in both
+  directions by tests -- against the logo it was copied from, and against the built wheel,
+  because `docs/` is not in the wheel and package data that is not declared silently is not
+  either.
+- **Internal: `chock/plugin/listing.py`.** What a listing needs from a package (icon,
+  licence, display metadata) is a different question from what a client needs to load it, and
+  `build.py` and `codex.py` were both over the 300-line review budget with the two mixed.
+
+## 0.7.0 — Migrate primitives-generation to agentseam
+
+BREAKING-ISH: chock's file layout, coverage vocabulary, and vendored runtime bytes all
+change. `agentseam==0.1.0` is a real dependency (staged, not yet published — CI on this
+change stays red by design until go-live; see the PR). Every adopter's next `chock sync`
+rewrites `.chock/bin/`, `.claude/settings.json`, `.cursor/hooks.json`, and most per-agent
+instruction files; some previously-written instruction files (for agents that read
+`AGENTS.md` natively) are deleted outright, and `coverage.json` re-grades several
+enforcement claims to a more honest, finer-grained word. All five migration-map axes land
+in this release (owner decision #7, "Option B"); the full accounting is in the wave's
+report, `plan/spine-a/reports/w7.md` on `open-coder-ai/org-plan` (private).
+
+- **Runtime: vendored PreToolUse/SessionStart runners are now agentseam's bundle, not a
+  hand-written cross-vendor adapter.** `.chock/bin/pretooluse.py` and
+  `.chock/bin/sessionstart.py` are gone, replaced by `.chock/bin/claude_code.py`,
+  `.chock/bin/cursor.py`, and `.chock/bin/vscode_copilot.py` — one self-contained,
+  stdlib-only file per agent (`agentseam.bundler.bundle()` plus chock's own guard-running
+  handler spliced in, see `gate/runtime_bundle.py`), instead of one file that sniffed which
+  vendor sent a payload by its shape. Claude Code's deny now rides entirely in the JSON
+  response body on a clean exit rather than exit code 2 — a deliberate, verified
+  improvement (avoids a PowerShell-wrapper exit-code collapse and a command-line leak into
+  the UI on some vendors), not a regression. Plugin packages (`chock plugin build` for
+  claude/cursor/copilot/codex) ship the matching per-agent runtime instead of a shared one.
+- **Runtime: `installed_*_policy_ids` keeps its content-comparison identity, verified
+  against agentseam's own new opt-in mode.** agentseam's `install()`/`installed()` gained a
+  content-comparison mode this wave (built by a prior worker specifically so a
+  multi-fragment consumer like chock would not have to keep re-deriving it). chock's own
+  three `installed_*_policy_ids` functions keep their existing, already-correct
+  content-comparison logic rather than delegating to it: agentseam's mode does an exact
+  string compare with no hook for machine-independent normalization, and chock's committed
+  `.claude/settings.json` must compare equal across machines with different baked
+  interpreter paths — delegating would have reintroduced the exact cross-machine
+  coverage-flip bug `_normalize_fragment` exists to prevent. The required behavior (a
+  guard's compiled fragment changing drops its installed claim) is intact and tested.
+- **Permissions: `claude_managed.py` is unchanged, on verified evidence.** Checked directly
+  against Claude Code's own documentation (`code.claude.com/docs/en/permissions`, read
+  2026-08-29): permission rules cannot match a tool's content field at all — the docs name
+  this explicitly and say Claude Code rejects an attempt to do so at parse time — and a
+  request for regex/content matching there was closed "not planned" upstream
+  (`anthropics/claude-code#37509`). `scan-secrets`'s regex-based managed-setting fragment
+  has no equivalent in `agentseam.permissions.plan()`'s model and none is being forced
+  through; no protection changes.
+- **Instructions: whole-file branded templates are gone, replaced by agentseam's
+  marker-block / shared-file model (owner decision #8).** Most agents chock scaffolds for
+  read `AGENTS.md` natively (`agentseam.instructions.reads_shared()`) and now get no
+  dedicated file at all: `.cursor/rules/*.mdc`, `.cursorrules`, `.windsurf/rules/*.md`,
+  `.windsurfrules`, `codex.md`, `.kimi-code/AGENTS.md`, `.github/copilot-instructions.md`,
+  `.gemini/GEMINI.md`, and `.github/agents/*.agent.md` are no longer written — their
+  content lives only in `AGENTS.md`'s own managed pointer block. Agents that do not read
+  `AGENTS.md` natively (claude, aider, devin, grok, replit, tabnine, antigravity) get a
+  marker-delimited block in their own file instead of a whole-file claim, so adopter
+  content elsewhere in that file survives untouched — coexistence a whole-file template
+  could never offer. Claude Code's own file moves from `.claude/CLAUDE.md` to `CLAUDE.md`
+  at the repo root (agentseam's preferred path). Aider is the one exception: agentseam's
+  model cannot express `.aider.conf.yml` (a real config file, not a marker-block target),
+  so chock still ships it directly alongside the marker block it writes into
+  `CONVENTIONS.md`.
+- **Coverage: `coverage_level()` adopts agentseam's five-tier vocabulary for in-agent
+  surfaces (owner decision #9).** `pre-tool-use`/`agent-hooks`, once installed, no longer
+  read a flat `enforced` — they return whichever of `enforced`/`enforceable`/`best-effort`
+  the mapped agent's own verified capability row earns
+  (`agentseam.matrix.enforcement_level`). claude_code's PreToolUse is FAIL_OPEN, so it now
+  reads `best-effort`, never `enforced`; cursor's is FAIL_CONFIGURABLE, so it reads
+  `enforceable`. `enforced-at-commit` and `advisory` stay chock's own words for its
+  git-hook/CI-gate and ambient-rule surfaces, which are outside agentseam's per-agent-hook
+  model; `unsupported` is renamed `none`, agentseam's own word for the same claim. A
+  companion `open-coder-ai/chock-catalog` PR re-renders the seven guard-shipping policies'
+  docs and coverage matrix to the same honest wording (their own descriptions already said
+  "best-effort"; only the machine-readable label was overclaiming).
+
 ## 0.6.0 — Agent-hooks `py` fallback and INT-3 verb list
 
 MINOR: the agent-hooks emitter output changes, so an adopter's next `chock sync` /

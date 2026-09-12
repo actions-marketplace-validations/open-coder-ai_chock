@@ -17,14 +17,7 @@ def _token_estimate(text: str) -> int:
 
 
 def _rule_lines(entry: IndexEntry) -> list[str]:
-    """Render a rule, preserving its line structure.
-
-    Rules are capped at ~2 lines by design and each line is an independent directive.
-    Joining them with a space runs two directives together -- "... lint_clean
-    never(fix_test_by): ..." reads as one malformed statement -- which destroys the
-    structure the cap exists to create. Single-line rules keep the compact inline form;
-    multi-line rules use a markdown list continuation.
-    """
+    """Render a rule, preserving its line structure."""
     body = [line.strip() for line in entry.rule_text.strip().splitlines() if line.strip()]
     if not body:
         return [f"- **{entry.id}**: (no rule text)"]
@@ -41,7 +34,7 @@ def _skill_line(entry: IndexEntry) -> str:
     return f"- **{entry.id}** — {entry.description or 'no description'}\n  → `{entry.manifest_path}`"
 
 
-def _render_main(entries: list[IndexEntry], has_extended: bool) -> str:
+def _render_main(entries: list[IndexEntry], *, has_extended: bool) -> str:
     lines: list[str] = [_HEADER, "", _TITLE, ""]
     sections: dict[str, list[str]] = {"rule": [], "hook": [], "skill": []}
 
@@ -78,7 +71,7 @@ def _render_extended(entries: list[IndexEntry]) -> str:
     ]
     for entry in entries:
         if entry.artifact == "rule":
-            lines.extend(_rule_lines(entry) + [""])
+            lines.extend([*_rule_lines(entry), ""])
         elif entry.artifact == "hook":
             lines.append(_gate_line(entry) + "\n")
         else:
@@ -106,11 +99,10 @@ def render_index(entries: Iterable[IndexEntry], max_tokens: int) -> IndexOutput:
     while True:
         main = [e for e in sorted_entries if e.id not in demoted]
         has_extended = bool(demoted)
-        text = _render_main(main, has_extended)
+        text = _render_main(main, has_extended=has_extended)
         tokens = _token_estimate(text)
         if tokens <= max_tokens:
             break
-        # Remove the last advise-tier entry (by sorted order) to protect block/verify.
         moved = False
         for entry in reversed(sorted_entries):
             if entry.enforcement == "advise" and entry.id not in demoted:
@@ -122,7 +114,7 @@ def render_index(entries: Iterable[IndexEntry], max_tokens: int) -> IndexOutput:
             break
 
     main = [e for e in sorted_entries if e.id not in demoted]
-    main_text = _render_main(main, bool(demoted))
+    main_text = _render_main(main, has_extended=bool(demoted))
     main_tokens = _token_estimate(main_text)
 
     extended_text: str | None = None

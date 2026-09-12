@@ -4,6 +4,13 @@ from __future__ import annotations
 
 from enum import Enum
 
+from chock.compile.levels import IN_AGENT_TODAY, Grade, _matrix_can_block, in_agent_grade
+from chock.hooks.in_agent_install import AGENT_HOOKS_VENDORS
+from chock.vendors import CHOCK_AGENT
+
+#: Shared by every CLI subcommand that takes a required, non-empty `--agents` option.
+AGENTS_ARG_REQUIRED_MSG = "--agents requires at least one agent name"
+
 
 class Surface(str, Enum):
     AMBIENT_RULE = "ambient-rule"
@@ -12,56 +19,62 @@ class Surface(str, Enum):
     PRE_TOOL_USE = "pre-tool-use"
     MANAGED_SETTING = "managed-setting"
     GATEWAY = "gateway"
-    # MCP tool-call interception (chock#32). Distinct from GATEWAY, which stays reserved
-    # for budget/egress backstop controls. Deliberately absent from every SURFACE_AGENTS
-    # set: coverage_level can only credit surfaces an agent's set contains, so nothing is
-    # credited until P3c ships per-agent config witnesses -- emitted, not yet claimed.
     MCP_GATEWAY = "mcp-gateway"
-    # Native pre-tool-use hooks for the GitHub-ecosystem agents (Copilot CLI, VS Code
-    # agent mode), read from `.github/hooks/*.json`. A distinct mechanism from PRE_TOOL_USE
-    # (which is Claude Code's settings.json + Cursor's .cursor/hooks.json), witnessed
-    # blocking on both clients 2026-08-23.
     AGENT_HOOKS = "agent-hooks"
 
 
-# Surfaces each agent supports. Gateway is modeled now but emitted in P3.
+#: Derived, never hand-rowed: every aliased agent gets the advisory floor, claude keeps
+#: its managed-setting arm (chock policy), and in-agent membership comes from the matrix
+#: blocking predicate via IN_AGENT_TODAY -- agent-hooks where the vendor is wired through
+#: chock's owned agent-hooks file, pre-tool-use everywhere else.
 SURFACE_AGENTS: dict[str, set[Surface]] = {
-    "claude": {
-        Surface.AMBIENT_RULE,
-        Surface.GIT_HOOK,
-        Surface.CI_GATE,
-        Surface.PRE_TOOL_USE,
-        Surface.MANAGED_SETTING,
-    },
-    # Cursor Agent Hooks (GA 2026): beforeShellExecution honours exit 2 as deny and sets
-    # CLAUDE_PROJECT_DIR, so the vendored adapter enforces there natively. Caveat carried
-    # in docs/enforcement-surfaces.md: Cursor fails OPEN on other non-zero exits.
-    "cursor": {Surface.AMBIENT_RULE, Surface.GIT_HOOK, Surface.CI_GATE, Surface.PRE_TOOL_USE},
-    "copilot": {Surface.AMBIENT_RULE, Surface.GIT_HOOK, Surface.CI_GATE, Surface.AGENT_HOOKS},
-    "windsurf": {Surface.AMBIENT_RULE, Surface.GIT_HOOK, Surface.CI_GATE},
-    "devin": {Surface.AMBIENT_RULE, Surface.GIT_HOOK, Surface.CI_GATE},
-    "codex": {Surface.AMBIENT_RULE, Surface.GIT_HOOK, Surface.CI_GATE},
-    "grok": {Surface.AMBIENT_RULE, Surface.GIT_HOOK, Surface.CI_GATE},
-    "kimi-code": {Surface.AMBIENT_RULE, Surface.GIT_HOOK, Surface.CI_GATE},
-    "aider": {Surface.AMBIENT_RULE, Surface.GIT_HOOK, Surface.CI_GATE},
-    "gemini": {Surface.AMBIENT_RULE, Surface.GIT_HOOK, Surface.CI_GATE},
-    "replit": {Surface.AMBIENT_RULE, Surface.GIT_HOOK, Surface.CI_GATE},
-    "tabnine": {Surface.AMBIENT_RULE, Surface.GIT_HOOK, Surface.CI_GATE},
-    "vscode": {Surface.AMBIENT_RULE, Surface.GIT_HOOK, Surface.CI_GATE, Surface.AGENT_HOOKS},
-    "antigravity": {Surface.AMBIENT_RULE, Surface.GIT_HOOK, Surface.CI_GATE},
+    agent: {Surface.AMBIENT_RULE, Surface.GIT_HOOK, Surface.CI_GATE} for agent in CHOCK_AGENT
 }
+SURFACE_AGENTS["claude"].add(Surface.MANAGED_SETTING)
+
+for _agent in IN_AGENT_TODAY:
+    if not _matrix_can_block(_agent):  # pragma: no cover - membership already derives from can_block
+        _msg = (
+            f"agentseam's matrix no longer confirms {_agent!r} can block a pre-tool call; "
+            "in-agent membership must be re-derived, not silently kept"
+        )
+        raise AssertionError(_msg)
+    _surface = Surface.AGENT_HOOKS if CHOCK_AGENT[_agent] in AGENT_HOOKS_VENDORS else Surface.PRE_TOOL_USE
+    SURFACE_AGENTS[_agent].add(_surface)
+del _agent, _surface
 
 
-DISABLED = "disabled"
-
-
-# Surfaces that something actually installs, and therefore actually enforce.
-#
-# `pre-tool-use` and `managed-setting` are compiled into .chock/compiled/ and then
-# read by nothing: no code writes them into .claude/settings.json or a managed-settings
-# location. A fragment that never reaches the agent enforces nothing, so it must not raise
-# a coverage claim. Add a surface here only once an installer exists for it.
 INSTALLED_SURFACES: set[Surface] = {Surface.GIT_HOOK, Surface.CI_GATE, Surface.AMBIENT_RULE}
+
+
+def coverage_cell(
+    emitted: set[Surface],
+    agent: str,
+    *,
+    pre_tool_use_installed: bool = False,
+    ci_gate_installed: bool = False,
+    agent_hooks_installed: bool = False,
+) -> Grade:
+    """The enforcement level a policy achieves on an agent, with the evidence bounding it."""
+    supported = SURFACE_AGENTS.get(agent, set())
+    active = emitted & supported if supported else set()
+    if not active:
+        return Grade("none", None, witnessed=False)
+
+    for installed, surface in (
+        (pre_tool_use_installed, Surface.PRE_TOOL_USE),
+        (agent_hooks_installed, Surface.AGENT_HOOKS),
+    ):
+        if installed and surface in active and agent in IN_AGENT_TODAY:
+            return in_agent_grade(agent, surface.value)
+    commit_time = active & INSTALLED_SURFACES & {Surface.GIT_HOOK}
+    if ci_gate_installed:
+        commit_time |= active & INSTALLED_SURFACES & {Surface.CI_GATE}
+    if commit_time:
+        return Grade("enforced-at-commit", None, witnessed=False)
+    if Surface.AMBIENT_RULE in active & INSTALLED_SURFACES:
+        return Grade("advisory", None, witnessed=False)
+    return Grade("none", None, witnessed=False)
 
 
 def coverage_level(
@@ -72,84 +85,27 @@ def coverage_level(
     ci_gate_installed: bool = False,
     agent_hooks_installed: bool = False,
 ) -> str:
-    """Return the enforcement level a policy actually achieves on an agent.
-
-    This reports what is enforced, not what the agent is capable of. The previous version
-    asked only whether the policy's target surfaces were a subset of the agent's supported
-    ones, which had two consequences:
-
-      Surfaces that emitted zero files still counted, because the compiler records a key
-      per surface whether or not the emitter produced anything.
-
-      A policy with no gate of any kind therefore reported `enforced` -- code-safety, an
-      advise-only rule, claimed a "hard, pre-execution control" on claude.
-
-    14 of 15 policies claimed `enforced` before this change. For a governance tool,
-    overstating its own enforcement is the failure that discredits every other claim.
-
-    `active & {GIT_HOOK, CI_GATE}` used to be spelled out here with no reference to
-    `INSTALLED_SURFACES` at all, so that constant was documentation rather than a control:
-    removing a surface from it changed no verdict. Every branch below now intersects with it,
-    which makes membership *necessary* -- a surface absent from the constant can raise no
-    claim at all.
-
-    It is not *sufficient*, and the difference is worth stating rather than glossing. Which
-    level a surface maps to, and whether it needs an install witness, are still literals here,
-    because the two commit-time surfaces do not behave alike: `recompile` wires up a git hook
-    by itself, while a CI workflow exists only because someone ran `install-ci`. Folding that
-    into the set would mean dropping the witness -- the exact overclaim this function exists
-    to prevent.
-    """
-    supported = SURFACE_AGENTS.get(agent, set())
-    if not supported:
-        return "unsupported"
-
-    active = emitted & supported
-    if not active:
-        return "unsupported"
-
-    # `enforced` means a hard control that runs BEFORE the action, in-agent. Emitting a
-    # PreToolUse fragment does not achieve that while nothing installs it.
-    if pre_tool_use_installed and Surface.PRE_TOOL_USE in active:
-        return "enforced"
-    # Copilot CLI / VS Code native hooks: same hard pre-execution tier, gated on the same
-    # kind of witness -- `.github/hooks/chock.json` must actually carry this policy's entry.
-    # Emitting the entry is not enough; without the installed file the client runs nothing.
-    if agent_hooks_installed and Surface.AGENT_HOOKS in active:
-        return "enforced"
-    # Unlike git-hook (wired up automatically by every `recompile`), nothing runs `install-ci`
-    # on a policy's behalf -- crediting CI_GATE the moment it is merely compiled would repeat
-    # the exact overclaim `pre_tool_use_installed` exists to prevent for PreToolUse.
-    commit_time = active & INSTALLED_SURFACES & {Surface.GIT_HOOK}
-    if ci_gate_installed:
-        commit_time |= active & INSTALLED_SURFACES & {Surface.CI_GATE}
-    if commit_time:
-        return "enforced-at-commit"
-    if Surface.AMBIENT_RULE in active & INSTALLED_SURFACES:
-        return "advisory"
-    # Only uninstalled surfaces remain: the agent supports them, but nothing wires them up,
-    # so the policy has no effect here.
-    return "unsupported"
+    """Return the enforcement level a policy actually achieves on an agent."""
+    return coverage_cell(
+        emitted,
+        agent,
+        pre_tool_use_installed=pre_tool_use_installed,
+        ci_gate_installed=ci_gate_installed,
+        agent_hooks_installed=agent_hooks_installed,
+    ).level
 
 
 def parse_agent_selection(groups: list[str], valid: dict[str, object] | None = None) -> list[str]:
-    """Split comma- or space-separated --agents values; reject names not in `valid`.
-
-    One funnel for every agent selection, wherever it enters: `init --agents
-    claude,cursor <path>` once swallowed the path into the agent list (nargs="*"),
-    silently filtered every unknown entry, and handed the deselect pass an empty
-    selection. A selection mistake must stop the run, not redirect it. Duplicates are
-    dropped (order preserved) so `--agents claude claude,cursor` selects two agents,
-    not three.
-    """
+    """Split comma- or space-separated --agents values; reject names not in `valid`."""
     valid = SURFACE_AGENTS if valid is None else valid
     agents: list[str] = []
     for group in groups:
-        for name in group.split(","):
-            name = name.strip()
+        for raw_name in group.split(","):
+            name = raw_name.strip()
             if name and name not in agents:
                 agents.append(name)
     unknown = [a for a in agents if a not in valid]
     if unknown:
-        raise ValueError(f"unknown agent(s): {', '.join(unknown)} -- valid: {', '.join(sorted(valid))}")
+        msg = f"unknown agent(s): {', '.join(unknown)} -- valid: {', '.join(sorted(valid))}"
+        raise ValueError(msg)
     return agents

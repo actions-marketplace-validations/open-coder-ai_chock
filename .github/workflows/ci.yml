@@ -65,6 +65,47 @@ jobs:
           done < <(git rev-list --no-merges "origin/$BASE_REF..HEAD")
           exit "$missing"
 
+  # Commit messages and PR bodies are as public as the diff and much easier to leak
+  # into -- container paths, session identifiers, personal addresses. Checked here
+  # because the local test can only see the history it has.
+  template-lint:
+    # Emitted-artifact templates (chock W48) are checked-in files in their own language,
+    # not Python string literals -- so they are linted as that language, same as any
+    # other source file. shellcheck ships preinstalled on ubuntu-latest; actionlint does
+    # not, so it is fetched as a pinned, checksum-verified release binary (same discipline
+    # this file already applies to Action refs, just for a binary instead of a SHA).
+    runs-on: ubuntu-latest
+    env:
+      ACTIONLINT_VERSION: "1.7.7"
+      ACTIONLINT_SHA256: "023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+
+      - name: Shellcheck the shell/bash emitted-artifact templates
+        run: |
+          shellcheck \
+            src/chock/compile/emitters/data/git_hook_shim.sh \
+            src/chock/hooks/data/dispatcher.sh \
+            src/chock/hooks/data/validate_wrapper_windows.sh \
+            src/chock/hooks/data/policy_wrapper.sh
+          shellcheck --shell=bash src/chock/compile/emitters/data/agent_hook_bash.sh
+
+      - name: Install actionlint (pinned, checksum-verified)
+        run: |
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -sSfL -o "$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${archive}"
+          echo "${ACTIONLINT_SHA256}  ${archive}" | sha256sum -c -
+          tar xzf "$archive" actionlint
+
+      - name: Actionlint the scaffolded CI workflow template
+        # Not the ci-gate step fragment: actionlint needs a complete workflow, and the
+        # step is a fragment spliced into an adopter's own workflow -- it is unit-tested
+        # instead (tests/test_template_tokens.py, tests/test_emitter_stability.py).
+        run: ./actionlint src/chock/scaffold/data/ci_workflow.yml
+
   brand-assets:
     # docs/assets/social-preview.svg is derived from the repository -- agents, surfaces,
     # commands, versions -- so adding any of them silently invalidates the committed card.
@@ -86,8 +127,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --require-hashes --upgrade -r requirements/pip.txt
-          pip install -e .
-          pip install "cairosvg==2.9.0"
+          python -m pip install --require-hashes -r requirements/brand-assets.txt
+          pip install -e . --no-deps
 
       - name: Check the social preview matches the repository
         run: |
@@ -126,6 +167,13 @@ jobs:
       - name: Check enforcement matrix traceability
         run: chock check --only matrix
 
+      # Traceability only proves a row *exists*. This proves the mechanism it names is real:
+      # defined, invoked on the engine or lifecycle dispatch path, and able to emit the
+      # severity the row claims. Three rows were found in one day whose claim outran its
+      # implementation, none of them by a standing check.
+      - name: Check matrix rows name real, invoked mechanisms
+        run: chock check --only mechanisms
+
       - name: Install bundled skills (injects canonical schemas)
         run: chock install-skills .
 
@@ -142,6 +190,11 @@ jobs:
 
       - name: Index freshness check
         run: chock check --only index
+
+      # Runs after the index check because it parses the compiled INDEX.md: two ambient rules
+      # that contradict each other leave the agent free to satisfy either one.
+      - name: Ambient rule conflicts
+        run: chock check --only conflicts
 
       # Tier 2. Deterministic mode replays each policy's own gate or guard, so it needs no
       # model, no budget, and no sandbox -- which is why it can gate every build rather

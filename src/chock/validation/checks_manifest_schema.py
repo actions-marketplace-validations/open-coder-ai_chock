@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from chock.manifest import CANONICAL_MANIFEST, resolve_manifest_path
-from chock.policy_id import InvalidPolicyId, validate_policy_id
+from chock.policy_id import InvalidPolicyIdError, validate_policy_id
 from chock.validation.checks_gate_shape import _validate_gate
 from chock.validation.report import Finding, Report
 
@@ -25,15 +25,17 @@ def _manifest_ref(artifact_dir: Path) -> Path:
 
 
 def _check_manifest_id_folder(artifact_dir: Path, manifest: dict[str, Any], report: Report) -> None:
-    # Validate the *effective* id -- the folder name when no id field is present -- against
-    # the same rule compile and add enforce. Checking only a present id field left the
-    # defaulted-id path (an unsafe folder name, no id) unvalidated, while compile still turns
-    # that name into a shell token and an output path.
     effective_id = manifest.get("id") or artifact_dir.name
     try:
         validate_policy_id(effective_id, artifact_dir.name)
-    except InvalidPolicyId as exc:
+    except InvalidPolicyIdError as exc:
         report.add(Finding(str(_manifest_ref(artifact_dir)), "manifest_id_folder", "error", str(exc)))
+
+
+def _script_only_hook(manifest: dict[str, Any]) -> bool:
+    """True when the hook payload declares a script and no declarative gate."""
+    hook = manifest.get("hook") or {}
+    return bool(hook.get("script")) and not hook.get("gate")
 
 
 def _check_manifest_payload(artifact_dir: Path, manifest: dict[str, Any], report: Report) -> None:
@@ -41,6 +43,13 @@ def _check_manifest_payload(artifact_dir: Path, manifest: dict[str, Any], report
     allowed = _PAYLOADS.get(artifact)
     if allowed is None:
         return
+
+    # A rule may also declare the script that enforces it. The script is not a second
+    # artifact: it is the same control on a second surface, and the rule text is what the
+    # agent reads, which a hook artifact has no payload for. A declarative gate is still
+    # artifact: hook -- a rule carrying one would have two answers to what enforces it.
+    if artifact == "rule" and _script_only_hook(manifest):
+        allowed = allowed | {"hook"}
 
     present = {k for k in manifest if k in _ALL_PAYLOAD_KEYS}
     disallowed = present - allowed
@@ -55,7 +64,9 @@ def _check_manifest_payload(artifact_dir: Path, manifest: dict[str, Any], report
         )
         return
 
-    own = present & allowed
+    # The script declaration rides along; it is not the artifact's own payload, so it does
+    # not count toward the one-payload rule it was just admitted past.
+    own = (present & allowed) - ({"hook"} if artifact == "rule" else set())
     if len(own) != 1:
         report.add(
             Finding(
@@ -72,18 +83,20 @@ def _check_manifest_block_needs_gate(artifact_dir: Path, manifest: dict[str, Any
     if enforcement not in {"block", "verify"}:
         return
 
-    hook_gate = (manifest.get("hook") or {}).get("gate")
+    hook = manifest.get("hook") or {}
 
-    if hook_gate:
-        _validate_gate(hook_gate, str(_manifest_ref(artifact_dir)), report, tool_use_allowed=True)
+    if hook.get("gate"):
+        _validate_gate(hook["gate"], str(_manifest_ref(artifact_dir)), report, tool_use_allowed=True)
         return
+    if hook.get("script"):
+        return  # the script refuses at the declared event; checks_script_events pins it to disk
 
     report.add(
         Finding(
             str(_manifest_ref(artifact_dir)),
             "manifest_block_needs_gate",
             "error",
-            f"enforcement is '{enforcement}' but no hook.gate definition found",
+            f"enforcement is '{enforcement}' but neither a hook.gate nor a hook.script was declared",
         )
     )
 
@@ -171,7 +184,7 @@ def _check_manifest_workflow_uses(artifact_dir: Path, manifest: dict[str, Any], 
             )
 
 
-def check_manifest_schema(artifact_dir, manifest: dict[str, Any], artifact_type: str, report: Report) -> None:
+def check_manifest_schema(artifact_dir, manifest: dict[str, Any], _artifact_type: str, report: Report) -> None:
     """Validate structural manifest invariants that are errors."""
     artifact_dir = Path(artifact_dir)
     _check_manifest_id_folder(artifact_dir, manifest, report)

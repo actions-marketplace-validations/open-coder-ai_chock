@@ -33,13 +33,7 @@ def _run(cmd: list[str], cwd: Path, check: bool = True) -> subprocess.CompletedP
 
 
 def _init_repo(tmp_path: Path) -> Path:
-    """A scaffolded repo with this repo's policies copied in.
-
-    `init` installs no policies -- the framework ships mechanism, not content -- so the
-    copy is explicit here. It is also the real v1 adoption path: copy a folder from the
-    catalog, then recompile. These tests are about enable/disable/override mechanics, and
-    they need something installed to toggle.
-    """
+    """A scaffolded repo with this repo's policies copied in."""
     repo = tmp_path / "consumer"
     repo.mkdir()
     _run([sys.executable, "-m", "chock.cli", "init", str(repo), "--skip-hooks"], cwd=repo)
@@ -64,7 +58,11 @@ def test_disable_removes_compiled_artifacts_and_hook_wrappers(tmp_path: Path) ->
 
     assert not (repo / ".chock" / "compiled" / "block-no-verify").exists()
     coverage = json.loads((repo / ".chock" / "coverage.json").read_text())
-    assert coverage["block-no-verify"] == {"claude": "disabled", "copilot": "disabled", "gemini": "disabled"}
+    assert {a: c["level"] for a, c in coverage["block-no-verify"].items()} == {
+        "claude": "disabled",
+        "copilot": "disabled",
+        "gemini": "disabled",
+    }
 
     result = _run([sys.executable, "-m", "chock.cli", "validate", str(repo)], cwd=repo, check=False)
     assert result.returncode == 0, result.stderr
@@ -79,7 +77,6 @@ def test_override_advise_emits_only_ambient_and_allows_commit(tmp_path: Path) ->
 
     repo = _init_repo(tmp_path)
     _git_init(repo)
-    # Install hooks so we can observe the override removing the scan-secrets hook.
     _run([sys.executable, "-m", "chock.cli", "install-hooks", str(repo)], cwd=repo)
 
     config = repo / ".chock" / "config.yaml"
@@ -89,17 +86,13 @@ def test_override_advise_emits_only_ambient_and_allows_commit(tmp_path: Path) ->
         encoding="utf-8",
     )
 
-    # Recompile after manual config edit.
     _run([sys.executable, "-m", "chock.cli", "recompile", "--repo", str(repo)], cwd=repo)
 
     scan_compiled = repo / ".chock" / "compiled" / "scan-secrets"
     assert (scan_compiled / "ambient-rule" / "ambient.md").exists()
     assert not (scan_compiled / "git-hook").exists()
 
-    # Commit on a feature branch so protect-main-branch (mandatory) isn't what blocks;
-    # this isolates the scan-secrets override under test.
     _run(["git", "checkout", "-b", "feature/x"], cwd=repo)
-    # Stage a file that would normally be blocked by scan-secrets.
     (repo / "secret.txt").write_text("AKIAIOSFODNN7EXAMPLE\n", encoding="utf-8")
     _run(["git", "add", "secret.txt"], cwd=repo)
     result = _run(["git", "commit", "-m", "test"], cwd=repo, check=False)
@@ -115,7 +108,7 @@ def test_enable_restores_policy_and_coverage(tmp_path: Path) -> None:
     _run([sys.executable, "-m", "chock.cli", "enable", "block-no-verify"], cwd=repo)
     assert (repo / ".chock" / "compiled" / "block-no-verify").exists()
     coverage = json.loads((repo / ".chock" / "coverage.json").read_text())
-    assert coverage["block-no-verify"]["claude"] != "disabled"
+    assert coverage["block-no-verify"]["claude"]["level"] != "disabled"
 
 
 def test_init_preserves_user_policies_block(tmp_path: Path) -> None:

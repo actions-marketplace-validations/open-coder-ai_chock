@@ -9,6 +9,7 @@ from pathlib import Path
 from chock.emit import write_generated
 from chock.index.builder import build_entries, emit_warnings, max_tokens_for
 from chock.index.render import render_index
+from chock.output import error, warn
 from chock.scaffold.agents_md import is_stale as agents_md_is_stale
 from chock.scaffold.agents_md import update_agents_md
 from chock.scaffold.skills_bridge import update_skill_bridges
@@ -53,7 +54,7 @@ def _report_cost(output) -> None:
     if output.extended is not None:
         print(f"INDEX-extended.md: ~{output.extended_tokens} tokens (demoted advise entries)")
     if output.warning:
-        print(f"[WARN] {output.warning}", file=sys.stderr)
+        warn(output.warning)
 
 
 def is_stale(root: Path) -> tuple[bool, str | None]:
@@ -66,9 +67,6 @@ def is_stale(root: Path) -> tuple[bool, str | None]:
         return True, "INDEX.md is stale"
     if ext != output.extended:
         return True, "INDEX-extended.md is stale"
-    # AGENTS.md's managed form was rewritten by refresh but never checked, so a hand-inlined
-    # per-policy block survived until someone happened to run refresh -- serving text
-    # INDEX.md had already resolved differently.
     if agents_md_is_stale(root / "AGENTS.md"):
         return True, "AGENTS.md has drifted from its managed form"
     return False, None
@@ -88,16 +86,13 @@ def cmd_refresh(argv: list[str] | None = None) -> int:
     try:
         output = _generate(root)
     except OSError as exc:
-        print(f"[ERROR] Failed to read repository files: {exc}", file=sys.stderr)
+        error(f"Failed to read repository files: {exc}")
         return 2
 
     if args.check:
-        # Defer to is_stale() rather than repeating the comparison: `validate` reports
-        # freshness through the same helper, and two copies of the rule could disagree
-        # about whether the index is current.
         stale, reason = is_stale(root)
         if output.warning:
-            print(f"[WARN] {output.warning}", file=sys.stderr)
+            warn(output.warning)
         if stale:
             print(reason, file=sys.stderr)
             return 1

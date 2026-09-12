@@ -14,21 +14,20 @@ from chock.validation.loading import (
 )
 from chock.validation.report import Finding, Report
 
+#: A frontier standard snapshot older than this many days is flagged stale (FRS-1).
+_MAX_FRONTIER_AGE_DAYS = 90
+
 
 def load_frontier_standard(agent: str) -> dict[str, Any] | None:
-    # Map mode names to standard file names.
     standard_map = {
         "claude": "claude-code",
-        "codex": "agentskills",  # Codex uses Agent Skills
+        "codex": "agentskills",
         "cursor": "agentskills",
         "copilot": "agentskills",
         "devin": "agentskills",
         "openai": "agentskills",
     }
     standard_name = standard_map.get(agent, agent)
-    # The directory ingest writes is the directory validation reads. Recomputing the path
-    # here made that a coincidence of two identical expressions rather than a stated fact,
-    # and left validation reading a location no test could redirect.
     path = STANDARDS_DIR / f"{standard_name}.json"
     if not path.exists():
         return None
@@ -37,7 +36,6 @@ def load_frontier_standard(agent: str) -> dict[str, Any] | None:
         base = load_frontier_standard(data["extends"])
         if base:
             merged = base.copy()
-            # Deep merge to avoid shallow update bugs once nested keys overlap.
             for key, value in data.items():
                 if isinstance(value, dict) and key in merged and isinstance(merged[key], dict):
                     merged[key] = {**merged[key], **value}
@@ -64,13 +62,12 @@ def check_frontier_mode(
         )
         return
 
-    # FRS-1: warn if the frontier standard is older than 90 days.
     fetched_at = standard.get("fetched_at")
     if fetched_at:
         try:
             fetched = datetime.datetime.fromisoformat(fetched_at)
             age_days = (datetime.datetime.now(datetime.timezone.utc) - fetched).days
-            if age_days > 90:
+            if age_days > _MAX_FRONTIER_AGE_DAYS:
                 report.add(
                     Finding(
                         str(artifact_dir),
@@ -79,8 +76,8 @@ def check_frontier_mode(
                         f"Frontier standard for {agent} was last fetched {age_days} days ago; run ingest.py to refresh (FRS-1).",
                     )
                 )
-        except Exception:
-            pass  # staleness notice is advisory; a malformed fetched_at must not fail validation
+        except (ValueError, TypeError):
+            pass  # malformed/missing fetched_at: skip staleness reporting, not a validation failure
 
     if artifact_type == "skill":
         desc_std = standard.get("skill_description", {})

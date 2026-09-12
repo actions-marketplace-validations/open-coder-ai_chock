@@ -30,7 +30,6 @@ def _schema_validate_suite(suite_file: Path, report: Report) -> None:
 
 def check_eval_first(artifact_dir: Path, manifest: dict[str, Any], artifact_type: str, report: Report) -> None:
     """Eval suite must exist and meet minimum case counts before an artifact is valid."""
-    # The spec requires eval suites for every artifact in the taxonomy.
     if artifact_type not in ARTIFACT_TYPES:
         return
 
@@ -55,8 +54,6 @@ def check_eval_first(artifact_dir: Path, manifest: dict[str, Any], artifact_type
         report.add(Finding(str(suite_file), "eval_first", "error", f"Invalid YAML: {exc}"))
         return
 
-    # A top-level list (or any non-mapping shape) used to raise AttributeError here and
-    # take down the entire validate run -- a parse-shaped problem must be a finding.
     if not isinstance(doc, dict):
         report.add(Finding(str(suite_file), "eval_first", "error", "Eval suite must be a YAML mapping."))
         return
@@ -70,48 +67,51 @@ def check_eval_first(artifact_dir: Path, manifest: dict[str, Any], artifact_type
         return
     cases = [c for c in cases if isinstance(c, dict)]
     categories = [str(c.get("category", c.get("type", ""))).lower() for c in cases]
-    if len(cases) < BUDGETS["eval_suite_min_cases"]:
+    min_suite_cases = BUDGETS["eval_suite_min_cases"]
+    if len(cases) < min_suite_cases:
         report.add(
             Finding(
                 str(suite_file),
                 "eval_first",
                 "error",
-                f"Eval suite has {len(cases)} case(s); need >= {BUDGETS['eval_suite_min_cases']}.",
+                f"Eval suite has {len(cases)} case(s); need >= {min_suite_cases}.",
             )
         )
-    if categories.count("trigger") < BUDGETS["eval_trigger_cases_min"]:
-        report.add(
-            Finding(
-                str(suite_file), "eval_first", "error", f"Need >= {BUDGETS['eval_trigger_cases_min']} trigger case(s)."
-            )
-        )
-    if categories.count("negative_trigger") < BUDGETS["eval_negative_trigger_cases_min"]:
-        report.add(
-            Finding(
-                str(suite_file),
-                "eval_first",
-                "error",
-                f"Need >= {BUDGETS['eval_negative_trigger_cases_min']} negative_trigger case(s).",
-            )
-        )
-    if categories.count("behavior") < BUDGETS["eval_behavior_cases_min"]:
+    min_trigger_cases = BUDGETS["eval_trigger_cases_min"]
+    if categories.count("trigger") < min_trigger_cases:
+        report.add(Finding(str(suite_file), "eval_first", "error", f"Need >= {min_trigger_cases} trigger case(s)."))
+    min_negative_trigger_cases = BUDGETS["eval_negative_trigger_cases_min"]
+    if categories.count("negative_trigger") < min_negative_trigger_cases:
         report.add(
             Finding(
                 str(suite_file),
                 "eval_first",
                 "error",
-                f"Need >= {BUDGETS['eval_behavior_cases_min']} behavior case(s).",
+                f"Need >= {min_negative_trigger_cases} negative_trigger case(s).",
+            )
+        )
+    min_behavior_cases = BUDGETS["eval_behavior_cases_min"]
+    if categories.count("behavior") < min_behavior_cases:
+        report.add(
+            Finding(
+                str(suite_file),
+                "eval_first",
+                "error",
+                f"Need >= {min_behavior_cases} behavior case(s).",
             )
         )
 
-    # SEC-6: skills that process external content require an adversarial eval case.
-    if artifact_type == "skill" and manifest.get("security", {}).get("processes_external_content"):
-        if categories.count("adversarial") < 1 and categories.count("security") < 1:
-            report.add(
-                Finding(
-                    str(suite_file),
-                    "eval_first",
-                    "error",
-                    "security.processes_external_content is true but eval suite has no adversarial or security case (SEC-6).",
-                )
+    if (
+        artifact_type == "skill"
+        and manifest.get("security", {}).get("processes_external_content")
+        and categories.count("adversarial") < 1
+        and categories.count("security") < 1
+    ):
+        report.add(
+            Finding(
+                str(suite_file),
+                "eval_first",
+                "error",
+                "security.processes_external_content is true but eval suite has no adversarial or security case (SEC-6).",
             )
+        )

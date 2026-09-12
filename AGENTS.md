@@ -22,8 +22,14 @@ source_of_truth: AGENTS.md; adapters: thin_wrappers(delegate_here); authority: n
 
 ## Data boundaries
 
-- never_read(file: README.md)
-- never_read(path: docs/)
+These are a context-economy rule, not a secrecy one. `README.md` and `docs/` are large,
+human-facing, and irrelevant to most tasks, so loading them by default spends context an
+agent needs for the actual work. They are **on-demand, not off-limits**: when the task is to
+change one of them, read it and change it.
+
+- read_on_demand(file: README.md) — not read for general work; read and edit it when the task
+  is to change it
+- read_on_demand(path: docs/) — same
 - agent_source: AGENTS.md, .agents/skills/<id>/SKILL.md, .agents/policies/<id>/manifest.yaml
 - human_source: docs/**, references/ that are not SKILL.md or manifest.yaml
 
@@ -64,6 +70,30 @@ minimal_content: {compress: true, expression: short_code, target: [redundancy, e
 short_code_english: {
   prefer: [schemas, pseudocode, command_formats, structured_variables],
   avoid: [prose, essays, conversational_filler, ambiguity]
+}
+code_comments: {
+  applies_to: source_files,
+  docstring: one_line, inline: nonobvious_only, why: [pr_body, docs/],
+  understanding: deepwiki(open-coder-ai/chock),
+  keep: [noqa, pragma, "type:", "fmt:", "ruff:", shebang, adopter_template_markers],
+  target: prose_to_code <=0.15, enforcement: advisory
+}
+externalized_text: {
+  non_python_text: data_or_template_file(read_by: code),
+  vendor_facts: data_file(read_by: code),
+  placeholders: "__TOKEN__" + str.replace,
+  lint: own_language(actionlint | shellcheck | ruff),
+  coverage: [package_data_test, frozen_binary_spec],
+  exceptions: {error_messages: beside_condition, behaviour: code}
+}
+static_analysis: {
+  bar: sonar_checkstyle_findbugs_via_ruff,
+  select: [C90, N, PLR, PLW, PLC, ERA, T20, ARG, RET, SIM, PIE, FBT, A, B, S, BLE, TRY, RUF],
+  thresholds: {complexity: 10, max_args: 5, max_branches: 12, max_returns: 6, max_statements: 50},
+  magic_values: {remedy: constant_or_data, duplication_check: tools/check_literal_duplication.py},
+  booleans: keyword_only_not_positional,
+  per_file_ignores: {require: reason, escape_hatch: "TODO(lint-adoption)" + enumerate_in_report},
+  never: blanket_fix
 }
 progressive_disclosure: {SKILL.md: activation_surface, depth: references/, inline: false}
 budgets: {SKILL.md: <=150, description: <=500, references: <=300, ambient_rule: <=2}

@@ -1,9 +1,4 @@
-"""Discovery and loading of eval suites.
-
-Discovery is a glob, never a list. A hand-maintained registry of what to test falls behind
-what exists -- that is how `BASELINE_PACKS` came to omit two shipped policies while every
-test was green.
-"""
+"""Discovery and loading of eval suites."""
 
 from __future__ import annotations
 
@@ -12,9 +7,14 @@ from typing import Any
 
 import yaml
 
+from chock.compile.emitters import GUARD_SUFFIXES, SCRIPT_EVENTS
 from chock.eval.model import Case
 from chock.manifest import load_manifest
 from chock.validation.loading import discover_artifacts
+
+#: A script named for a git event runs at that event with no argv and reads the change
+#: from git itself. Handing it an eval case's command would score a verdict it never gave.
+_EVENT_STEMS = tuple(f"-{segment}" for segment in SCRIPT_EVENTS.values())
 
 
 def _suite_doc(policy_dir: Path) -> dict[str, Any]:
@@ -70,17 +70,15 @@ class Policy:
 
     @property
     def guards(self) -> list[Path]:
-        """Executable guard scripts shipped with the policy, if any."""
+        """Command guards shipped with the policy: argv in, exit code out."""
         impl = self.dir / "implementations"
-        return sorted(impl.glob("*.sh")) if impl.is_dir() else []
+        if not impl.is_dir():
+            return []
+        return sorted(p for p in impl.iterdir() if p.suffix in GUARD_SUFFIXES and not p.stem.endswith(_EVENT_STEMS))
 
     @property
     def deterministic(self) -> bool:
-        """Mode is chosen from the policy, not configured.
-
-        A policy with a gate or a guard script has a mechanism to replay; a bare rule has
-        only a behavioural expectation, which needs an agent.
-        """
+        """Mode is chosen from the policy, not configured."""
         return bool(self.gate) or bool(self.guards)
 
     def cases(self) -> list[Case]:
@@ -93,7 +91,7 @@ def discover_policies(repo_root: Path, policy_id: str | None = None) -> list[Pol
     for _artifact_type, directory in discover_artifacts(Path(repo_root)):
         try:
             loaded = load_manifest(directory)
-        except Exception:  # a malformed manifest is validate's problem, not the runner's
+        except Exception:  # noqa: BLE001, S112 -- best-effort discovery: skip any dir whose manifest fails to load
             continue
         if loaded is None:
             continue

@@ -114,7 +114,22 @@ def test_wrong_payload_for_artifact_errors() -> None:
         VALIDATOR.validate(instance=manifest)
 
 
-def test_two_payloads_error() -> None:
+def test_the_schema_admits_a_rule_that_declares_its_script() -> None:
+    """A rule may carry a hook holding only a script: one control, two surfaces."""
+    manifest = {**_rule(), "enforcement": "block", "hook": {"script": {"on": ["commit"]}}}
+    VALIDATOR.validate(instance=manifest)
+
+
+def test_two_payloads_are_rejected_in_code_not_by_the_schema() -> None:
+    """Exclusivity moved, it did not go away: `oneOf` cannot admit the one legal pair.
+
+    The schema now says "at least one payload" and `_check_manifest_payload` says which
+    combinations are legal -- this test pins where the check lives, so a reader who finds the
+    schema permissive does not conclude nothing enforces it.
+    """
+    from chock.validation.checks_manifest_schema import _check_manifest_payload
+    from chock.validation.report import Report
+
     manifest = _rule()
     manifest["hook"] = {
         "gate": {
@@ -125,8 +140,11 @@ def test_two_payloads_error() -> None:
             "params": {"refs": ["main"]},
         }
     }
-    with pytest.raises(jsonschema.ValidationError):
-        VALIDATOR.validate(instance=manifest)
+    VALIDATOR.validate(instance=manifest)  # the schema no longer objects
+
+    report = Report()
+    _check_manifest_payload(Path("policies/demo-policy"), manifest, report)
+    assert [f for f in report.errors if f.check == "manifest_payload"], "a rule carrying a gate"
 
 
 def test_unknown_top_level_key_errors() -> None:
@@ -168,8 +186,7 @@ def test_gate_on_empty_rejected() -> None:
 
 
 def test_gate_message_empty_rejected() -> None:
-    """B3 guard: a blocking gate with an empty message gives the developer no actionable
-    alternative and must be rejected by the schema."""
+    """B3 guard: a blocking gate with an empty message gives the developer no actionable"""
     manifest = _hook()
     manifest["hook"]["gate"]["message"] = ""
     with pytest.raises(jsonschema.ValidationError):
@@ -177,9 +194,7 @@ def test_gate_message_empty_rejected() -> None:
 
 
 def test_baseline_gates_validate() -> None:
-    """The two real baseline gates (scan-secrets, protect-main-branch) must validate
-    against the v3 manifest schema. Replaces test_scan_secrets_gate_is_valid and
-    test_protect_main_branch_gate_is_valid from the deleted test_gate_validation.py."""
+    """The two real baseline gates (scan-secrets, protect-main-branch) must validate"""
     for policy_id in ("scan-secrets", "protect-main-branch"):
         manifest_path = baseline_policy(policy_id) / "manifest.yaml"
         with manifest_path.open(encoding="utf-8") as fh:
@@ -218,7 +233,6 @@ def test_propagation_default(tmp_path: Path) -> None:
     data, _ = load_manifest(rule_dir)
     assert data["propagation"] == "inherit"
 
-    # 'advise' does not receive a default.
     advise_dir = tmp_path / "test-advise"
     advise_dir.mkdir()
     advise_dir.joinpath("manifest.yaml").write_text(
@@ -260,9 +274,5 @@ def test_manifest_artifact_enum_is_pinned() -> None:
 
 
 def test_code_derives_artifact_types_from_the_schema() -> None:
-    """Code must read the taxonomy from the schema, never restate it.
-
-    A `command` artifact type outlived the v3 migration because three modules each
-    held their own copy. ARTIFACT_TYPES is derived, so that cannot recur.
-    """
+    """Code must read the taxonomy from the schema, never restate it."""
     assert ARTIFACT_TYPES == frozenset(EXPECTED_ARTIFACTS)

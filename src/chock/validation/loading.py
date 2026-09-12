@@ -15,6 +15,7 @@ from chock.resources import package_data_dir
 from chock.validation.report import Finding, Report
 
 SCHEMA_DIR = package_data_dir("chock.validation", "schemas")
+MANIFEST_SCHEMA = "manifest.schema.json"
 
 BUDGETS = {
     "skill_md_lines": 150,
@@ -47,17 +48,15 @@ SCHEMA_STORE = _build_schema_store()
 def load_schema(name: str) -> dict[str, Any]:
     path = SCHEMA_DIR / name
     if not path.exists():
-        raise FileNotFoundError(f"Schema not found: {path}")
+        msg = f"Schema not found: {path}"
+        raise FileNotFoundError(msg)
     with path.open("r", encoding="utf-8") as f:
         if name.endswith(".json"):
             return json.load(f)
         return yaml.safe_load(f)
 
 
-# The artifact taxonomy is declared once, in manifest.schema.json. Derive it here rather
-# than restating it: a `command` type outlived the v3 migration in three modules that each
-# kept their own copy. Checks that apply to a subset should write that subset explicitly.
-ARTIFACT_TYPES: frozenset[str] = frozenset(load_schema("manifest.schema.json")["properties"]["artifact"]["enum"])
+ARTIFACT_TYPES: frozenset[str] = frozenset(load_schema(MANIFEST_SCHEMA)["properties"]["artifact"]["enum"])
 
 
 def _registry() -> Registry:
@@ -85,11 +84,6 @@ def validate_yaml_against_schema(data: dict[str, Any], schema: dict[str, Any], p
 
 
 def discover_artifacts(root: Path) -> Iterable[tuple[str, Path]]:
-    # `validate <policy-folder>` is the documented authoring loop, and it used to validate
-    # nothing: discovery only walked subdirectories, so the folder's own manifest was never
-    # read while its `evals/` was misread as a standalone eval tree -- an artifact with no
-    # manifest, no id, and a SEC-1 failure against its own suite.yaml. A root that is
-    # itself an artifact folder is exactly one artifact; its subfolders belong to it.
     for candidate in (*MANIFEST_NAMES, "subagent.yaml"):
         manifest = root / candidate
         if not manifest.exists():
@@ -103,17 +97,13 @@ def discover_artifacts(root: Path) -> Iterable[tuple[str, Path]]:
         if art:
             yield (art, root)
             return
-        # A manifest with no `artifact` used to make the folder invisible to validate
-        # while `chock compile` still discovered it (any dir with manifest.yaml) -- an
-        # artifact that enforces without ever being validated. Yield it as unknown so
-        # the schema check reports the missing field instead.
         yield ("unknown", root)
         return
 
     candidates = [
         (".agents/skills", "skill"),
         ("skills", "skill"),
-        (".agents/policies", None),  # resolved by manifest artifact field
+        (".agents/policies", None),
         ("policies", None),
         ("hooks", "hook"),
         ("rules", "rule"),
@@ -136,7 +126,6 @@ def discover_artifacts(root: Path) -> Iterable[tuple[str, Path]]:
             except yaml.YAMLError:
                 yield ("unknown", sub)
                 break
-            # Same gap as the root form: no `artifact` means unknown, not invisible.
             yield (art or "unknown", sub)
             break
 
@@ -147,8 +136,6 @@ def discover_artifacts(root: Path) -> Iterable[tuple[str, Path]]:
 
         if default_type == "eval":
             for eval_file in base.rglob("suite.yaml"):
-                # A bare evals/ dir is also a common adopter folder name; outside the
-                # .agents/ namespace only claim files that parse as an eval suite.
                 if not rel_dir.startswith(".agents/"):
                     try:
                         doc = yaml.safe_load(eval_file.read_text(encoding="utf-8"))
@@ -163,10 +150,6 @@ def discover_artifacts(root: Path) -> Iterable[tuple[str, Path]]:
         for sub in base.iterdir():
             if not sub.is_dir():
                 continue
-            # Bare root dirs (hooks/, skills/, rules/, subagents/) are common adopter
-            # folder names. Claiming them without evidence hard-failed SEC-1 against
-            # unrelated code, so outside the .agents/ namespace a subfolder is only an
-            # artifact when it carries a recognizable manifest.
             if not chock_namespace and find_manifest(sub, default_type or "subagent") is None:
                 continue
             yield from _yield_policy_dir(sub, default_type)

@@ -1,17 +1,4 @@
-"""Cursor and Codex packaging: the envelope differs, the enforcement does not.
-
-Both vendors run the same guard through the same adapter as the Claude package; what
-changes is the file layout, the event name and the hook shape. These tests pin the parts
-that are vendor-specific and easy to get silently wrong:
-
-- Cursor's `beforeShellExecution` matcher is a regex over the COMMAND TEXT, not a tool
-  name, so emitting the other formats' `MATCHER = "Bash"` would match almost nothing and
-  disable the guard while the package still claimed enforcement.
-- Codex DISCARDS hooks from an Agent-Plugins-format manifest (loader.rs), so the manifest
-  must be `.codex-plugin/plugin.json` and must not carry the agent-plugins `$schema`.
-- Cursor's manifest schema is `additionalProperties: false`, so `$schema`/`extensions`
-  (which the shared `build_manifest` emits) would make the package invalid.
-"""
+"""Cursor and Codex packaging: the envelope differs, the enforcement does not."""
 
 from __future__ import annotations
 
@@ -21,7 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-import chock.gate.pretooluse as adapter_module
+from chock.gate import runtime_bundle
 from chock.plugin.cli import main as plugin_main
 from chock.plugin.codex import POSTURE_ENFORCED_CODEX, build_codex_plugin, codex_plugin_files
 from chock.plugin.cursor import POSTURE_ENFORCED_CURSOR, build_cursor_plugin, cursor_plugin_files
@@ -68,16 +55,13 @@ def policy(tmp_path: Path):
     return _make
 
 
-# ----------------------------------------------------------------------------- cursor
-
-
 def test_cursor_guard_policy_layout_and_hook(policy, tmp_path: Path) -> None:
     files = cursor_plugin_files(policy(GUARD_MANIFEST, guard=True), GUARD_MANIFEST, tmp_path)
     assert set(files) == {
         Path(".cursor-plugin/plugin.json"),
         Path("skills/block-destructive-commands/SKILL.md"),
         Path("hooks/hooks.json"),
-        Path("scripts/pretooluse.py"),
+        Path("scripts/cursor.py"),
         Path("scripts/block-destructive-commands.sh"),
     }
 
@@ -86,28 +70,18 @@ def test_cursor_guard_policy_layout_and_hook(policy, tmp_path: Path) -> None:
     entries = hooks["hooks"]["beforeShellExecution"]
     assert len(entries) == 1
     entry = entries[0]
-    # Flat entry: no nested `hooks` array and no `type`, unlike Claude/Codex.
     assert set(entry) == {"command", "timeout"}
-    # The exact command, not properties of it: one interpreter invocation, no fallback
-    # chain (a chain converts a real deny into the next leg's exit code).
     assert entry["command"] == (
-        'python3 "${CURSOR_PLUGIN_ROOT}/scripts/pretooluse.py" '
+        'python3 "${CURSOR_PLUGIN_ROOT}/scripts/cursor.py" '
         '--guard "${CURSOR_PLUGIN_ROOT}/scripts/block-destructive-commands.sh"'
     )
 
 
 def test_cursor_hook_carries_no_matcher(policy, tmp_path: Path) -> None:
-    """A `matcher` here is a regex over the command text, not a tool name.
-
-    Emitting the Claude/Codex `MATCHER = "Bash"` would be read as a command regex and
-    match almost nothing -- a package that ships a hook, claims enforcement, and silently
-    never fires.
-    """
+    """A `matcher` here is a regex over the command text, not a tool name."""
     files = cursor_plugin_files(policy(GUARD_MANIFEST, guard=True), GUARD_MANIFEST, tmp_path)
     entry = json.loads(files[Path("hooks/hooks.json")])["hooks"]["beforeShellExecution"][0]
     assert "matcher" not in entry
-    # failClosed is likewise deliberately absent: the plugin resolves python3 at run time,
-    # so failing closed would refuse every shell command on a machine without it.
     assert "failClosed" not in entry
 
 
@@ -129,22 +103,18 @@ def test_cursor_rule_policy_gets_no_hook(policy, tmp_path: Path) -> None:
     assert "hooks" not in json.loads(files[Path(".cursor-plugin/plugin.json")])
 
 
-# ------------------------------------------------------------------------------ codex
-
-
 def test_codex_guard_policy_layout_and_hook(policy, tmp_path: Path) -> None:
     files = codex_plugin_files(policy(GUARD_MANIFEST, guard=True), GUARD_MANIFEST, tmp_path)
     assert set(files) == {
         Path(".codex-plugin/plugin.json"),
         Path("skills/block-destructive-commands/SKILL.md"),
         Path("hooks/hooks.json"),
-        Path("scripts/pretooluse.py"),
+        Path("scripts/codex_cli.py"),
         Path("scripts/block-destructive-commands.sh"),
+        Path("assets/icon.svg"),
     }
 
     hooks = json.loads(files[Path("hooks/hooks.json")])
-    # ONLY the `hooks` key: Codex < 0.143.0 rejects the whole file over a top-level
-    # `description` and silently drops every hook in it (openai/codex#30397).
     assert set(hooks) == {"hooks"}
     entry = hooks["hooks"]["PreToolUse"][0]
     assert entry["matcher"] == "Bash"
@@ -152,17 +122,12 @@ def test_codex_guard_policy_layout_and_hook(policy, tmp_path: Path) -> None:
     assert inner["type"] == "command"
     assert "async" not in inner, "Codex only honours a blocking decision from a sync hook"
     assert inner["command"] == (
-        'python3 "${PLUGIN_ROOT}/scripts/pretooluse.py" --guard "${PLUGIN_ROOT}/scripts/block-destructive-commands.sh"'
+        'python3 "${PLUGIN_ROOT}/scripts/codex_cli.py" --guard "${PLUGIN_ROOT}/scripts/block-destructive-commands.sh"'
     )
 
 
 def test_codex_manifest_is_legacy_format_not_agent_plugins(policy, tmp_path: Path) -> None:
-    """The manifest must be `.codex-plugin/plugin.json` WITHOUT the agent-plugins `$schema`.
-
-    Codex's loader discards hooks when it classifies a manifest as AgentPlugin format, so
-    an agent-plugins-shaped manifest would install a package whose hook is deleted at load
-    time while its description still claimed enforcement.
-    """
+    """The manifest must be `.codex-plugin/plugin.json` WITHOUT the agent-plugins `$schema`."""
     files = codex_plugin_files(policy(GUARD_MANIFEST, guard=True), GUARD_MANIFEST, tmp_path)
     assert Path("plugin.json") not in files, "a root plugin.json is the AgentPlugin shape"
     data = json.loads(files[Path(".codex-plugin/plugin.json")])
@@ -173,24 +138,28 @@ def test_codex_manifest_is_legacy_format_not_agent_plugins(policy, tmp_path: Pat
 
 def test_codex_rule_policy_gets_no_hook(policy, tmp_path: Path) -> None:
     files = codex_plugin_files(policy(RULE_MANIFEST), RULE_MANIFEST, tmp_path)
-    assert set(files) == {Path(".codex-plugin/plugin.json"), Path("skills/code-safety/SKILL.md")}
+    assert set(files) == {
+        Path(".codex-plugin/plugin.json"),
+        Path("skills/code-safety/SKILL.md"),
+        Path("assets/icon.svg"),
+    }
+    assert Path("LICENSE") not in files
     assert "hooks" not in json.loads(files[Path(".codex-plugin/plugin.json")])
 
 
-# -------------------------------------------------------------------- shared discipline
-
-
 @pytest.mark.parametrize(
-    "files_for,manifest_rel",
+    "files_for,manifest_rel,script_name,agent",
     [
-        (cursor_plugin_files, Path(".cursor-plugin/plugin.json")),
-        (codex_plugin_files, Path(".codex-plugin/plugin.json")),
+        (cursor_plugin_files, Path(".cursor-plugin/plugin.json"), "cursor.py", "cursor"),
+        (codex_plugin_files, Path(".codex-plugin/plugin.json"), "codex_cli.py", "codex_cli"),
     ],
 )
-def test_adapter_and_guard_are_verbatim_copies(policy, tmp_path: Path, files_for, manifest_rel) -> None:
-    """Byte-identity is the contract: a plugin must not parse payloads differently."""
+def test_adapter_and_guard_are_verbatim_copies(
+    policy, tmp_path: Path, files_for, manifest_rel, script_name, agent
+) -> None:
+    """Byte-identity is the contract: a plugin must not parse payloads differently from"""
     files = files_for(policy(GUARD_MANIFEST, guard=True), GUARD_MANIFEST, tmp_path)
-    assert files[Path("scripts/pretooluse.py")] == Path(adapter_module.__file__).read_text(encoding="utf-8")
+    assert files[Path("scripts") / script_name] == runtime_bundle.render(agent)
     assert files[Path("scripts/block-destructive-commands.sh")] == GUARD_BODY
     assert manifest_rel in files
 
@@ -228,7 +197,6 @@ def test_cli_builds_both_formats_and_refuses_in_place(policy, tmp_path: Path, ca
 
     assert (out / "cursor" / "block-destructive-commands" / ".cursor-plugin" / "plugin.json").exists()
     assert (out / "codex" / "block-destructive-commands" / ".codex-plugin" / "plugin.json").exists()
-    # --check is clean immediately after a build, and writes nothing.
     for fmt in ("cursor", "codex"):
         assert plugin_main(["build", "--repo", str(tmp_path), "--format", fmt, "--out-dir", str(out), "--check"]) == 0
         capsys.readouterr()
@@ -255,14 +223,7 @@ def test_losing_a_guard_removes_the_hook(policy, tmp_path: Path, build, tree, ho
 
 
 def test_each_vendor_claims_only_what_was_witnessed(policy, tmp_path: Path) -> None:
-    """Cursor was witnessed blocking; Codex was witnessed NOT blocking. The packages say so.
-
-    Probed on real installs 2026-08-23/24. Both vendors block only after the adapter
-    speaks each one's actual dialect -- Cursor's `permission` JSON, Codex's exit-0
-    `permissionDecision` JSON (its Windows shell wrapper collapses exit 2 into a failed
-    hook) -- and both postures name their conditions: fail-open, and for Codex the
-    per-hook trust review whose hash binding a plugin update silently voids.
-    """
+    """Cursor was witnessed blocking; Codex was witnessed NOT blocking. The packages say so."""
     assert "Session-enforced in Cursor" in POSTURE_ENFORCED_CURSOR
     assert "OPEN" in POSTURE_ENFORCED_CURSOR and "python3" in POSTURE_ENFORCED_CURSOR
 

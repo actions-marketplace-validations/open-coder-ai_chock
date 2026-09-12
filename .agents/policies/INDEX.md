@@ -40,6 +40,9 @@
 - **protect-commit-privacy**:
   commit_message|pr_description: describe(change); never(narrate: conversation|plan|who_asked|user_quotes|session_refs|internal_doc_paths)
   if(sensitive_context): propose_message_to_human; await(approval) before(commit)  # history is published forever
+- **require-review-evidence**:
+  before(merge): pass(chock review require --base <ref>)  # required GitHub status check, see action.yml
+  if(fails): read the printed judgement and run the `chock review emit` command it names
 - **token-efficiency**:
   cap(tool_output): 4000_bytes; cap(search_results): top_3; cap(retry_loops): max_3_iterations
   prefer: targeted_reads|structured_output|on_demand_refs; never: re-read(unchanged_file)|load_all_upfront
@@ -56,6 +59,7 @@
 - **block-wildcard-agent-permissions**: Wildcard agent permission grant detected. Scope the grant to specific tools or commands (e.g. Bash(git status:*), a named tool list), or add 'pragma: allowlist broad-agency' on the same line for a reviewed exception.
 - **protect-main-branch**: Direct commits/pushes to a protected branch (main|master) are blocked. Create a feature branch and open a pull request.
 - **scan-secrets**: Potential secret detected in staged changes. Remove credentials and rotate any exposed keys. Add '# pragma: allowlist secret' on the same line only for documented test fixtures.
+- **test-integrity**: Tests were weakened, not fixed. If a test is genuinely obsolete, say so on the line that removes it with `chock: test-removal-reviewed` and have a human confirm it.
 
 ## Skills — invoke when the task matches
 

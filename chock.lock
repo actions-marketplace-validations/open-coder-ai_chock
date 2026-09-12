@@ -16,7 +16,7 @@
       "managed": false,
       "sha256": "59fffb91c6f65710b461e87782d355c1403953f36700e05369fca065683821c0",
       "source": "local",
-      "artifacts_sha256": "6d646e182c4aded33704c6b0118dd7fb463c9bd47f6c5e2bdfb1653a9654162a"
+      "artifacts_sha256": "f5ce8291003c254099de2b7b0bcd30b3bd749ebfd97ed1071ad37e51237c10cd"
     },
     {
       "id": "block-invisible-unicode",
@@ -32,7 +32,7 @@
       "managed": false,
       "sha256": "ef0d729c413086bd4ce77c7191bcc1393f4e0cdfcfc959b33a1ddb771afdf2b0",
       "source": "local",
-      "artifacts_sha256": "9c2d033dc280514f369c1469a25483a7a95e4ac448e3180834e1d2f04390042b"
+      "artifacts_sha256": "fc65a16e8d3d84f2735a86922e16fa21324fcb63553c17cdd32bb87ef5a6d906"
     },
     {
       "id": "block-wildcard-agent-permissions",
@@ -104,7 +104,7 @@
       "managed": false,
       "sha256": "b98d5472c534d381b87e253086642675c71ce3947e2cfe01ed9fec5ed8b66295",
       "source": "local",
-      "artifacts_sha256": "a411b389e02a5a964872f7fad18d884047b0da8ad1492b816d3f46f46b859ef2"
+      "artifacts_sha256": "1d695d9651e43d3ea6aaea6d74d4d1fa9cf2661ed99b5438f1d25cbc56e08470"
     },
     {
       "id": "protect-commit-privacy",
@@ -112,7 +112,7 @@
       "managed": false,
       "sha256": "281522db2b259ea9a12d76b30d57ed9993882089b04a1fb4ce9932bc15a3388f",
       "source": "local",
-      "artifacts_sha256": "619c364582c6daaabcaac00f5a071bb303389c515e67d42905739f40117f1a5b"
+      "artifacts_sha256": "e27d75a558ff05e9c5a3858d68ecbbfa4ec7a9d3243b85fa8ce76aa0da7c72ba"
     },
     {
       "id": "protect-main-branch",
@@ -123,12 +123,28 @@
       "artifacts_sha256": "18bb4772936ece0e374fb48e1a09fdbf946fb82381ed30687c0bcc8a10d4643c"
     },
     {
+      "id": "require-review-evidence",
+      "version": "0.0.1",
+      "managed": false,
+      "sha256": "6746768db59903cf017c66799b68ca4290870655ab6ede665ef2fde035c87875",
+      "source": "local",
+      "artifacts_sha256": "6bab271e1984302fd4c659739aac6d0029f5f2215af90182d3d7cbb59984f9c8"
+    },
+    {
       "id": "scan-secrets",
       "version": "0.0.1",
       "managed": false,
       "sha256": "dd8756e91c9f429c31ee5c39b1901dcb2f74b61c9a209ea268561f24b2742123",
       "source": "local",
       "artifacts_sha256": "cd7df13ded59738cd76aa24c19ec0600ca6847be5614536ec4c39f886f4f6e58"
+    },
+    {
+      "id": "test-integrity",
+      "version": "0.0.1",
+      "managed": false,
+      "sha256": "c140c5ca23c3e9dde10712b889840ee9a4a1976f7cb328d088f8f781e03c274e",
+      "source": "local",
+      "artifacts_sha256": "c5e8de5994b7c5a044203babbca3db334500cab99e66ac409ba07daa5baf51a6"
     },
     {
       "id": "token-efficiency",

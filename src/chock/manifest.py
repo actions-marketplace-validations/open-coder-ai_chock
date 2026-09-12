@@ -7,14 +7,20 @@ from typing import Any
 
 import yaml
 
-# The frontmatter metadata codec lives in skill_metadata.py: the flat-string dialect
-# (dotted keys, comma-joined lists, "true"/"false" booleans) is decoded in one place.
 from chock.skill_metadata import _as_bool, _as_list, _chock_metadata
 
 CANONICAL_MANIFEST = "manifest.yaml"
 MANIFEST_NAMES: tuple[str, ...] = (CANONICAL_MANIFEST,)
 SKILL_MD = "SKILL.md"
 INTERFACE_YAML = "interface.yaml"
+#: manifest.security's field name gating whether in-content instructions may be obeyed (SEC-1).
+CONTENT_INSTRUCTIONS_KEY = "content_instructions"
+#: Boolean top-level manifest fields, coerced via _as_bool rather than passed through.
+DETERMINIZATION_REVIEWED_KEY = "determinization_reviewed"
+AGENT_SPECIFIC_VOCABULARY_KEY = "agent_specific_vocabulary"
+
+#: Longest a manifest/frontmatter `name` may be before it's flagged.
+_MAX_NAME_LENGTH = 128
 
 
 class ManifestSourceError(Exception):
@@ -48,10 +54,7 @@ def _load_interface(
     artifact_dir: Path,
     warnings: list[str] | None,
 ) -> dict[str, Any]:
-    """Load the optional interface.yaml next to a SKILL.md. Returns empty if absent.
-
-    Malformed or unreadable interface.yaml is reported as a warning and ignored.
-    """
+    """Load the optional interface.yaml next to a SKILL.md. Returns empty if absent."""
     interface_path = artifact_dir / INTERFACE_YAML
     if not interface_path.exists():
         return {}
@@ -76,48 +79,43 @@ def _project_skill_frontmatter(
     ac = _chock_metadata(frontmatter)
 
     if "description" not in frontmatter or frontmatter["description"] is None:
-        raise ManifestSourceError("description is a required frontmatter field")
+        msg = "description is a required frontmatter field"
+        raise ManifestSourceError(msg)
 
     data: dict[str, Any] = {}
 
-    # identity: id from metadata.chock.id, else frontmatter.name, else folder name
     front_name = frontmatter.get("name", artifact_dir.name)
     if not isinstance(front_name, str):
         front_name = str(front_name)
 
-    if front_name != artifact_dir.name:
-        if warnings is not None:
-            warnings.append(f"frontmatter name '{front_name}' does not match directory name '{artifact_dir.name}'")
+    if front_name != artifact_dir.name and warnings is not None:
+        warnings.append(f"frontmatter name '{front_name}' does not match directory name '{artifact_dir.name}'")
 
-    if len(front_name) > 128:
-        if warnings is not None:
-            warnings.append(f"name exceeds 128 characters ({len(front_name)})")
+    if len(front_name) > _MAX_NAME_LENGTH and warnings is not None:
+        warnings.append(f"name exceeds 128 characters ({len(front_name)})")
 
     data["id"] = ac.get("id") or artifact_dir.name
     data["name"] = ac.get("name") or front_name
     data["description"] = frontmatter["description"]
 
-    # core fields with safe defaults for third-party skills
     _set_or_default(data, "version", ac.get("version"), "0.0.0", warnings)
     _set_or_default(data, "artifact", ac.get("artifact"), "skill", warnings)
     _set_or_default(data, "enforcement", ac.get("enforcement"), "advise", warnings)
 
-    # provenance: unknown provenance lands in sandbox with a generic license
     provenance = ac.get("provenance") or {}
     _set_or_default(data, "provenance.author", provenance.get("author"), "unknown", warnings)
     _set_or_default(data, "provenance.source_repo", provenance.get("source_repo"), "unknown", warnings)
     _set_or_default(data, "provenance.license", provenance.get("license"), "proprietary", warnings)
     _set_or_default(data, "provenance.trust_tier", provenance.get("trust_tier"), "sandbox", warnings)
 
-    # lifecycle
     lifecycle = ac.get("lifecycle") or {}
     _set_or_default(data, "lifecycle.status", lifecycle.get("status"), "draft", warnings)
 
-    # security: required by check_security_baseline, default for unknown skills
     security = ac.get("security") or {}
-    _set_or_default(data, "security.content_instructions", security.get("content_instructions"), "never-obey", warnings)
+    _set_or_default(
+        data, "security.content_instructions", security.get(CONTENT_INSTRUCTIONS_KEY), "never-obey", warnings
+    )
 
-    # skill payload
     skill_type = ac.get("skill_type")
     _set_or_default(data, "skill.skill_type", skill_type, "nl", warnings)
     data["skill"]["entry"] = manifest_path.name
@@ -126,7 +124,7 @@ def _project_skill_frontmatter(
     if "approval" in ac:
         data["skill"]["approval"] = ac["approval"]
 
-    # carry forward any explicitly-declared blocks
+    bool_keys = (DETERMINIZATION_REVIEWED_KEY, AGENT_SPECIFIC_VOCABULARY_KEY)
     for key in [
         "applies_to",
         "optimization",
@@ -135,15 +133,13 @@ def _project_skill_frontmatter(
         "conflicts_with",
         "bundle",
         "categories",
-        "determinization_reviewed",
+        DETERMINIZATION_REVIEWED_KEY,
         "scripts",
         "compliance",
-        "agent_specific_vocabulary",
+        AGENT_SPECIFIC_VOCABULARY_KEY,
     ]:
         if key in ac:
-            # The two boolean carriers arrive as "true"/"false" strings in the
-            # flat-string metadata dialect; everything else passes through as-is.
-            if key in ("determinization_reviewed", "agent_specific_vocabulary"):
+            if key in bool_keys:
                 data[key] = _as_bool(ac[key])
             else:
                 data[key] = ac[key]
@@ -167,12 +163,7 @@ def _project_skill_frontmatter(
 
 
 def resolve_manifest_path(artifact_dir: Path) -> Path | None:
-    """Return the manifest path for a directory, or None if absent.
-
-    Resolution order is manifest.yaml -> SKILL.md, checking direct children only.
-    Callers that need to detect ambiguity must use load_manifest(), which checks
-    whether the sibling file is also present.
-    """
+    """Return the manifest path for a directory, or None if absent."""
     candidate = Path(artifact_dir) / CANONICAL_MANIFEST
     if candidate.exists():
         return candidate
@@ -191,7 +182,6 @@ def _parse_skill_frontmatter(text: str) -> dict[str, Any]:
     if not lines:
         return {}
 
-    # Find the end of the first YAML document: next '---' or '...' on its own line.
     end = -1
     for i in range(1, len(lines)):
         if lines[i].strip() in {"---", "..."}:
@@ -201,23 +191,11 @@ def _parse_skill_frontmatter(text: str) -> dict[str, Any]:
     if end == -1:
         return {}
 
-    try:
-        return yaml.safe_load("\n".join(lines[:end])) or {}
-    except yaml.YAMLError:
-        raise
+    return yaml.safe_load("\n".join(lines[:end])) or {}
 
 
 def normalize_manifest(data: dict[str, Any]) -> dict[str, Any]:
-    """Apply v3 manifest defaults that JSON Schema cannot enforce.
-
-    This mutates `data` in place before schema validation and registry indexing,
-    so `validate`, `compile`, and the registry all inspect the same resolved dict.
-    A future rule such as "propagation must be explicit on block policies" would
-    therefore see the defaulted value, not the raw file.
-
-    propagation defaults to 'inherit' when absent, enforcement is present, and
-    enforcement is not 'advise'.
-    """
+    """Apply v3 manifest defaults that JSON Schema cannot enforce."""
     if "propagation" not in data and data.get("enforcement") is not None and data.get("enforcement") != "advise":
         data["propagation"] = "inherit"
     return data
@@ -227,12 +205,7 @@ def load_manifest_file(
     manifest_path: Path,
     warnings: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Parse and normalize a manifest by file path.
-
-    Handles manifest.yaml and SKILL.md frontmatter. Raises yaml.YAMLError on
-    malformed YAML, OSError on unreadable files, and ManifestSourceError when a
-    SKILL.md frontmatter is missing required fields.
-    """
+    """Parse and normalize a manifest by file path."""
     text = manifest_path.read_text(encoding="utf-8")
 
     if manifest_path.name == SKILL_MD:
@@ -252,11 +225,11 @@ def load_manifest(
     if path is None:
         return None
 
-    # Direct-children-only ambiguity check.
     has_manifest = (artifact_dir / CANONICAL_MANIFEST).exists()
     has_skill = (artifact_dir / SKILL_MD).exists()
     if has_manifest and has_skill:
-        raise ManifestSourceError(f"both {CANONICAL_MANIFEST} and {SKILL_MD} are present; remove one")
+        msg = f"both {CANONICAL_MANIFEST} and {SKILL_MD} are present; remove one"
+        raise ManifestSourceError(msg)
 
     data = load_manifest_file(path, warnings)
     interface = _load_interface(artifact_dir, warnings)

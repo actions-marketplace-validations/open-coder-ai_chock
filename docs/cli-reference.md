@@ -92,16 +92,15 @@ lockfile-write failure fails the command. An adopter-edited dispatcher is backed
 
 - `--check` — write nothing; exit non-zero listing every compiled artifact that no longer
   matches its manifest. This is the CI drift gate.
-- `--ci` — additionally write the GitHub Actions workflow that runs every compiled
-  `ci-gate` on pull requests. Idempotent; refuses to overwrite a workflow it did not write.
-  Until this runs, `ci-gate` output is compiled but not enforced.
+- `--ci` — additionally write the GitHub Actions workflow that runs every compiled `ci-gate` on pull requests. Idempotent;
+  refuses to overwrite a workflow it did not write. Until this runs, `ci-gate` output is compiled but not enforced.
 - `--skills` — additionally refresh the bundled authoring skills in `.agents/skills/`.
 - `--skip-hooks` — compile and refresh bookkeeping without touching `.git/hooks`.
 
 ### `check` — is this repo sound?
 
 ```bash
-chock check [--repo .] [--only validate,verify,evals,matrix,index] [--mode MODE] [--event EVENT]
+chock check [--repo .] [--only validate,verify,evals,matrix,mechanisms,index] [--mode MODE] [--event EVENT]
 ```
 
 Runs every truth check, read-only — `check` never regenerates what it measures (that is
@@ -113,12 +112,15 @@ Runs every truth check, read-only — `check` never regenerates what it measures
 | `verify` | Installed packs match `chock.lock` — both source and compiled-artifact hashes. |
 | `evals` | Every policy's eval suite passes under deterministic replay. |
 | `matrix` | Spec invariants are traceable in the enforcement matrix. Framework-repo homework: auto-skipped (with a note) in repos that have no `spec/enforcement-matrix.md`. |
+| `mechanisms` | Every enforcement-matrix row naming a `` `function()` `` names a real, invoked, severity-capable one — presence in `matrix` is not the same as being real. Same auto-skip as `matrix`. |
 | `index` | `INDEX.md` and the `AGENTS.md` pointer are fresh. |
 
 - `--only` — comma-separated subset, e.g. `--only validate,verify`.
 - `--mode` — frontier validation profile (e.g. `frontier-claude`), passed to `validate`.
 - `--event` — hook event context (e.g. `commit`), passed to `validate`; softens
   pre-existing-drift findings at commit time.
+- `eval export --format context-report --out DIR [POLICY_ID ...]` — exports a policy's tier-3
+  cases (no `execute` block) as a context-report run/v0.1 directory; see [Evals](evals.md#exporting-tier-3-cases-to-context-report).
 
 ### `status` — what is installed, and what happened
 
@@ -195,24 +197,24 @@ diffs the result to catch a stale registry. See [Registry & Lockfile](registry-a
 ### `plugin build` — package policies as installable plugins
 
 ```bash
-chock plugin build [--repo .] [--policies-dir base] [--format agent-plugins|claude|copilot|cursor|codex|all] [--out-dir DIST] [--check]
+chock plugin build [--repo .] [--policies-dir base] [--format agent-plugins|claude|copilot|cursor|codex|all] [--out-dir DIST] [--policy ID ...] [--out PATH] [--check]
 ```
 
 Renders each policy as a plugin. The default `agent-plugins` format writes an
-[Agent Plugins 1.0.0](https://agent-plugins.org) package into each policy folder —
-additive, `manifest.yaml` stays the source of truth, and a packaged policy is `advisory`
-wherever it is read: v1 defines no enforcement semantics, so packaging changes no value in
-`coverage.json`.
+[Agent Plugins 1.0.0](https://agent-plugins.org) package into each policy folder — additive,
+`manifest.yaml` stays the source of truth, and a packaged policy is `advisory` wherever it is
+read: v1 defines no enforcement semantics, so packaging changes no value in `coverage.json`.
 
-The four hook formats ship a byte-identical guard and adapter; only the envelope
-differs. `claude` (`.claude-plugin/`) is read natively by Claude Code, Copilot CLI, VS Code
-and Grok Build; `copilot` is the Agent Plugins 1.0 layout with the hook under
-`com.github.copilot/hooks/`, which spec-validating marketplaces accept; `cursor`
-(`.cursor-plugin/`, `beforeShellExecution`) and `codex` (`.codex-plugin/`, `PreToolUse`) each reach a hook engine no other package can. A guard policy's
-plugin is session-enforced where the host honours the hook, failing **open** when
-`python3` is absent — a posture each description states verbatim. The hook formats require
-`--out-dir`; in-place output is refused so a policy folder is never mistaken for a
-published plugin. `--policies-dir` packages a published directory; `--check` judges without writing.
+The four hook formats ship a byte-identical guard and adapter; only the envelope differs.
+`claude` (`.claude-plugin/`) is read natively by Claude Code, Copilot CLI, VS Code and Grok
+Build; `copilot` is the Agent Plugins 1.0 layout under `com.github.copilot/hooks/`; `cursor`
+(`.cursor-plugin/`, `beforeShellExecution`) and `codex` (`.codex-plugin/`, `PreToolUse`) each
+reach a hook engine no other package can, failing **open** when `python3` is absent. They
+require `--out-dir` (or `--out`); in-place output is refused so a policy folder is never
+mistaken for a published plugin. `--policies-dir` packages a published directory; `--check`
+judges without writing. `--policy ID` (repeatable; manifest `id` or directory name, else a
+named error) narrows the build and skips `--out-dir` stale-package cleanup. `--out PATH`
+(exactly one `--policy`) writes straight to `PATH` instead of `<out-dir>/<format>/<id>/`.
 
 ### `marketplace build` — index a built plugin tree
 
@@ -233,16 +235,15 @@ hand-listed; an empty tree exits 2; `--check` reports drift without writing.
 ### `review` — record and check what a review rests on
 
 ```bash
-chock review emit   [--repo .] [--base origin/main] [--checks ...] [--kind agent|human] [--by NAME]
-chock review verify [--repo .] [--base origin/main] <evidence.json>
+chock review emit    [--repo .] [--base origin/main] [--checks ...] [--kind agent|human] [--by NAME]
+chock review verify  [--repo .] [--base origin/main] <evidence.json>
+chock review require [--repo .] [--base origin/main]
 ```
 
-`emit` runs every check in the repository's registry and writes evidence to
-`.chock/evidence/<diff>.json`. `verify` re-derives each `verified` claim and exits
-non-zero if any disagrees. Attested (human-judged) claims are printed under **NOT
-verified** with their stated basis. The recorded `command` is never executed — the
-verifier resolves checks through the registry, because evidence is contributor-authored.
-Full format: [Reviewer Evidence](reviewer-evidence.md).
+`emit` writes evidence to `.chock/evidence/<diff>.json`, plus a `command_set_hash` over any
+declared `required_checks`. `verify` re-derives each `verified` claim; attested (human-judged)
+claims print under **NOT verified**. `require` is the CI-side gate: present, valid, sufficient
+(hash matches), passing, and attested, in order. Full format: [Reviewer Evidence](reviewer-evidence.md).
 
 ### `compliance report` — compliance coverage
 
@@ -267,8 +268,7 @@ control list.
 
 ## Pre-launch aliases
 
-The pre-consolidation names (`validate`, `recompile`, `install-hooks`, `install-ci`, `refresh`,
-`verify`, `eval`, `check-matrix`, `policies`, `gate-log`) still dispatch, hidden from `--help`; use the verbs above.
+The pre-consolidation names (`validate`, `recompile`, `install-hooks`, `install-ci`, `refresh`, `verify`, `eval`, `check-matrix`, `policies`, `gate-log`) still dispatch, hidden from `--help`; use the verbs above.
 
 ## Typical workflows
 

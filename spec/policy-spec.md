@@ -49,7 +49,7 @@ wiring:
 
 ```
 .agents/policies/<id>/
-├── manifest.yaml
+├── manifest.yaml          # + implementations/ when it declares hook.script
 └── evals/suite.yaml
 ```
 
@@ -117,7 +117,7 @@ require(evals/suite.yaml): minimum 3 cases across:
 target: policy, not agent
 default metric: pass_rate
 
-## 7. Gate definition (hooks only)
+## 7. Gate definition (`hook.gate`; for `hook.script` see `spec/script-backed-gates.md`)
 
 ```yaml
 gate:
@@ -167,7 +167,7 @@ optimize_playbook: MAY NOT raise tier
 - warning-level for justified network calls with a `network` effect declared under `verify`/`block` enforcement and approval wiring
 
 > Invariant: **SEC-3** — Gate failures present an actionable message naming the compliant alternative.
-- required in `gate.message` for every hook with `action: block` or `action: verify`
+- required in `gate.message` for every hook that declares a `gate` -- unconditional, not per action: the schema lists `message` in `gate.required` under `additionalProperties: false`. `gate.action` is a `const: block`; the `advise`/`verify`/`block` distinction belongs to `enforcement`, a different field (EFF-1)
 
 > Invariant: **SEC-4** — All artifact text surfaces are scanned for prompt-injection tripwires.
 - scan covers: `SKILL.md`, `references/`, `examples/`, `evals/`, templates, manifest string fields (`name`, `description`, `rule.text`, `hook.gate.message`), and eval prompts/expectations
@@ -271,7 +271,12 @@ optimize_playbook: MAY NOT raise tier
 
 > Invariant: **AMB-1** — Compiled ambient rule blocks must stay within the ~500-token soft budget (§4).
 
-- the validator estimates tokens across all `chock:rules` marked blocks in `AGENTS.md` and warns on overrun
+- the validator estimates tokens across the attention surface in `.agents/policies/INDEX.md` (the file `AGENTS.md` points agents to read) and warns on overrun
+
+> Invariant: **AMB-2** — Rules compiled from independently authored, independently enabled policies must not contradict each other in the attention surface.
+
+- the validator parses `.agents/policies/INDEX.md` with provenance and flags, as errors, a direct contradiction, a modality conflict (opposing verbs from the closed vocabulary), and a scope overlap (intersecting targets with opposite verdicts); redundant or shadowed rules are a warning naming their token cost against AMB-1
+- deterministic set arithmetic only, never a model call (Arbiter, arXiv:2603.08993); `# chock: conflict-reviewed <key>` in a policy's `rule.text` suppresses exactly that finding
 
 > Invariant: **FRS-1** — Generated adapter files must carry a freshness marker (`fetched_at` or `updated_at`) and must be refreshed if the marker is older than 30 days.
 
