@@ -63,10 +63,16 @@ prefer this style — it turns "should block" into a checked fact.
 
 Example shape:
 
-| Guard | Must BLOCK (exit ≠ 0) | Must ALLOW (exit 0) |
+| Guard | Must BLOCK (exit 1) | Must ALLOW (exit 0) |
 | :--- | :--- | :--- |
 | protect-main-branch | commit on `main` | commit on `feature/x` |
 | scan-secrets | staged `AKIA…` key | file mentioning the word "password" |
+
+A pre-tool guard has one more answer. **Exit 3 asks**: the command is held until the user
+confirms it, and the guard's first output line is the prompt they read, so name the thing to
+confirm and never echo the command. A case expects it with `expect: ask`. Any other non-zero
+exit is the guard failing to decide, reported as an `error` in a replay and as an ask (with
+"could not check") in a client.
 
 ## Which gate a case is replayed against
 
