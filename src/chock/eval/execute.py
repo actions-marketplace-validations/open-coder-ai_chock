@@ -17,11 +17,12 @@ from chock.compile.compiler import _load_manifest
 from chock.eval.model import Case, CaseResult
 from chock.gate import runner as gate_runner
 from chock.gate.build import build_gate_json
-from chock.gate.guard_runner import GUARD_VIOLATION, find_bash
+from chock.gate.guard_runner import GUARD_ASK_EXIT, GUARD_VIOLATION, find_bash
 from chock.gate.runner import GATE_LOG_ENV
 
 BLOCK = "block"
 ALLOW = "allow"
+ASK = "ask"
 ERROR = "error"
 
 #: gate_runner.run()'s process-exit convention: 0 allow, 1 block, 2 spec error.
@@ -139,6 +140,8 @@ def _run_guard(repo: Path, guard: Path, command: str) -> tuple[str, str]:
     first = detail[0] if detail else f"guard exit {proc.returncode}"
     if proc.returncode == GUARD_VIOLATION:
         return BLOCK, first
+    if proc.returncode == GUARD_ASK_EXIT:
+        return ASK, first
     if proc.returncode == 0:
         return ALLOW, first
     return ERROR, f"guard exited {proc.returncode}, so nothing was checked: {first}"

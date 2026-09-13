@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Guards can ask.** A pre-tool guard that exits **3** holds the command for the user's
+  confirmation, and its first output line is the prompt they see (`gate/guard_runner.py`,
+  `GUARD_ASK_EXIT`). Until now a guard had two answers, exit 1 to refuse and exit 0 to stay
+  silent, and every other exit was read as "the guard did not complete" and turned into an ask
+  that says only "could not check". A policy whose table has a *confirm* column (rm -rf on a
+  relative path, `git reset --hard`, `docker system prune`) had to refuse outright or stay
+  quiet. The client outcome is unchanged on every vendor -- `escalate`, degraded as agentseam
+  records -- so the crash path keeps its safety and only the reason text moves. The eval
+  replayer observes it as `ask` and a case may `expect: ask` (`eval.schema.json`); the
+  gate-events log records `"verdict": "ask"`. The runtime goldens are regenerated for the
+  handler change. The fail-to-ask suite's crash fixture moves from exit 3 to exit 4.
+
 - **Scaffold: the doc boundary `chock init` writes now matches this repo's own.** `4e85f97`
   renamed `never_read` to `read_on_demand` in this repo's `AGENTS.md` and in the per-agent
   wrapper text `scaffold/adapters.py` emits, but not in the `AGENTS.md` and `docs/README.md`

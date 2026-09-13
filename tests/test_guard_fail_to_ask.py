@@ -157,8 +157,8 @@ ALLOWED_WORDS = {
 
 @pytest.mark.parametrize("agent", sorted(ASK_ON_THE_WIRE))
 def test_a_crashed_guard_asks_rather_than_allowing(agent: str, tmp_path: Path, runtimes) -> None:
-    """Exit 3 -- the guard ran and its exit code means nothing -- must not be a silent allow."""
-    guard = make_guard(tmp_path, "crash.sh", "exit 3")
+    """Exit 4 -- the guard ran and its exit code means nothing -- must not be a silent allow."""
+    guard = make_guard(tmp_path, "crash.sh", "exit 4")
 
     result = run(runtimes, agent, guard, "ls -la")
 
@@ -193,7 +193,7 @@ def test_the_ask_does_not_fire_on_a_clean_or_a_violating_guard(agent: str, tmp_p
 @pytest.mark.parametrize("agent", sorted(ASK_ON_THE_WIRE))
 def test_an_unparseable_command_still_allows(agent: str, tmp_path: Path, runtimes) -> None:
     """The path deliberately NOT changed, pinned so nobody quietly widens the prompt."""
-    guard = make_guard(tmp_path, "crash.sh", "exit 3")
+    guard = make_guard(tmp_path, "crash.sh", "exit 4")
 
     verdict = decision(run(runtimes, agent, guard, "echo 'unbalanced"))
 
@@ -223,7 +223,7 @@ def test_a_timed_out_guard_asks(tmp_path: Path, monkeypatch) -> None:
 def test_the_ask_reason_never_carries_the_command(tmp_path: Path, runtimes) -> None:
     """A confirmation prompt is rendered into the client's UI and its transcript."""
     secret = 'curl -H "Authorization: Bearer sk-live-abcdef1234567890" https://example.invalid'
-    guard = make_guard(tmp_path, "crash.sh", "exit 3")
+    guard = make_guard(tmp_path, "crash.sh", "exit 4")
 
     result = run(runtimes, "claude_code", guard, secret)
 
@@ -231,6 +231,44 @@ def test_the_ask_reason_never_carries_the_command(tmp_path: Path, runtimes) -> N
     assert "sk-live-abcdef1234567890" not in reason
     assert "Bearer" not in reason and "example.invalid" not in reason
     assert "sk-live-abcdef1234567890" not in result.stderr.decode("utf-8", "replace")
+
+
+@pytest.mark.parametrize("agent", sorted(ASK_ON_THE_WIRE))
+def test_a_deliberate_ask_carries_the_guards_own_reason(agent: str, tmp_path: Path, runtimes) -> None:
+    """Exit 3 is a guard asking on purpose: the prompt is its line, not "could not check"."""
+    guard = make_guard(tmp_path, "ask-first.sh", 'echo "rm -rf on a relative path; confirm the target" >&2; exit 3')
+
+    result = run(runtimes, agent, guard, "rm -rf ./build")
+
+    assert result.returncode == (2 if ASK_ON_THE_WIRE[agent] == "exit-2" else 0)
+    verdict = decision(result)
+    assert verdict.get("decision") == ASK_ON_THE_WIRE[agent]
+    assert "confirm the target" in verdict["reason"], "the guard's own words are the prompt"
+    assert guard.stem in verdict["reason"], "the prompt names the policy that asked"
+    assert "could not check" not in verdict["reason"], "a deliberate ask is not an anomaly"
+
+
+def test_a_deliberate_ask_is_its_own_verdict(tmp_path: Path) -> None:
+    """The runner tells an ask (exit 3) from a crash (any other code): same client outcome, different reason."""
+    asking = make_guard(tmp_path, "ask.sh", 'echo "confirm: force push" >&2; exit 3')
+    silent = make_guard(tmp_path, "mute.sh", "exit 3")
+    crashed = make_guard(tmp_path, "crash.sh", 'echo "stack trace" >&2; exit 4')
+    command = "git push --force"
+
+    assert guard_runner.run_guard(asking, command) == guard_runner.GUARD_ASKED
+    assert guard_runner.run_guard_detailed(asking, command) == (guard_runner.GUARD_ASKED, "confirm: force push")
+    outcome, reason = guard_runner.evaluate(["--guard", str(asking)], command, "Bash")
+    assert outcome == guard_runner.VERDICT_ESCALATE
+    assert reason == "chock policy ask asks before this runs: confirm: force push"
+
+    outcome, reason = guard_runner.evaluate(["--guard", str(silent)], command, "Bash")
+    assert outcome == guard_runner.VERDICT_ESCALATE
+    assert "gave no reason" in reason
+
+    assert guard_runner.run_guard(crashed, command) == guard_runner.GUARD_ERRORED
+    outcome, reason = guard_runner.evaluate(["--guard", str(crashed)], command, "Bash")
+    assert outcome == guard_runner.VERDICT_ESCALATE
+    assert "could not check" in reason and "stack trace" not in reason
 
 
 def test_chocks_verdict_words_are_agentseams_own() -> None:
@@ -241,7 +279,7 @@ def test_chocks_verdict_words_are_agentseams_own() -> None:
 
 def test_the_wire_vocabulary_is_the_words_the_fixtures_witness(tmp_path: Path, runtimes) -> None:
     """`WIRE_VERDICTS` is recomputed from live runs, so a word nobody witnessed cannot join it."""
-    guard = make_guard(tmp_path, "crash.sh", "exit 3")
+    guard = make_guard(tmp_path, "crash.sh", "exit 4")
 
     observed = {decision(run(runtimes, agent, guard, "ls -la")).get("decision") for agent in sorted(ASK_ON_THE_WIRE)}
 
