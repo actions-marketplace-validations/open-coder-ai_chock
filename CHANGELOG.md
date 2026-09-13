@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Scaffold: the doc boundary `chock init` writes now matches this repo's own.** `4e85f97`
+  renamed `never_read` to `read_on_demand` in this repo's `AGENTS.md` and in the per-agent
+  wrapper text `scaffold/adapters.py` emits, but not in the `AGENTS.md` and `docs/README.md`
+  templates `chock init` writes into an adopter's repo. One `init` therefore produced a
+  `CLAUDE.md` saying "read `README.md` and `docs/` only when the task is to change them", an
+  `AGENTS.md` saying `never_read`, and a `docs/README.md` saying "Agents must not read files
+  here" -- and `AGENTS.md`, being the declared source of truth, is the one that wins. Both
+  templates now carry the on-demand wording with the reason beside it, and the installed tree
+  under `.agents/skills/` was regenerated with `chock install-skills .`.
+
 - **CI/docs: launch prep -- smaller hero GIF, no star history, split workflows.**
   `docs/assets/demo.gif` recompressed with gifsicle (2.37 MB -> 955 KB) for mobile,
   verified legible at the 760px width the README renders at; the README's Star history
