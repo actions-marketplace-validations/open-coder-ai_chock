@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import stat
 from pathlib import Path
 
 import pytest
@@ -63,6 +64,31 @@ def test_a_guard_that_cannot_run_is_an_error_not_a_block(tmp_path: Path) -> None
 def _passing(provenance: str) -> CaseResult:
     case = Case(id="c", category="trigger", prompt="p", expect="e", policy_id="p", provenance=provenance)
     return CaseResult(case, "pass")
+
+
+def test_a_guard_that_asks_is_observed_as_ask(tmp_path: Path) -> None:
+    """Exit 3 is neither a block nor an allow, and a suite can expect exactly that."""
+    guard = tmp_path / "ask-first.sh"
+    guard.write_text('#!/usr/bin/env bash\necho "confirm the target" >&2\nexit 3\n', encoding="utf-8", newline="\n")
+    guard.chmod(guard.stat().st_mode | stat.S_IEXEC)
+
+    def case(expect: str) -> Case:
+        return Case(
+            id="tc-ask",
+            category="trigger",
+            prompt="x",
+            expect="x",
+            policy_id="p",
+            execute={"command": "rm -rf ./build", "expect": expect},
+        )
+
+    asked = run_case(case("ask"), tmp_path, tmp_path, [guard])
+    assert asked.outcome == "pass", asked.detail
+    assert "confirm the target" in asked.detail
+
+    blocked = run_case(case("block"), tmp_path, tmp_path, [guard])
+    assert blocked.outcome == "fail"
+    assert "observed ask" in blocked.detail
 
 
 def test_derived_passes_alone_never_earn_an_attestation() -> None:

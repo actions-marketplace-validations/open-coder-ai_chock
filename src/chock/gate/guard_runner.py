@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 GUARD_VIOLATION = 1
+#: A guard that wants the user asked before the command runs, with its own reason.
+GUARD_ASK_EXIT = 3
 
 PYTHON_SUFFIX = ".py"
 
@@ -30,6 +32,7 @@ _GUARD_TIMEOUT_SECONDS = 30
 
 GUARD_BLOCKED = "blocked"
 GUARD_CLEAN = "clean"
+GUARD_ASKED = "asked"
 GUARD_UNCHECKED = "unchecked"
 GUARD_ERRORED = "errored"
 
@@ -71,19 +74,24 @@ def find_interpreter(guard: Path) -> str | None:
 
 
 def run_guard(guard: Path, command: str) -> str:
-    """`GUARD_BLOCKED` / `GUARD_CLEAN` when the guard ran, otherwise why it did not."""
+    """`GUARD_BLOCKED` / `GUARD_ASKED` / `GUARD_CLEAN` when the guard ran, otherwise why it did not."""
+    return run_guard_detailed(guard, command)[0]
+
+
+def run_guard_detailed(guard: Path, command: str) -> tuple[str, str]:
+    """`run_guard`'s verdict plus the guard's own first line, which an ask carries to the user."""
     try:
         args = shlex.split(command)
     except ValueError:
         print("chock: could not parse command (unbalanced quotes), not checked", file=sys.stderr)
-        return GUARD_UNCHECKED
+        return GUARD_UNCHECKED, ""
     if not args:
-        return GUARD_UNCHECKED
+        return GUARD_UNCHECKED, ""
 
     interpreter = find_interpreter(guard)
     if interpreter is None:
         print(f"chock: no usable interpreter found, {guard.name} not checked", file=sys.stderr)
-        return GUARD_UNCHECKED
+        return GUARD_UNCHECKED, ""
 
     try:
         env = {**os.environ, "CHOCK_RAW_COMMAND": command}
@@ -102,28 +110,33 @@ def run_guard(guard: Path, command: str) -> str:
             f"chock: guard timed out after {_GUARD_TIMEOUT_SECONDS}s, not checked",
             file=sys.stderr,
         )
-        return GUARD_ERRORED
+        return GUARD_ERRORED, ""
     except (OSError, UnicodeError) as exc:
         print(f"chock: guard could not run, not checked: {exc}", file=sys.stderr)
-        return GUARD_ERRORED
+        return GUARD_ERRORED, ""
 
+    output = ((proc.stderr or "") + (proc.stdout or "")).strip()
+    first_line = output.splitlines()[0].strip() if output else ""
     if proc.returncode == GUARD_VIOLATION:
         sys.stderr.write(proc.stdout or "")
         sys.stderr.write(proc.stderr or "")
-        if not ((proc.stdout or "") + (proc.stderr or "")).strip():
+        if not output:
             print(f"chock: blocked by {Path(guard).name} (guard gave no reason)", file=sys.stderr)
-        return GUARD_BLOCKED
+        return GUARD_BLOCKED, first_line
+    if proc.returncode == GUARD_ASK_EXIT:
+        sys.stderr.write(proc.stdout or "")
+        sys.stderr.write(proc.stderr or "")
+        return GUARD_ASKED, first_line
     if proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout or "").strip().splitlines()
         print(
-            f"chock: guard exited {proc.returncode}, not checked" + (f": {detail[0][:120]}" if detail else ""),
+            f"chock: guard exited {proc.returncode}, not checked" + (f": {first_line[:120]}" if first_line else ""),
             file=sys.stderr,
         )
-        return GUARD_ERRORED
-    return GUARD_CLEAN
+        return GUARD_ERRORED, ""
+    return GUARD_CLEAN, ""
 
 
-def log_outcome(guard: Path, tool: str, *, blocked: bool) -> None:
+def log_outcome(guard: Path, tool: str, *, verdict: str) -> None:
     """Append one outcome record. Best effort: never raises, never changes the verdict."""
     try:
         if os.environ.get(GATE_LOG_ENV) == "0":
@@ -150,7 +163,7 @@ def log_outcome(guard: Path, tool: str, *, blocked: bool) -> None:
             "event": "tool_use",
             "kind": guard.stem,
             "tool": tool,
-            "verdict": "block" if blocked else "allow",
+            "verdict": verdict,
         }
         with log_path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -163,11 +176,21 @@ def evaluate(argv: list[str], command: str, tool: str = "") -> tuple[str, str] |
     guard = guard_path_from_argv(argv)
     if guard is None or not guard.exists():
         return None
-    verdict = run_guard(guard, command)
-    if verdict in (GUARD_BLOCKED, GUARD_CLEAN):
-        log_outcome(guard, tool, blocked=verdict == GUARD_BLOCKED)
+    verdict, message = run_guard_detailed(guard, command)
+    logged = {GUARD_BLOCKED: "block", GUARD_ASKED: "ask", GUARD_CLEAN: "allow"}
+    if verdict in logged:
+        log_outcome(guard, tool, verdict=logged[verdict])
     if verdict == GUARD_BLOCKED:
         return (VERDICT_DENY, f"Blocked by chock policy: {guard.stem}")
+    if verdict == GUARD_ASKED:
+        # The guard's own line is the prompt: it names what needs confirming, never the
+        # raw command, which would put a live tool argument into the client's UI.
+        return (
+            VERDICT_ESCALATE,
+            f"chock policy {guard.stem} asks before this runs: {message}"
+            if message
+            else f"chock policy {guard.stem} asks for confirmation before this runs (guard gave no reason).",
+        )
     if verdict == GUARD_ERRORED:
         return (
             VERDICT_ESCALATE,

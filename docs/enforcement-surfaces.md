@@ -226,7 +226,7 @@ distinguishes five such causes and answers two of them differently from the othe
 | The command will not tokenize (unbalanced quotes) | allow | Common and usually benign — PowerShell quoting, a Windows path. A prompt here fires on a large share of ordinary tool calls. |
 | The command is empty after tokenizing | allow | There is nothing to check. |
 | No bash on the machine can resolve the guard | allow | Uniform: it holds for every command, not this one, so a prompt says nothing per call and would fire on every tool call on a platform without Git Bash. The fix is an install step. |
-| The guard crashed, or exited a code that is neither 0 nor 1 | **ask** | The control was installed, reachable and runnable, and still produced no answer. Rare, and anomalous. |
+| The guard crashed, or exited a code that is none of 0, 1 or 3 | **ask** | The control was installed, reachable and runnable, and still produced no answer. Rare, and anomalous. (Exit 3 is not this: it is the guard asking on purpose, and its own first line is the prompt.) |
 | The guard hit its 30-second timeout | **ask** | Same: the control ran and did not decide. |
 
 The split is deliberate, and it is a budget decision rather than a safety maximum. Oversight

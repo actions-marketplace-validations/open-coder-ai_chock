@@ -47,7 +47,7 @@ def evaluate(guard: Path, command: str, tool: str = "Bash") -> tuple[str, str] |
 
 def test_block_is_recorded(tmp_path: Path, monkeypatch) -> None:
     guard = make_guard(tmp_path, BLOCKING_GUARD)
-    monkeypatch.setattr(guard_runner, "run_guard", lambda *_: guard_runner.GUARD_BLOCKED)
+    monkeypatch.setattr(guard_runner, "run_guard_detailed", lambda *_: (guard_runner.GUARD_BLOCKED, ""))
 
     assert evaluate(guard, "rm -rf /") == (guard_runner.VERDICT_DENY, "Blocked by chock policy: block-destructive")
 
@@ -63,21 +63,37 @@ def test_block_is_recorded(tmp_path: Path, monkeypatch) -> None:
 
 def test_allow_is_recorded(tmp_path: Path, monkeypatch) -> None:
     guard = make_guard(tmp_path, CLEAN_GUARD)
-    monkeypatch.setattr(guard_runner, "run_guard", lambda *_: guard_runner.GUARD_CLEAN)
+    monkeypatch.setattr(guard_runner, "run_guard_detailed", lambda *_: (guard_runner.GUARD_CLEAN, ""))
 
     assert evaluate(guard, "ls -la") is None
     assert read_log(tmp_path)[0]["verdict"] == "allow"
+
+
+ASKING_GUARD = '#!/usr/bin/env bash\necho "confirm the target" >&2\nexit 3\n'
+
+
+def test_ask_is_recorded(tmp_path: Path) -> None:
+    """Real run_guard, no stubbing: a deliberate ask is its own verdict in the log, not a block."""
+    guard = make_guard(tmp_path, ASKING_GUARD)
+
+    outcome, reason = evaluate(guard, "rm -rf ./build")
+    assert outcome == guard_runner.VERDICT_ESCALATE
+    assert "confirm the target" in reason
+
+    records = read_log(tmp_path)
+    assert len(records) == 1
+    assert records[0]["verdict"] == "ask"
 
 
 def test_unchecked_guard_is_not_recorded_as_a_pass(tmp_path: Path, monkeypatch) -> None:
     """The distinction the outcome words exist for: nothing was checked."""
     guard = make_guard(tmp_path, BROKEN_GUARD)
 
-    monkeypatch.setattr(guard_runner, "run_guard", lambda *_: guard_runner.GUARD_UNCHECKED)
+    monkeypatch.setattr(guard_runner, "run_guard_detailed", lambda *_: (guard_runner.GUARD_UNCHECKED, ""))
     assert evaluate(guard, "ls -la") is None
     assert read_log(tmp_path) == []
 
-    monkeypatch.setattr(guard_runner, "run_guard", lambda *_: guard_runner.GUARD_ERRORED)
+    monkeypatch.setattr(guard_runner, "run_guard_detailed", lambda *_: (guard_runner.GUARD_ERRORED, ""))
     outcome, reason = evaluate(guard, "ls -la")
     assert outcome == guard_runner.VERDICT_ESCALATE
     assert reason, "a confirmation request must say why it is being asked for"
@@ -87,7 +103,7 @@ def test_unchecked_guard_is_not_recorded_as_a_pass(tmp_path: Path, monkeypatch) 
 def test_command_never_reaches_the_log(tmp_path: Path, monkeypatch) -> None:
     """Commands carry credentials far more often than files do."""
     guard = make_guard(tmp_path, BLOCKING_GUARD)
-    monkeypatch.setattr(guard_runner, "run_guard", lambda *_: guard_runner.GUARD_BLOCKED)
+    monkeypatch.setattr(guard_runner, "run_guard_detailed", lambda *_: (guard_runner.GUARD_BLOCKED, ""))
 
     evaluate(guard, SECRET_COMMAND)
 
@@ -98,7 +114,7 @@ def test_command_never_reaches_the_log(tmp_path: Path, monkeypatch) -> None:
 
 def test_env_switch_disables_logging(tmp_path: Path, monkeypatch) -> None:
     guard = make_guard(tmp_path, BLOCKING_GUARD)
-    monkeypatch.setattr(guard_runner, "run_guard", lambda *_: guard_runner.GUARD_BLOCKED)
+    monkeypatch.setattr(guard_runner, "run_guard_detailed", lambda *_: (guard_runner.GUARD_BLOCKED, ""))
     monkeypatch.setenv(GATE_LOG_ENV, "0")
 
     assert evaluate(guard, "rm -rf /") == (guard_runner.VERDICT_DENY, "Blocked by chock policy: block-destructive")
@@ -107,7 +123,7 @@ def test_env_switch_disables_logging(tmp_path: Path, monkeypatch) -> None:
 
 def test_logging_failure_does_not_change_the_verdict(tmp_path: Path, monkeypatch) -> None:
     guard = make_guard(tmp_path, BLOCKING_GUARD)
-    monkeypatch.setattr(guard_runner, "run_guard", lambda *_: guard_runner.GUARD_BLOCKED)
+    monkeypatch.setattr(guard_runner, "run_guard_detailed", lambda *_: (guard_runner.GUARD_BLOCKED, ""))
 
     class Exploding:
         @staticmethod
@@ -124,7 +140,7 @@ def test_guard_outside_an_chock_repo_is_not_recorded(tmp_path: Path, monkeypatch
     guard = tmp_path / "loose" / "implementations" / "block-destructive.sh"
     guard.parent.mkdir(parents=True, exist_ok=True)
     guard.write_text(BLOCKING_GUARD, encoding="utf-8", newline="\n")
-    monkeypatch.setattr(guard_runner, "run_guard", lambda *_: guard_runner.GUARD_BLOCKED)
+    monkeypatch.setattr(guard_runner, "run_guard_detailed", lambda *_: (guard_runner.GUARD_BLOCKED, ""))
 
     assert evaluate(guard, "rm -rf /") == (guard_runner.VERDICT_DENY, "Blocked by chock policy: block-destructive")
     assert read_log(tmp_path) == []

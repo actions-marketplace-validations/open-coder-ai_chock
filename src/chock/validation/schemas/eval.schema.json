@@ -267,7 +267,7 @@
                 "description": "Executable form of the case, replayed by `chock check --only evals --mode deterministic`. Absent means the expectation is behavioural and belongs to agent mode.",
                 "required": ["expect"],
                 "properties": {
-                  "expect": {"type": "string", "enum": ["block", "allow"]},
+                  "expect": {"type": "string", "enum": ["block", "allow", "ask"]},
                   "command": {"type": "string", "description": "argv passed to the policy's guard script. Mutually exclusive with the gate fields."},
                   "files": {"type": "object", "description": "Paths staged for the commit under test, as path -> content.", "additionalProperties": {"type": "string"}},
                   "head_files": {"type": "object", "description": "Paths committed before staging, so a case can distinguish a dependency this commit ADDS from one already present.", "additionalProperties": {"type": "string"}},

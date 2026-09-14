@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- **Guards can ask.** A pre-tool guard that exits **3** holds the command for the user's
+  confirmation, and its first output line is the prompt they see (`gate/guard_runner.py`,
+  `GUARD_ASK_EXIT`). Until now a guard had two answers, exit 1 to refuse and exit 0 to stay
+  silent, and every other exit was read as "the guard did not complete" and turned into an ask
+  that says only "could not check". A policy whose table has a *confirm* column (rm -rf on a
+  relative path, `git reset --hard`, `docker system prune`) had to refuse outright or stay
+  quiet. The client outcome is unchanged on every vendor -- `escalate`, degraded as agentseam
+  records -- so the crash path keeps its safety and only the reason text moves. The eval
+  replayer observes it as `ask` and a case may `expect: ask` (`eval.schema.json`); the
+  gate-events log records `"verdict": "ask"`. The runtime goldens are regenerated for the
+  handler change. The fail-to-ask suite's crash fixture moves from exit 3 to exit 4.
+
+- **Scaffold: the doc boundary `chock init` writes now matches this repo's own.** `4e85f97`
+  renamed `never_read` to `read_on_demand` in this repo's `AGENTS.md` and in the per-agent
+  wrapper text `scaffold/adapters.py` emits, but not in the `AGENTS.md` and `docs/README.md`
+  templates `chock init` writes into an adopter's repo. One `init` therefore produced a
+  `CLAUDE.md` saying "read `README.md` and `docs/` only when the task is to change them", an
+  `AGENTS.md` saying `never_read`, and a `docs/README.md` saying "Agents must not read files
+  here" -- and `AGENTS.md`, being the declared source of truth, is the one that wins. Both
+  templates now carry the on-demand wording with the reason beside it, and the installed tree
+  under `.agents/skills/` was regenerated with `chock install-skills .`.
+
 - **CI/docs: launch prep -- smaller hero GIF, no star history, split workflows.**
   `docs/assets/demo.gif` recompressed with gifsicle (2.37 MB -> 955 KB) for mobile,
   verified legible at the 760px width the README renders at; the README's Star history
