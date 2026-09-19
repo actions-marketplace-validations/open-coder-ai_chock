@@ -40,6 +40,13 @@ def build_gate_json(policy_dir: Path, repo_root: Path) -> dict[str, Any] | None:
         "params": dict(gate.get("params") or {}),
     }
 
+    # applies_to.paths bounds which files this gate may judge. It rides beside params rather
+    # than inside them: params are what the policy declared about its check, and this is what
+    # the policy declared about its reach.
+    scope = (manifest.get("applies_to") or {}).get("paths")
+    if scope:
+        spec["paths"] = [str(p) for p in scope]
+
     config = load_config(repo_root)
 
     if "config_key" in spec["params"]:

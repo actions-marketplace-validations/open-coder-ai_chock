@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,11 +36,23 @@ class GateContext:
         push_stdin: str | None = None,
         base: str | None = None,
         head_ref: str | None = None,
+        scope: Sequence[str] | None = None,
     ) -> None:
         self.repo_root = Path(repo_root)
         self._push_stdin = push_stdin or ""
         self.base = base
         self.head_ref = head_ref
+        #: The policy's applies_to.paths. Empty means every changed file is in scope.
+        self.scope = tuple(scope or ())
+
+    def in_scope(self, path: str) -> bool:
+        """Whether this policy may judge this file at all.
+
+        fnmatch semantics, so `*` crosses `/` and `.github/workflows/*` covers nested files.
+        A gate with no scope sees every changed file, which is what every gate did before
+        applies_to.paths was read.
+        """
+        return not self.scope or any(fnmatch.fnmatchcase(path, g) for g in self.scope)
 
     def _range(self) -> list[str]:
         """The git-diff scope: a commit range in CI, the staged index otherwise."""
@@ -67,7 +80,8 @@ class GateContext:
 
     def staged_paths(self, diff_filter: str = "ACMRT") -> list[str]:
         out = self._git("diff", *self._range(), "--name-only", f"--diff-filter={diff_filter}")
-        return [line.strip() for line in out.splitlines() if line.strip()]
+        paths = (line.strip() for line in out.splitlines() if line.strip())
+        return [path for path in paths if self.in_scope(path)]
 
     def added_lines(self, path: str) -> list[str]:
         out = self._git("diff", *self._range(), "-U0", "--", path)
@@ -354,7 +368,13 @@ def run(
     if kind is None:
         print(f"gate: unknown kind {spec.get('kind')!r}", file=sys.stderr)
         return 2
-    ctx = GateContext(repo_root=repo_root, push_stdin=push_stdin, base=base, head_ref=head_ref)
+    ctx = GateContext(
+        repo_root=repo_root,
+        push_stdin=push_stdin,
+        base=base,
+        head_ref=head_ref,
+        scope=spec.get("paths"),
+    )
     if event == "ci" and base and not ctx.rev_exists(base):
         print(
             f"gate: base ref {base!r} does not resolve -- refusing to scan an empty range. "
