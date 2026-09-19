@@ -38,6 +38,7 @@ def _gate(tmp_path: Path, paths: list[str] | None = None) -> Path:
 
 # --- the scope bounds what is judged ------------------------------------------------------------
 
+
 def test_a_gate_with_no_scope_judges_every_changed_file(tmp_path: Path) -> None:
     """The behaviour before applies_to.paths was read, and still the default."""
     init_repo(tmp_path)
@@ -67,6 +68,7 @@ def test_a_scope_that_matches_nothing_changed_refuses_nothing(tmp_path: Path) ->
 
 # --- the context is where scope lives -----------------------------------------------------------
 
+
 def test_scope_globs_cross_the_path_separator(tmp_path: Path) -> None:
     """fnmatch semantics, so one glob covers a directory's nested files too."""
     ctx = GateContext(repo_root=tmp_path, scope=[".github/workflows/*"])
@@ -81,6 +83,7 @@ def test_an_empty_scope_admits_everything(tmp_path: Path) -> None:
 
 
 # --- the manifest is where it is declared -------------------------------------------------------
+
 
 def _policy(tmp_path: Path, manifest: dict) -> Path:
     policy = tmp_path / "policy"
@@ -97,8 +100,9 @@ def _manifest(**extra) -> dict:
         "description": "d",
         "artifact": "hook",
         "enforcement": "block",
-        "hook": {"gate": {"kind": "content_regex", "on": ["commit"], "action": "block",
-                          "message": "m", "params": PARAMS}},
+        "hook": {
+            "gate": {"kind": "content_regex", "on": ["commit"], "action": "block", "message": "m", "params": PARAMS}
+        },
         "provenance": {"author": "t"},
         "lifecycle": {"status": "draft"},
         **extra,
