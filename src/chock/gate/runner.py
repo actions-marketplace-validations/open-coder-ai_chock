@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -117,6 +117,50 @@ class GateContext:
             if len(parts) >= _PUSH_LINE_MIN_PARTS:
                 refs.append(parts[2])
         return refs
+
+
+class WriteContext(GateContext):
+    """Files an agent is about to write, or has just written, shaped like a staged diff.
+
+    The gate kinds are untouched and cannot tell the difference: only the material changes.
+    A whole-file write is entirely added lines, and an edit carries exactly the text being
+    introduced, so "added_lines" means at this surface what it has always meant.
+
+    It still subclasses GateContext so repo_root and the git-backed accessors a kind may
+    reach for keep working -- an allowlist file still lives in the repository even when the
+    content under judgement does not.
+    """
+
+    def __init__(self, repo_root: Path, writes: Mapping[str, str], scope: Sequence[str] | None = None) -> None:
+        super().__init__(repo_root=repo_root, scope=scope)
+        self._writes = dict(writes)
+
+    def staged_paths(self, diff_filter: str = "ACMRT") -> list[str]:  # noqa: ARG002 -- no diff to filter
+        return [path for path in self._writes if self.in_scope(path)]
+
+    def staged_blob(self, path: str) -> str:
+        return self._writes.get(path, "")
+
+    def added_lines(self, path: str) -> list[str]:
+        return self._writes.get(path, "").splitlines()
+
+    def removed_lines(self, path: str) -> list[str]:  # noqa: ARG002 -- a write removes nothing yet
+        """Nothing is removed by a write that has not landed, so a kind reading this sees none."""
+        return []
+
+    def head_blob(self, path: str) -> str:
+        """What is on disk now, which is what this write would replace."""
+        target = self.repo_root / path
+        try:
+            return target.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return ""
+
+
+#: Kinds whose question a write can answer. A branch name is not in a tool call, so
+#: forbidden_ref has nothing to read here; saying so beats passing it empty and calling
+#: that an allow.
+WRITE_PATH_KINDS = frozenset({"content_regex"})
 
 
 def _kind_content_regex(ctx: GateContext, params: dict, _event: str) -> GateResult:
@@ -338,7 +382,37 @@ def _log_outcome(gate_path: Path, event: str, spec: dict, result: GateResult) ->
         return
 
 
-_EVENT_NAME = {"pre-commit": "commit", "pre-push": "push"}
+#: Both agent surfaces answer to the vocabulary policies already declare. A policy saying
+#: `on: [commit, tool_use]` has been asking for both of these all along; nothing in a manifest
+#: has to change for it to get them.
+_EVENT_NAME = {"pre-commit": "commit", "pre-push": "push", "pre-tool-use": "tool_use", "stop": "tool_use"}
+
+AGENT_EVENTS = ("pre-tool-use", "stop")
+
+
+def _context(
+    event: str,
+    spec: dict,
+    repo_root: Path,
+    push_stdin: str | None,
+    base: str | None,
+    head_ref: str | None,
+    writes: Mapping[str, str] | None,
+) -> GateContext | None:
+    """The material this event puts under judgement, or None when the kind cannot read it."""
+    if event not in AGENT_EVENTS:
+        return GateContext(
+            repo_root=repo_root, push_stdin=push_stdin, base=base, head_ref=head_ref, scope=spec.get("paths")
+        )
+    if spec.get("kind") not in WRITE_PATH_KINDS:
+        print(
+            f"gate: kind {spec.get('kind')!r} has nothing to read at {event} -- it asks about the "
+            "repository, not about a file being written. Refusing rather than reporting an allow "
+            "it never established.",
+            file=sys.stderr,
+        )
+        return None
+    return WriteContext(repo_root=repo_root, writes=writes or {}, scope=spec.get("paths"))
 
 
 def run(
@@ -348,6 +422,7 @@ def run(
     repo_root: Path,
     base: str | None = None,
     head_ref: str | None = None,
+    writes: Mapping[str, str] | None = None,
 ) -> int:
     gate_path = Path(gate_path)
     if not gate_path.exists():
@@ -368,13 +443,9 @@ def run(
     if kind is None:
         print(f"gate: unknown kind {spec.get('kind')!r}", file=sys.stderr)
         return 2
-    ctx = GateContext(
-        repo_root=repo_root,
-        push_stdin=push_stdin,
-        base=base,
-        head_ref=head_ref,
-        scope=spec.get("paths"),
-    )
+    ctx = _context(event, spec, repo_root, push_stdin, base, head_ref, writes)
+    if ctx is None:
+        return 2
     if event == "ci" and base and not ctx.rev_exists(base):
         print(
             f"gate: base ref {base!r} does not resolve -- refusing to scan an empty range. "
@@ -402,18 +473,35 @@ def _repo_root() -> Path:
         return Path.cwd()
 
 
+def _writes(raw: str) -> dict[str, str]:
+    """The files this event puts under judgement. Unreadable input yields none, never a guess."""
+    try:
+        payload = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return {}
+    writes = payload.get("writes")
+    if not isinstance(writes, dict):
+        return {}
+    return {str(path): str(text) for path, text in writes.items() if isinstance(text, str)}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="gate.py")
     sub = parser.add_subparsers(dest="command", required=True)
     run_p = sub.add_parser("run", help="Run a compiled gate")
     run_p.add_argument("--gate", required=True, help="Path to compiled gate.json")
-    run_p.add_argument("--event", required=True, choices=["pre-commit", "pre-push", "ci"])
+    run_p.add_argument("--event", required=True, choices=["pre-commit", "pre-push", "ci", *AGENT_EVENTS])
     run_p.add_argument("--base", help="Base ref to diff HEAD against (required for --event ci)")
     run_p.add_argument("--head-ref", help="Branch under test, e.g. $GITHUB_HEAD_REF (used by forbidden_ref)")
     args = parser.parse_args(argv)
 
     if args.event == "ci" and not args.base:
         parser.error("--event ci requires --base")
+
+    if args.event in AGENT_EVENTS:
+        # The files are on stdin because a tool call's content is not in the repository yet and
+        # cannot be read back from it. {"writes": {"<path>": "<text>"}}.
+        return run(Path(args.gate), args.event, None, _repo_root(), writes=_writes(sys.stdin.read()))
 
     push_stdin = sys.stdin.read() if args.event == "pre-push" and not sys.stdin.isatty() else None
     return run(Path(args.gate), args.event, push_stdin, _repo_root(), base=args.base, head_ref=args.head_ref)

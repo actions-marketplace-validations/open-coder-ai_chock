@@ -6,5 +6,8 @@ def handle(event):
         if verdict is not None:
             outcome, reason = verdict
             return Decision.escalate(reason) if outcome == ESCALATE else Decision.deny(reason)
+    gated = evaluate_gate(sys.argv[1:], event)
+    if gated is not None:
+        return Decision.deny(gated[1])
 # __SESSION_START_BRANCH__
     return None
