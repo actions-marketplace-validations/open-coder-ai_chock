@@ -189,3 +189,31 @@ def test_adapter_arms_a_fresh_clone_end_to_end(tmp_path: Path) -> None:
     assert proc.returncode == 0
     assert "armed them now" in proc.stdout, proc.stdout + proc.stderr
     assert pre_commit.exists(), "the adapter must reinstall the pre-commit dispatcher"
+
+
+def test_a_repo_with_no_policies_keeps_the_runtime_its_arm_hook_runs() -> None:
+    """The in-agent installer unlinks a runtime nothing wires; the arm hook wires it.
+
+    A fresh `chock init` has the arm hook and no policies. Before this, the pre-tool/stop
+    installer ran after the arm hook's, found no fragments, and unlinked `claude_code.py`
+    while `.claude/settings.json` still told Claude Code to run it at every session start.
+    """
+    from chock.hooks.in_agent_install import install_hooks
+
+    repo = _bare_repo()
+    assert install_sessionstart_hook(repo) is True
+    assert install_hooks(repo, "claude_code") == []
+    vendored = repo / ".chock" / "bin" / "claude_code.py"
+    assert vendored.is_file(), "the arm hook still points here"
+    assert ".chock/bin/claude_code.py" in _entry_command(_settings(repo))
+
+
+def test_a_repo_with_neither_hook_nor_policy_keeps_no_runtime() -> None:
+    """The unlink is still right when nothing at all references the file."""
+    from chock.hooks.in_agent_install import install_hooks
+    from chock.hooks.runtime_vendor import vendor_runtime
+
+    repo = _bare_repo()
+    vendor_runtime(repo, "claude_code")
+    assert install_hooks(repo, "claude_code") == []
+    assert not (repo / ".chock" / "bin" / "claude_code.py").exists()
