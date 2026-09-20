@@ -44,6 +44,13 @@ def repo_wirable(vendor: str) -> bool:
     return facts["config_format"] == "json" and not str(facts["config_path"]).startswith("~")
 
 
+#: Vendors chock wires through its OWN hooks file (.github/hooks/chock.json) instead of the
+#: vendor's config, in an entry shape witnessed live rather than read from agentseam. That
+#: witness covers the pre-tool key alone, so the file's turn-end spelling is unknown --
+#: which is an install cap, like repo_wirable, not a claim about what the vendor can do.
+AGENT_HOOKS_VENDORS = ("vscode_copilot",)
+
+
 def in_agent_vendors() -> tuple[str, ...]:
     """Vendors the in-agent surface covers: the matrix blocking predicate, install-capped.
 
@@ -51,6 +58,24 @@ def in_agent_vendors() -> tuple[str, ...]:
     facts (and the install cap above), never capability.
     """
     return tuple(sorted(v for v in VENDOR_CONFIG if _matrix.can_block(v, _contract.PRE_TOOL) and repo_wirable(v)))
+
+
+def stop_vendors() -> tuple[str, ...]:
+    """Vendors the stop surface covers: the same predicate, asked about the turn-end event.
+
+    A different set from `in_agent_vendors` in both directions, which is the point of
+    deriving each one rather than inheriting: cursor, grok and windsurf can only observe a
+    finished turn, while three vendors here can refuse one without recording any write
+    vocabulary. vscode_copilot can refuse one too and is still held back -- see
+    AGENT_HOOKS_VENDORS for the file chock would have to guess a key in.
+    """
+    return tuple(
+        sorted(
+            v
+            for v in VENDOR_CONFIG
+            if _matrix.can_block(v, _contract.STOP) and repo_wirable(v) and v not in AGENT_HOOKS_VENDORS
+        )
+    )
 
 
 def config_path(vendor: str) -> str:
@@ -72,6 +97,11 @@ def wire_event(vendor: str, canonical: str) -> str:
 def pre_tool_event(vendor: str) -> str:
     """The vendor's wire spelling of the pre-tool gate event."""
     return wire_event(vendor, _contract.PRE_TOOL)
+
+
+def stop_event(vendor: str) -> str:
+    """The vendor's wire spelling of the end-of-turn event (`Stop`, `AfterAgent`, ...)."""
+    return wire_event(vendor, _contract.STOP)
 
 
 def shell_gate_event(vendor: str) -> str:
@@ -107,6 +137,16 @@ def write_matcher(vendor: str) -> str | None:
 def pre_tool_hook_config(vendor: str, command: str, matcher: str | None = None) -> dict[str, Any]:
     """The vendor's complete hook-config document gating pre-tool with `command`."""
     return _adapters.get(vendor).hook_config((_contract.PRE_TOOL,), command, matcher)
+
+
+def stop_hook_config(vendor: str, command: str) -> dict[str, Any]:
+    """The vendor's complete hook-config document running `command` when a turn ends.
+
+    No matcher: the turn-end event carries no tool to match on, which is why this surface
+    reaches every vendor the predicate admits rather than only the two that record a write
+    vocabulary.
+    """
+    return _adapters.get(vendor).hook_config((_contract.STOP,), command, None)
 
 
 def config_envelope(vendor: str) -> dict[str, Any]:

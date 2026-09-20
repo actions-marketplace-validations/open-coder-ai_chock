@@ -12,12 +12,16 @@ from chock.compile.surfaces import SURFACE_AGENTS, Surface
 
 ROOT = Path(__file__).resolve().parents[1]
 DOC = ROOT / "docs" / "enforcement-surfaces.md"
+#: The level vocabulary moved to its own page when the surfaces page outgrew the review
+#: budget. Checked just as hard: these are the words every claim on DOC is worded in.
+LEVELS = ROOT / "docs" / "coverage-levels.md"
 README = ROOT / "README.md"
 COLUMNS = [
     Surface.AMBIENT_RULE,
     Surface.GIT_HOOK,
     Surface.CI_GATE,
     Surface.PRE_TOOL_USE,
+    Surface.STOP,
     Surface.MANAGED_SETTING,
     Surface.AGENT_HOOKS,
 ]
@@ -75,6 +79,34 @@ def test_every_cell_matches_the_code(path: Path, columns: list[Surface]) -> None
     assert not wrong, f"{path.name} disagrees with surfaces.py:\n  " + "\n  ".join(wrong)
 
 
+#: Surfaces the full matrix deliberately leaves out, each with the words that must explain it
+#: somewhere on the page. A surface that is neither a column nor here is one a reader has no
+#: way to ask about -- which is how `stop` could have been added in silence.
+DOC_OMITTED = {
+    Surface.GATEWAY: "modeled now, emitted later",
+    Surface.MCP_GATEWAY: "credits no agent",
+}
+
+
+def test_every_surface_is_either_a_column_or_explained() -> None:
+    """Adding a surface is a claim. The page has to carry it one way or the other."""
+    text = DOC.read_text(encoding="utf-8")
+    unaccounted = [s.value for s in Surface if s not in COLUMNS and s not in DOC_OMITTED]
+    assert not unaccounted, f"{DOC.name} neither tabulates nor explains: {unaccounted}"
+    for surface, phrase in DOC_OMITTED.items():
+        assert phrase in text, f"the page no longer explains why `{surface.value}` has no column"
+
+
+def test_the_page_names_stop_as_a_backstop_worth_no_coverage() -> None:
+    """The one surface with a column and no grade; a reader who misses that over-reads the table."""
+    from chock.compile.surfaces import UNCREDITED_SURFACES
+
+    assert UNCREDITED_SURFACES == {Surface.STOP}, "the caveat below names exactly one surface"
+    text = " ".join(DOC.read_text(encoding="utf-8").split())
+    assert "`stop` is a backstop, and is deliberately worth nothing" in text
+    assert "no coverage word" in text, "the surface table must say the column buys no grade"
+
+
 def _readme_rows() -> dict[str, str]:
     """{agent: "what it enforces" cell} for every row across README's visible and <details> tables."""
     text = README.read_text(encoding="utf-8")
@@ -111,6 +143,16 @@ def test_readme_enforces_column_matches_the_code() -> None:
     assert not wrong, "README Supported agents table disagrees with surfaces.py:\n  " + "\n  ".join(wrong)
 
 
+#: What README's one omission paragraph owes each surface it drops. Ordered by where the
+#: names appear in that paragraph, which `_reason_for` slices on.
+README_OMITTED = {
+    Surface.MANAGED_SETTING: "compiled but not installed",
+    Surface.GATEWAY: "modelled but not yet emitted",
+    Surface.MCP_GATEWAY: "per-client witness",
+    Surface.STOP: "worth no grade of its own",
+}
+
+
 def _omission_caveat() -> str:
     """The one README paragraph that says why three surfaces are missing from its table."""
     paragraphs = [" ".join(p.split()) for p in README.read_text(encoding="utf-8").split("\n\n")]
@@ -121,9 +163,7 @@ def _omission_caveat() -> str:
 
 def _reason_for(caveat: str, surface: Surface) -> str:
     """The slice of `caveat` that belongs to `surface`: its name up to the next surface named."""
-    marks = sorted(
-        (caveat.index(f"`{s.value}`"), s) for s in (Surface.MANAGED_SETTING, Surface.GATEWAY, Surface.MCP_GATEWAY)
-    )
+    marks = sorted((caveat.index(f"`{s.value}`"), s) for s in README_OMITTED)
     for i, (start, at) in enumerate(marks):
         if at is surface:
             return caveat[start : marks[i + 1][0] if i + 1 < len(marks) else len(caveat)]
@@ -135,17 +175,11 @@ def test_readme_says_why_the_absent_surfaces_are_absent() -> None:
     from chock.compile.compiler import EMITTERS
     from chock.compile.surfaces import INSTALLED_SURFACES, coverage_level
 
-    omitted = {
-        Surface.MANAGED_SETTING: "compiled but not installed",
-        Surface.GATEWAY: "modelled but not yet emitted",
-        Surface.MCP_GATEWAY: "per-client witness",
-    }
     caveat = _omission_caveat()
-    for surface, phrase in omitted.items():
+    for surface, phrase in README_OMITTED.items():
         assert phrase in _reason_for(caveat, surface), (
             f"the caveat no longer gives `{surface.value}` the reason {phrase!r}"
         )
-    for surface in omitted:
         crediting = [a for a in SURFACE_AGENTS if coverage_level({surface}, a) != "none"]
         assert not crediting, f"{surface.value} now credits {crediting}; the README owes it a column"
 
@@ -153,13 +187,18 @@ def test_readme_says_why_the_absent_surfaces_are_absent() -> None:
     assert Surface.GATEWAY not in EMITTERS, "gateway emits now; 'not yet emitted' is now false"
     supporting = [a for a, s in SURFACE_AGENTS.items() if Surface.MCP_GATEWAY in s]
     assert not supporting, f"mcp-gateway is now supported by {supporting}; the per-client wording is stale"
+    # stop is the one here that DOES install and DOES refuse; the caveat says so, so if it
+    # ever stops installing the sentence is wrong in the more flattering direction.
+    assert Surface.STOP in INSTALLED_SURFACES and Surface.STOP in EMITTERS, (
+        "the caveat says `stop` installs and refuses; it no longer does"
+    )
 
 
 def test_the_page_publishes_the_cap_the_code_applies() -> None:
     """The cap table is the honesty anchor; a doc that drifts from it advertises a stronger claim."""
     from chock.compile.levels import BASIS_CAP
 
-    text = DOC.read_text(encoding="utf-8")
+    text = LEVELS.read_text(encoding="utf-8")
     start = "| Weakest basis under the grade | May back at most |"
     assert start in text, "the basis-cap table is gone or its header changed"
 
@@ -176,7 +215,7 @@ def test_the_page_publishes_the_cap_the_code_applies() -> None:
 
 def _published_levels() -> list[str]:
     """The level names the doc's `| Level | Meaning |` table publishes, in the order it lists them."""
-    text = DOC.read_text(encoding="utf-8")
+    text = LEVELS.read_text(encoding="utf-8")
     start = "| Level | Meaning |"
     assert start in text, "the coverage-level table is gone or its header changed"
     table = start + text.split(start)[1].split("\n\n")[0]
@@ -211,7 +250,7 @@ def test_the_page_lists_the_in_agent_ladder_strongest_first() -> None:
 def test_the_page_states_the_ladder_order_the_code_returns() -> None:
     """The page prints the ladder as one line; it has to be the line `level_rank` produces."""
     rendered = "  <  ".join(sorted(IN_AGENT_LEVELS, key=level_rank))
-    flattened = " ".join(DOC.read_text(encoding="utf-8").split())
+    flattened = " ".join(LEVELS.read_text(encoding="utf-8").split())
     assert " ".join(rendered.split()) in flattened, f"the page does not state the ladder as: {rendered}"
 
 

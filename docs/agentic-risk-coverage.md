@@ -6,7 +6,7 @@ tier it honestly earns **today**. Rows that read `advisory`, `planned`, or `out 
 scope` stay on this page on purpose: a coverage claim you cannot verify is worse than a
 gap you know about. The enforcement levels — `enforceable`, `best-effort`,
 `enforced-at-commit`, `advisory` — are the compiler's own coverage taxonomy (see
-[Enforcement Surfaces](enforcement-surfaces.md#coverage-levels)); `planned` and `out of
+[Coverage Levels](coverage-levels.md)); `planned` and `out of
 scope` are statuses of this page, not compiler output. An enforcement level is claimed only
 with an install witness, never because a fragment was merely compiled.
 

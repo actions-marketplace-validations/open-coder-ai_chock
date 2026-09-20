@@ -144,8 +144,8 @@ def test_a_guard_script_still_emits_exactly_what_it_did(tmp_path: Path) -> None:
 
 def test_the_installer_looks_for_both_fragments(tmp_path: Path) -> None:
     """Emitting a fragment nothing installs would be machinery that never runs."""
-    from chock.hooks.in_agent_install import _MERGED
+    from chock.hooks.in_agent_merged import MERGED
 
-    glob = _MERGED["claude_code"].fragment_glob
-    assert Path("x/pre-tool-use/pretooluse.json").match(glob)
-    assert Path(f"x/pre-tool-use/{WRITE_FRAGMENT}").match(glob)
+    globs = [w.fragment_glob for w in MERGED["claude_code"].wirings]
+    for name in ("pretooluse.json", WRITE_FRAGMENT):
+        assert any(Path(f"x/pre-tool-use/{name}").match(glob) for glob in globs), name

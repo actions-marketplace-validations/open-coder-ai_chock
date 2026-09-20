@@ -183,6 +183,55 @@ def _gate_fragments(policy_id: str, spec: dict[str, Any], output_dir: Path) -> l
     return written
 
 
+#: The claude fragment the stop installer merges, named apart from the two pre-tool ones
+#: because it lands under a different event key in the same settings file.
+STOP_FRAGMENT = "stop.json"
+
+
+def _stop_rel(policy_id: str) -> str:
+    """Where this policy's stop artifacts land, from chock's own compiled layout."""
+    return f".chock/compiled/{policy_id}/stop"
+
+
+def _stop_fragments(policy_id: str, spec: dict[str, Any], output_dir: Path) -> list[Path]:
+    """One fragment per stop vendor, plus the gate they all run.
+
+    Every vendor `stop_vendors` admits gets one. A turn-end hook carries no tool to match
+    on, so nothing here depends on a write vocabulary -- the reason this surface reaches
+    six vendors where the write path reaches two.
+    """
+    gate = output_dir / GATE_FILE
+    write_generated_json(gate, spec)
+    written: list[Path] = [gate]
+
+    for vendor in vendors.stop_vendors():
+        token = vendors.repo_root_token(vendor)
+        root = f"{token}/" if token else ""
+        command = f'@CHOCK_PYTHON@ "{root}{_adapter_rel(vendor)}" --gate "{root}{_stop_rel(policy_id)}/{GATE_FILE}"'
+        if vendor == "claude_code":
+            dest, doc = output_dir / STOP_FRAGMENT, hook_entry(command)
+        else:
+            dest, doc = output_dir / f"{vendor}-hooks.json", vendors.stop_hook_config(vendor, command)
+        write_generated_json(dest, doc)
+        written.append(dest)
+    return written
+
+
+def emit_stop(policy_dir: Path, output_dir: Path, manifest: dict[str, Any]) -> list[Path]:
+    """Write the end-of-turn fragments for a policy whose gate can judge what a turn wrote.
+
+    Gate-only, deliberately: the shell half of `pre-tool-use` judges a command, and a
+    finished turn has none to judge. A policy carrying only a guard script emits nothing
+    here rather than a hook that would have nothing to look at.
+    """
+    policy_id = str(manifest.get("id", policy_dir.name))
+    spec = _tool_use_gate(policy_dir, output_dir)
+    if spec is None:
+        return []
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return _stop_fragments(policy_id, spec, output_dir)
+
+
 def emit_pre_tool_use(policy_dir: Path, output_dir: Path, manifest: dict[str, Any]) -> list[Path]:
     """Write the pre-tool-use fragments: a shell guard's, a content gate's, or neither."""
     policy_id = manifest.get("id", policy_dir.name)
@@ -240,4 +289,5 @@ def emit_agent_hooks(policy_dir: Path, output_dir: Path, manifest: dict[str, Any
 
 
 pre_tool_use = SimpleNamespace(emit=emit_pre_tool_use)
+stop = SimpleNamespace(emit=emit_stop)
 agent_hooks = SimpleNamespace(emit=emit_agent_hooks)

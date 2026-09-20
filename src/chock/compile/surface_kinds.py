@@ -16,6 +16,7 @@ class Surface(str, Enum):
     GIT_HOOK = "git-hook"
     CI_GATE = "ci-gate"
     PRE_TOOL_USE = "pre-tool-use"
+    STOP = "stop"
     MANAGED_SETTING = "managed-setting"
     GATEWAY = "gateway"
     MCP_GATEWAY = "mcp-gateway"

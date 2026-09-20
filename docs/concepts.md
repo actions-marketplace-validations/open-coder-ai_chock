@@ -63,7 +63,7 @@ agent is capable of: a surface that emits no file, or that nothing installs, rai
 
 The four in-agent levels form an ordered ladder — `best-effort` ‹ `fail-to-ask` ‹
 `enforceable` ‹ `enforced` — derived from the host's fail mode and the control's own
-degradation. See [Enforcement Surfaces](enforcement-surfaces.md#coverage-levels) for the
+degradation. See [Coverage Levels](coverage-levels.md) for the
 ordering axis and why chock's own in-agent control sits at the bottom of it.
 
 - **`enforced`** — a hard, pre-execution in-agent control that fails CLOSED: a crashed hook

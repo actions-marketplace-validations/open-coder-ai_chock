@@ -71,15 +71,27 @@ def test_no_module_level_import_cycle() -> None:
     assert not found, "import cycle(s): " + "; ".join(" -> ".join(c) for c in found)
 
 
-def test_the_check_would_notice_the_cycle_it_was_written_for() -> None:
-    """A checker that only ever reports zero is not a checker. This is the edge that was cut.
+#: The two edges whose removal cut the cycle CodeQL found. Restoring BOTH is what rebuilds
+#: it: `config` imported `compile.surfaces` for the Surface enum and the agent names, and
+#: `surfaces` imported the installer for AGENT_HOOKS_VENDORS; the installer reaches the
+#: in-agent emitter, and from there the gate builder reaches `config` again. The enum now
+#: lives in a leaf, config takes its agent names from the vendor table, and the vendor list
+#: is recorded beside the other install caps.
+CUT_EDGES = {
+    "chock.config": {"chock.compile.surfaces"},
+    "chock.compile.surfaces": {"chock.hooks.in_agent_install"},
+}
 
-    chock.config used to import chock.compile.surfaces for the Surface enum and the agent
-    names; surfaces reaches the installer, the installer the in-agent emitter, and from there
-    the gate builder reaches config again. The enum now lives in a leaf and config takes its
-    agent names from the vendor table.
-    """
-    graph = import_graph({"chock.config": {"chock.compile.surfaces"}})
-    found = cycles(graph)
-    assert found, "restoring the removed edge must reproduce a cycle"
+
+def test_the_check_would_notice_the_cycle_it_was_written_for() -> None:
+    """A checker that only ever reports zero is not a checker. These are the edges that were cut."""
+    found = cycles(import_graph(CUT_EDGES))
+    assert found, "restoring the removed edges must reproduce a cycle"
     assert any("chock.config" in c and "chock.compile.surfaces" in c for c in found)
+
+
+def test_each_cut_edge_is_still_absent() -> None:
+    """The fixture above only proves anything while the edges it restores are genuinely gone."""
+    graph = import_graph()
+    still_there = [f"{src} -> {dst}" for src, dsts in CUT_EDGES.items() for dst in dsts if dst in graph.get(src, ())]
+    assert not still_there, "the cycle fixture restores edge(s) the code already has: " + ", ".join(still_there)
