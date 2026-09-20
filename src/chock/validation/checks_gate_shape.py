@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from chock.gate.runner import KINDS
@@ -57,4 +58,21 @@ def _validate_gate(gate: dict[str, Any], gate_ref: str, report: Report, *, tool_
                     "error",
                     f"{exc.message} at {path_str}",
                 )
+            )
+        _validate_regex_params(params, gate_ref, report)
+
+
+_REGEX_PARAM_SUFFIXES = ("_pattern", "_regex", "_pragma")
+
+
+def _validate_regex_params(params: dict[str, Any], gate_ref: str, report: Report) -> None:
+    """A pattern that does not compile is found at validate, not by the first commit it guards."""
+    for name, value in params.items():
+        if not (isinstance(value, str) and name.endswith(_REGEX_PARAM_SUFFIXES)):
+            continue
+        try:
+            re.compile(value)
+        except re.error as exc:
+            report.add(
+                Finding(f"{gate_ref} (params)", _CATEGORY, "error", f"{name} is not a valid regular expression: {exc}")
             )
