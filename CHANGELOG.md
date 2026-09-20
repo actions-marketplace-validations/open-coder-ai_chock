@@ -1,6 +1,6 @@
 # Chock changelog
 
-## Unreleased
+## 0.9.1 — The suite passes on Windows, a policy-less repo keeps its runtime, and a pull request may not weaken the policy set
 
 - **Fixed: Windows.** The `v0.9.0` tag ran the full matrix and every Windows `validate` job
   failed at the test step, on fifteen tests, while Linux was green -- the release shipped on
