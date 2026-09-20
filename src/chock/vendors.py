@@ -86,6 +86,24 @@ def shell_matcher(vendor: str) -> str | None:
     return "|".join(tools) if tools else None
 
 
+def write_tools(vendor: str) -> tuple[str, ...]:
+    """The vendor's recorded file-writing tool vocabulary, empty where none is recorded.
+
+    agentseam records `tools.shell` for most vendors and `tools.write` for few, so this is
+    empty far more often than shell_tools is. Empty means unrecorded, never "no such tools":
+    a matcher invented here would gate a tool name nobody verified the vendor uses.
+    """
+    config = getattr(_adapters.get(vendor), "CONFIG", None)
+    tools = (config or {}).get("tools") if isinstance(config, dict) else None
+    return tuple((tools or {}).get("write") or ())
+
+
+def write_matcher(vendor: str) -> str | None:
+    """Matcher over the vendor's recorded write-tool vocabulary, or None where unrecorded."""
+    tools = write_tools(vendor)
+    return "|".join(tools) if tools else None
+
+
 def pre_tool_hook_config(vendor: str, command: str, matcher: str | None = None) -> dict[str, Any]:
     """The vendor's complete hook-config document gating pre-tool with `command`."""
     return _adapters.get(vendor).hook_config((_contract.PRE_TOOL,), command, matcher)

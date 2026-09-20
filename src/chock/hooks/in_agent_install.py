@@ -72,7 +72,9 @@ class _Wiring(NamedTuple):
 
 _MERGED = {
     "claude_code": _Wiring(
-        fragment_glob="*/pre-tool-use/pretooluse.json",
+        # pretooluse*.json, not pretooluse.json: a policy contributes a shell entry, a
+        # content entry, or both, and the merge loop already handles several fragments.
+        fragment_glob="*/pre-tool-use/pretooluse*.json",
         flat=False,
         unlink_runtime_when_empty=True,
         write_when_absent=True,
