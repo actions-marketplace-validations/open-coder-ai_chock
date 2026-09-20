@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -189,6 +191,37 @@ def check_release_consistency(root: Path, report: Report) -> None:
                     f"Top CHANGELOG entry {match.group(1)} != pyproject version {version}.",
                 )
             )
+
+
+def check_gate_log_untracked(root: Path, report: Report) -> None:
+    """The gate outcome log is per machine and grows on every commit; committed, it is churn."""
+    tracked = _tracked_under(root, ".chock/log")
+    if not tracked:
+        return
+    report.add(
+        Finding(
+            str(root / ".chock" / "log"),
+            "gate_log_tracked",
+            "warning",
+            f"{len(tracked)} gate log file(s) are committed ({', '.join(tracked[:3])}). The log records "
+            "this machine's verdicts and changes on every commit. Run `git rm --cached -r .chock/log` "
+            "and add `.chock/log/` to .gitignore; `chock init` writes that rule.",
+        )
+    )
+
+
+def _tracked_under(root: Path, rel: str) -> list[str]:
+    """Paths git tracks under `rel`, or [] outside a repository or when git is absent."""
+    git = shutil.which("git")
+    if git is None:
+        return []
+    result = subprocess.run(  # noqa: S603 -- asking git what it tracks is this check's whole job
+        [git, "-C", str(root), "ls-files", "--", rel],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.stdout.split() if result.returncode == 0 else []
 
 
 def check_ambient_token_budget(root: Path, report: Report) -> None:

@@ -96,7 +96,27 @@ def _write_config(repo_root: Path, agents: list[str], *, agent_agnostic: bool) -
     allowlist = path.parent / "dependency-allowlist.txt"
     if not allowlist.exists():
         allowlist.write_text(_dependency_allowlist_template(), encoding="utf-8")
+    _ignore_gate_log(repo_root)
     return path
+
+
+GATE_LOG_IGNORE = ".chock/log/"
+
+
+def _ignore_gate_log(repo_root: Path) -> None:
+    """Keep the per-machine gate outcome log out of the adopter's commits.
+
+    Every git hook appends to it, so an adopter who ran `git add -A` after `chock init`
+    committed a file that then changed on every commit they made. Appended once, never
+    rewritten: an existing rule, in any form git already honours, is left alone.
+    """
+    gitignore = repo_root / ".gitignore"
+    existing = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
+    if any(line.strip().rstrip("/") == GATE_LOG_IGNORE.rstrip("/") for line in existing.splitlines()):
+        return
+    block = f"# chock: the gate outcome log is per machine and grows on every commit\n{GATE_LOG_IGNORE}\n"
+    joiner = "" if not existing or existing.endswith("\n") else "\n"
+    write_generated(gitignore, existing + joiner + block)
 
 
 def _normalize_agents(args_agents: list[str] | None, *, agent_agnostic: bool, repo_root: Path) -> list[str]:

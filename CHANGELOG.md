@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **Fixed: Windows.** The `v0.9.0` tag ran the full matrix and every Windows `validate` job
+  failed at the test step, on fifteen tests, while Linux was green -- the release shipped on
+  that evidence. Two were the engine's: the vendored runtime was written in text mode, so
+  Windows got CRLF and `chock sync --check` reported every `.chock/bin/<vendor>.py` as
+  differing (and `chock validate` failed on the same drift); the matrix skip note printed a
+  Windows path. The rest were the tests': two searched JSON text for a backslash interpreter
+  path, one stringified a `Path`, and two ran `bash`, which on a Windows runner resolves to
+  System32's WSL launcher rather than Git Bash. `hooks/runtime_vendor.py` now writes LF on
+  every platform (`tests/test_sessionstart_arm.py` pins it); `tests/conftest.py` locates Git
+  Bash beside `git` on Windows.
+
+- **`chock init` keeps the gate outcome log out of the adopter's commits.** Every git hook
+  appends to `.chock/log/gate-events.jsonl`, and `init` never ignored it, so an adopter who
+  ran `git add -A` after onboarding committed a per-machine log that then changed on every
+  commit they made (chock-mise had 38 records committed). `init` now appends `.chock/log/` to
+  `.gitignore` once, respecting any rule already there; `chock validate` warns when the log
+  is tracked anyway and says how to untrack it (`check_gate_log_untracked()`).
+
 - **Fixed: a repo with no policies lost the runtime its session-start hook runs.** `chock sync`
   installs the arm hook first, which vendors `.chock/bin/claude_code.py` and points
   `SessionStart` at it, then the pre-tool/stop installer for the same file found no fragments

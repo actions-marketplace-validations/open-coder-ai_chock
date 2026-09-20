@@ -49,7 +49,8 @@ chock init .
 `init` is fully deterministic — no AI agent required. It:
 
 - creates `.chock/` (config + lockfile + `dependency-allowlist.txt`) and an empty `.agents/policies/`,
-- writes `AGENTS.md`, a `.gitattributes` pinning generated scripts to LF, the agent wrapper files
+- writes `AGENTS.md`, a `.gitattributes` pinning generated scripts to LF, a `.gitignore` rule for
+  the per-machine gate log (`.chock/log/`), the agent wrapper files
   (`.claude/CLAUDE.md`, `.cursor/rules/…`, `.github/copilot-instructions.md`, …), and the
   guardrail pairs `.agents/policies/{AGENTS.md,CLAUDE.md}` and `.agents/skills/{AGENTS.md,CLAUDE.md}`,
 - installs the four authoring skills (`policy-init`, `validate`, `eval`, `optimize`) into
