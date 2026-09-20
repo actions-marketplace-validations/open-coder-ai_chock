@@ -18,7 +18,7 @@ import palette as p
 from chock.compile.surfaces import SURFACE_AGENTS, Surface
 from chock.vendors import CHOCK_AGENT
 
-W, H = 760, 500
+W, H = 760, 640
 NAME, COUNT, TIER = 13, 12, 12
 
 #: Tier index into `palette.ENFORCEMENT`, or None for a surface no agent currently reaches
@@ -28,6 +28,7 @@ TIER_INDEX = {
     Surface.GIT_HOOK: 1,
     Surface.CI_GATE: 1,
     Surface.PRE_TOOL_USE: 2,
+    Surface.STOP: 2,
     Surface.AGENT_HOOKS: 2,
     Surface.MANAGED_SETTING: None,
     Surface.GATEWAY: None,
@@ -40,6 +41,7 @@ PHRASE = {
     Surface.GIT_HOOK: "enforced at commit",
     Surface.CI_GATE: "enforced at commit",
     Surface.PRE_TOOL_USE: "enforced in-agent",
+    Surface.STOP: "backstop, no grade",
     Surface.AGENT_HOOKS: "enforced in-agent",
     Surface.MANAGED_SETTING: "compiled, not installed",
     Surface.GATEWAY: "modelled, not emitted",
@@ -48,15 +50,24 @@ PHRASE = {
 
 TIER_NAME = ("advisory", "enforced at commit", "enforced in-agent")
 
-#: Reading order: the four surfaces every agent (or most) reach, then the four named for
-#: honesty even though today either two agents (agent-hooks) or none reach them.
-ROW1 = [Surface.AMBIENT_RULE, Surface.GIT_HOOK, Surface.CI_GATE, Surface.PRE_TOOL_USE]
-ROW2 = [Surface.AGENT_HOOKS, Surface.MANAGED_SETTING, Surface.GATEWAY, Surface.MCP_GATEWAY]
 
-COLS = [104, 288, 472, 656]  # column centres; 168-wide boxes, 16px gaps, 20px margins
-BOX_W, BOX_H = 168, 100
-ROW1_Y, ROW2_Y = 150, 290
-BUS1_Y, BUS2_Y = 115, 270
+#: Reading order, three rows that each mean something: the floor every agent gets, the
+#: in-agent surfaces, and the ones named for honesty though no agent reaches them today.
+ROW1 = [Surface.AMBIENT_RULE, Surface.GIT_HOOK, Surface.CI_GATE]
+ROW2 = [Surface.PRE_TOOL_USE, Surface.STOP, Surface.AGENT_HOOKS]
+ROW3 = [Surface.MANAGED_SETTING, Surface.GATEWAY, Surface.MCP_GATEWAY]
+ROWS = (ROW1, ROW2, ROW3)
+
+COLS = [140, 380, 620]  # column centres; 224-wide boxes, 16px gaps, 20px margins
+BOX_W, BOX_H = 224, 100
+ROW_Y = (150, 290, 430)
+BUS_Y = (115, 270, 410)
+
+_drawn = [_s for _row in ROWS for _s in _row]
+if sorted(_drawn, key=list(Surface).index) != list(Surface):
+    _msg = f"the rows above draw {[s.value for s in _drawn]}, not every surface exactly once"
+    raise AssertionError(_msg)
+del _drawn
 POLICY_X, POLICY_Y, POLICY_W, POLICY_H = 20, 20, 720, 70
 
 
@@ -100,15 +111,20 @@ def render(t, _name):
         W,
         H,
         t,
-        "One policy, eight surfaces",
-        "A fan-out diagram: one chock policy compiles into eight enforcement surfaces. "
-        "All 15 supported agent names get the advisory ambient rule and the two commit-time "
-        "gates, git hook and CI gate. 9 also get a native pre-tool-use hook, enforced live in "
-        "the agent, and 2 (vscode, copilot -- one underlying vendor) get chock's own "
-        "agent-hooks file, also enforced in-agent. Three surfaces are named for honesty though "
-        "no agent reaches them yet: managed-setting is compiled for Claude but not installed, "
-        "gateway is modelled but not emitted, and mcp-gateway emits but is not yet credited to "
-        "any agent.",
+        f"One policy, {len(Surface)} surfaces",
+        # Every count is _surface_count, never typed: a surface that gains or loses an agent
+        # moves the picture and the words a screen reader hears in the same commit.
+        f"A fan-out diagram: one chock policy compiles into {len(Surface)} enforcement surfaces. "
+        f"All {n_names} supported agent names get the advisory ambient rule and the two "
+        f"commit-time gates, git hook and CI gate. {_surface_count(Surface.PRE_TOOL_USE)} also "
+        "get a native pre-tool-use hook, enforced live in the agent, and "
+        f"{_surface_count(Surface.AGENT_HOOKS)} (vscode, copilot -- one underlying vendor) get "
+        f"chock's own agent-hooks file, also enforced in-agent. {_surface_count(Surface.STOP)} "
+        "get an end-of-turn hook that reads what the turn wrote: a backstop for what a pre-tool "
+        "hook cannot see, carrying no coverage grade of its own. Three surfaces are named for "
+        "honesty though no agent reaches them yet: managed-setting is compiled for Claude but "
+        "not installed, gateway is modelled but not emitted, and mcp-gateway emits but is not "
+        "yet credited to any agent.",
     )
 
     svg += p.box(POLICY_X, POLICY_Y, POLICY_W, POLICY_H, t["surface"], a)
@@ -122,17 +138,15 @@ def render(t, _name):
     )
 
     cx = (COLS[0] + COLS[-1]) / 2
-    svg += _wire(cx, POLICY_Y + POLICY_H, cx, BUS1_Y, a)
-    svg += _wire(COLS[0], BUS1_Y, COLS[-1], BUS1_Y, a)
-    for x, surface in zip(COLS, ROW1, strict=True):
-        svg += _node(x, ROW1_Y, surface, t)
+    previous = POLICY_Y + POLICY_H
+    for row, bus_y, row_y in zip(ROWS, BUS_Y, ROW_Y, strict=True):
+        svg += _wire(cx, previous, cx, bus_y, a)
+        svg += _wire(COLS[0], bus_y, COLS[-1], bus_y, a)
+        for x, surface in zip(COLS, row, strict=True):
+            svg += _node(x, row_y, surface, t)
+        previous = bus_y
 
-    svg += _wire(cx, BUS1_Y, cx, BUS2_Y, a)
-    svg += _wire(COLS[0], BUS2_Y, COLS[-1], BUS2_Y, a)
-    for x, surface in zip(COLS, ROW2, strict=True):
-        svg += _node(x, ROW2_Y, surface, t)
-
-    legend_y = 410
+    legend_y = 550
     svg += p.text(20, legend_y, "Fill:", t["secondary"], 12, weight="600")
     lx = 70
     for i, label in enumerate(TIER_NAME):

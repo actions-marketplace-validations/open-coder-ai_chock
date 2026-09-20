@@ -42,6 +42,7 @@ EMITTERS: dict[Surface, Any] = {
     Surface.GIT_HOOK: git_hook,
     Surface.CI_GATE: ci,
     Surface.PRE_TOOL_USE: in_agent.pre_tool_use,
+    Surface.STOP: in_agent.stop,
     Surface.MANAGED_SETTING: claude_managed,
     Surface.AMBIENT_RULE: ambient,
     Surface.MCP_GATEWAY: mcp_gateway,

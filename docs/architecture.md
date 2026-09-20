@@ -32,7 +32,7 @@ an ordered ladder — `enforced` › `enforceable` › `fail-to-ask` › `best-e
 controls, plus `enforced-at-commit`, `advisory` and `none` — so a guarantee is never a guess.
 Each grade is derived from the mechanism (what the agent does with our verdict, what it does
 when our hook dies, and what our own guard says when it cannot decide), never asserted per
-agent. See [Enforcement Surfaces](enforcement-surfaces.md#coverage-levels).
+agent. See [Coverage Levels](coverage-levels.md).
 
 ### 3. Enforce
 

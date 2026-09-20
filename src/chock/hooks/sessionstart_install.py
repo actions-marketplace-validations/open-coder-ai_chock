@@ -9,11 +9,11 @@ from agentseam import contract as _contract
 
 from chock import vendors
 from chock.emit import write_generated_json
-from chock.hooks.in_agent_install import (
+from chock.hooks.in_agent_merged import (
     INTERPRETER_PLACEHOLDER,
-    _bake_interpreter,
-    _interpreter_runs_here,
-    _normalize_fragment,
+    bake_interpreter,
+    interpreter_runs_here,
+    normalize_fragment,
 )
 from chock.hooks.runtime_vendor import owned_markers, runtime_rel, vendor_runtime
 from chock.output import warn
@@ -67,14 +67,14 @@ def install_sessionstart_hook(repo_root: Path) -> bool:
     ours_before = [e for e in existing if _is_ours(e)] if isinstance(existing, list) else []
     kept = [e for e in existing if not _is_ours(e)] if isinstance(existing, list) else []
 
-    wanted = _normalize_fragment(ARM_FRAGMENT)
+    wanted = normalize_fragment(ARM_FRAGMENT)
     install_form = None
     for entry in ours_before:
-        if _normalize_fragment(entry) == wanted and _interpreter_runs_here(entry):
+        if normalize_fragment(entry) == wanted and interpreter_runs_here(entry):
             install_form = entry
             break
     if install_form is None:
-        install_form = _bake_interpreter(ARM_FRAGMENT)
+        install_form = bake_interpreter(ARM_FRAGMENT)
 
     vendor_adapter(repo_root)
 

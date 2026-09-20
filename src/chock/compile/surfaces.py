@@ -2,25 +2,29 @@
 
 from __future__ import annotations
 
-from enum import Enum
-
-from chock.compile.levels import IN_AGENT_TODAY, Grade, _matrix_can_block, in_agent_grade
-from chock.hooks.in_agent_install import AGENT_HOOKS_VENDORS
-from chock.vendors import CHOCK_AGENT
+from chock.compile.levels import (
+    IN_AGENT_TODAY,
+    STOP_TODAY,
+    Grade,
+    _matrix_can_block,
+    _stop_can_block,
+    in_agent_grade,
+)
+from chock.compile.surface_kinds import Surface
+from chock.vendors import AGENT_HOOKS_VENDORS, CHOCK_AGENT
 
 #: Shared by every CLI subcommand that takes a required, non-empty `--agents` option.
 AGENTS_ARG_REQUIRED_MSG = "--agents requires at least one agent name"
 
 
-class Surface(str, Enum):
-    AMBIENT_RULE = "ambient-rule"
-    GIT_HOOK = "git-hook"
-    CI_GATE = "ci-gate"
-    PRE_TOOL_USE = "pre-tool-use"
-    MANAGED_SETTING = "managed-setting"
-    GATEWAY = "gateway"
-    MCP_GATEWAY = "mcp-gateway"
-    AGENT_HOOKS = "agent-hooks"
+#: Re-exported: every caller still reaches the vocabulary through this module.
+__all__ = [
+    "AGENTS_ARG_REQUIRED_MSG",
+    "INSTALLED_SURFACES",
+    "SURFACE_AGENTS",
+    "UNCREDITED_SURFACES",
+    "Surface",
+]
 
 
 #: Derived, never hand-rowed: every aliased agent gets the advisory floor, claude keeps
@@ -43,8 +47,30 @@ for _agent in IN_AGENT_TODAY:
     SURFACE_AGENTS[_agent].add(_surface)
 del _agent, _surface
 
+#: Derived from the matrix asking about the turn-end event, not inherited from the pre-tool
+#: answer: cursor, grok and windsurf can observe a finished turn but not refuse one, and
+#: three of the agents here have no write vocabulary recorded, so neither set contains the
+#: other. `stop` takes no matcher, so no vendor is held back for want of a tool vocabulary;
+#: vscode_copilot is held back for want of a witnessed key (chock.vendors.stop_vendors).
+for _agent in STOP_TODAY:
+    if not _stop_can_block(_agent):  # pragma: no cover - membership already derives from can_block
+        _msg = (
+            f"agentseam's matrix no longer confirms {_agent!r} can refuse a finished turn; "
+            "stop membership must be re-derived, not silently kept"
+        )
+        raise AssertionError(_msg)
+    SURFACE_AGENTS[_agent].add(Surface.STOP)
+del _agent
 
-INSTALLED_SURFACES: set[Surface] = {Surface.GIT_HOOK, Surface.CI_GATE, Surface.AMBIENT_RULE}
+
+INSTALLED_SURFACES: set[Surface] = {Surface.GIT_HOOK, Surface.CI_GATE, Surface.AMBIENT_RULE, Surface.STOP}
+
+#: Surfaces that run, and refuse, but are deliberately worth no coverage word. `stop` sees
+#: what a turn left on disk -- after every tool call in it has already run -- so it catches
+#: what the write path structurally cannot see (a heredoc carries no file argument) and
+#: catches nothing sooner. Crediting it would let a policy read as covered on an agent where
+#: the only thing standing between a bad write and the commit is a backstop that fires late.
+UNCREDITED_SURFACES: set[Surface] = {Surface.STOP}
 
 
 def coverage_cell(
@@ -57,7 +83,7 @@ def coverage_cell(
 ) -> Grade:
     """The enforcement level a policy achieves on an agent, with the evidence bounding it."""
     supported = SURFACE_AGENTS.get(agent, set())
-    active = emitted & supported if supported else set()
+    active = (emitted & supported) - UNCREDITED_SURFACES if supported else set()
     if not active:
         return Grade("none", None, witnessed=False)
 

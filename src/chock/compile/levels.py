@@ -9,7 +9,7 @@ from agentseam import matrix as _matrix
 from agentseam import matrix_terms as _terms
 
 from chock import evidence
-from chock.vendors import CHOCK_AGENT, in_agent_vendors
+from chock.vendors import CHOCK_AGENT, in_agent_vendors, stop_vendors
 
 #: Chock agents with an in-agent pre-tool surface. A narrower concept than `CHOCK_AGENT`
 #: (adapter-instruction coverage): derived by scoping the alias table to the vendors the
@@ -26,6 +26,19 @@ def _matrix_can_block(chock_agent: str) -> bool:
     """Whether agentseam's verified matrix confirms `chock_agent` can block a pre-tool call."""
     mapped = _mapped_vendor(chock_agent)
     return bool(mapped) and _matrix.can_block(mapped, _contract.PRE_TOOL)
+
+
+#: Chock agents whose client can REFUSE a finished turn, not merely observe one. Derived
+#: the same way IN_AGENT_TODAY is, asking the matrix about the turn-end event instead --
+#: a different question with a different answer, so it gets its own derivation rather than
+#: inheriting the pre-tool one.
+STOP_TODAY = tuple(sorted(a for a, v in CHOCK_AGENT.items() if v in stop_vendors()))
+
+
+def _stop_can_block(chock_agent: str) -> bool:
+    """Whether agentseam's verified matrix confirms `chock_agent` can refuse a finished turn."""
+    mapped = CHOCK_AGENT.get(chock_agent) if chock_agent in STOP_TODAY else None
+    return bool(mapped) and _matrix.can_block(mapped, _contract.STOP)
 
 
 DISABLED = "disabled"
