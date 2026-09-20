@@ -17,6 +17,28 @@ CONFIG_REL = Path(".chock") / "config.yaml"
 _CATEGORY = "policy_baseline"
 
 
+class BaselineError(RuntimeError):
+    """The comparison cannot be made, which is not the same as passing it."""
+
+
+def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(  # noqa: S603 -- reading a git revision is this check's whole job
+        ["git", "-C", str(repo_root), *args],  # noqa: S607 -- git from PATH
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _parse(text: str, where: str) -> dict[str, Any]:
+    try:
+        loaded = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        msg = f"{CONFIG_REL.as_posix()} at {where} is not valid YAML: {exc}"
+        raise BaselineError(msg) from exc
+    return loaded if isinstance(loaded, dict) else {}
+
+
 @dataclass(frozen=True)
 class Weakening:
     """One policy this branch enforces less of than its base does."""
@@ -30,17 +52,12 @@ class Weakening:
 
 
 def config_at(repo_root: Path, ref: str) -> dict[str, Any] | None:
-    """The config as of `ref`, or None when that revision carried none."""
-    result = subprocess.run(  # noqa: S603 -- reading a git revision is this check's whole job
-        ["git", "-C", str(repo_root), "show", f"{ref}:{CONFIG_REL.as_posix()}"],  # noqa: S607 -- git from PATH
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        return None
-    loaded = yaml.safe_load(result.stdout)
-    return loaded if isinstance(loaded, dict) else {}
+    """The config as of `ref`, or None when that revision carried none. A ref that does not resolve raises."""
+    if _git(repo_root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").returncode != 0:
+        msg = f"base ref {ref!r} does not resolve in this checkout; fetch it before comparing against it"
+        raise BaselineError(msg)
+    result = _git(repo_root, "show", f"{ref}:{CONFIG_REL.as_posix()}")
+    return _parse(result.stdout, ref) if result.returncode == 0 else None
 
 
 def config_in_worktree(repo_root: Path) -> dict[str, Any] | None:
@@ -48,8 +65,7 @@ def config_in_worktree(repo_root: Path) -> dict[str, Any] | None:
     path = Path(repo_root) / CONFIG_REL
     if not path.is_file():
         return None
-    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
-    return loaded if isinstance(loaded, dict) else {}
+    return _parse(path.read_text(encoding="utf-8"), "HEAD")
 
 
 def _named(config: dict[str, Any] | None) -> set[str]:
@@ -78,7 +94,7 @@ def weakenings(base: dict[str, Any] | None, head: dict[str, Any] | None) -> list
     for policy_id in sorted(_named(base) | _named(head)):
         base_rank, base_targets, was = _reach(base, policy_id)
         head_rank, head_targets, now = _reach(head, policy_id)
-        if head_rank < base_rank or (head_rank == base_rank and head_targets < base_targets):
+        if head_rank < base_rank or (head_rank == base_rank and not head_targets >= base_targets):
             found.append(Weakening(policy_id, was, now))
     return found
 
@@ -86,7 +102,12 @@ def weakenings(base: dict[str, Any] | None, head: dict[str, Any] | None) -> list
 def check_baseline(repo_root: Path, base: str, report: Report) -> None:
     """One error per policy `.chock/config.yaml` weakens relative to `base`."""
     repo_root = Path(repo_root)
-    for weakening in weakenings(config_at(repo_root, base), config_in_worktree(repo_root)):
+    try:
+        found = weakenings(config_at(repo_root, base), config_in_worktree(repo_root))
+    except BaselineError as exc:
+        report.add(Finding(str(repo_root / CONFIG_REL), _CATEGORY, "error", f"{exc} -- nothing was compared"))
+        return
+    for weakening in found:
         report.add(
             Finding(
                 str(repo_root / CONFIG_REL),

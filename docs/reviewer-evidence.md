@@ -113,7 +113,7 @@ Five judgements, in order, stopping at the first that fails:
 | 1 | Present | no evidence file matches the head's `diff_sha` |
 | 2 | Valid | `chock review verify` returns failures |
 | 3 | Sufficient | the evidence's `command_set_hash` does not match this repository's `required_checks`, hashed from repo config right now |
-| 4 | Passing | any required check is recorded `fail` |
+| 4 | Passing | any check is recorded `fail`, required or not |
 | 5 | Attested | the diff touches an `unattestable` path with fewer than `attestation_floor` attestations |
 
 Every failure names the exact `chock review emit` command to run next, or which line of the
@@ -141,6 +141,12 @@ chock:
 
 `required_checks` and `attestation_floor` both default to "off" (empty set, no floor) -- the same
 judgement that is silent when nothing is declared stays silent, exactly like `unattestable_paths`.
+
+A pull request edits `.chock/config.yaml` like any other file, so `emit`, `verify` and `require`
+judge by the **stricter of the base branch's policy and the head's**, per setting: the required
+set and `unattestable_paths` are the union, `attestation_floor` the higher, and a check both
+define runs as the base defines it. Tightening in a PR applies at once; loosening applies after
+it merges, in a PR a human approves for that reason (`review/policy.py`).
 `applies_to` is not enforced by `require` itself; it is there for your own workflow's `if:` condition
 (§docs/adopting.md), because requiring evidence from everyone is friction that lands on volunteers.
 

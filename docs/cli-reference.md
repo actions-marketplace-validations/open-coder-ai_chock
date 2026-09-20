@@ -40,7 +40,7 @@ preserves any scaffolded file you have edited (reported as `[KEPT]`); `--force` 
 ### `add` — install a policy or skill from a catalog
 
 ```bash
-chock add <id> [--repo .] [--from URL_OR_PATH] [--ref BRANCH_OR_TAG]
+chock add <id> [--repo .] [--from URL_OR_PATH] [--ref REF]
                [--verify-sha SHA256] [--force] [--skip-compile]
 ```
 
@@ -50,7 +50,7 @@ local path, which is what CI and offline installs use.
 
 | Flag | What it does |
 | :--- | :--- |
-| `--ref` | Pin the fetch to a branch or tag. Without it, `add` resolves the catalog's **default branch**. |
+| `--ref` | Pin the fetch to a branch, tag or commit id (a local path too). Without it, `add` resolves the catalog's **default branch**. |
 | `--verify-sha` | Refuse to install unless the fetched artifact hashes to this value. Checked *before* anything is written. |
 | `--force` | Replace an artifact that is already installed. Refused by default — installed content is yours. |
 | `--skip-compile` | Copy only; run `chock sync` yourself afterwards. |
@@ -82,13 +82,13 @@ chock sync --skills   # also install the bundled authoring skills
 ```
 
 The one "make it so" verb (`uv sync` semantics): recompiles every enabled policy from
-`.chock/config.yaml` into `.chock/compiled/`, reinstalls the git-hook dispatchers and
-policy wrappers, regenerates `INDEX.md` and the `AGENTS.md` pointer, refreshes the
-registry, and rewrites `chock.lock`. Run it after editing a policy, toggling config by
-hand, or bumping the engine version. A failed recompile never removes the existing
-compiled tree — the build is staged and swapped in only on success — and a
-lockfile-write failure fails the command. An adopter-edited dispatcher is backed up to
-`<event>.chock-backup` before being regenerated; custom steps belong in `<event>.d/`.
+`.chock/config.yaml` into `.chock/compiled/`, reinstalls the git-hook dispatchers, policy wrappers
+and the in-agent hooks of the agents `supported_agents` names (no other vendor's config file is
+written), regenerates `INDEX.md` and the `AGENTS.md` pointer, refreshes the registry, and rewrites
+`chock.lock`. Run it after editing a policy, toggling config by hand, or bumping the engine version.
+A failed recompile never removes the existing compiled tree — the build is staged and swapped in
+only on success — and a lockfile-write failure fails the command. An adopter-edited dispatcher is
+backed up to `<event>.chock-backup` before being regenerated; custom steps belong in `<event>.d/`.
 
 - `--check` — write nothing; exit non-zero listing every compiled artifact that no longer
   matches its manifest. This is the CI drift gate.
