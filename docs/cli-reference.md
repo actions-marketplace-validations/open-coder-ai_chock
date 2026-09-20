@@ -82,13 +82,13 @@ chock sync --skills   # also install the bundled authoring skills
 ```
 
 The one "make it so" verb (`uv sync` semantics): recompiles every enabled policy from
-`.chock/config.yaml` into `.chock/compiled/`, reinstalls the git-hook dispatchers and
-policy wrappers, regenerates `INDEX.md` and the `AGENTS.md` pointer, refreshes the
-registry, and rewrites `chock.lock`. Run it after editing a policy, toggling config by
-hand, or bumping the engine version. A failed recompile never removes the existing
-compiled tree — the build is staged and swapped in only on success — and a
-lockfile-write failure fails the command. An adopter-edited dispatcher is backed up to
-`<event>.chock-backup` before being regenerated; custom steps belong in `<event>.d/`.
+`.chock/config.yaml` into `.chock/compiled/`, reinstalls the git-hook dispatchers, policy wrappers
+and the in-agent hooks of the agents `supported_agents` names (no other vendor's config file is
+written), regenerates `INDEX.md` and the `AGENTS.md` pointer, refreshes the registry, and rewrites
+`chock.lock`. Run it after editing a policy, toggling config by hand, or bumping the engine version.
+A failed recompile never removes the existing compiled tree — the build is staged and swapped in
+only on success — and a lockfile-write failure fails the command. An adopter-edited dispatcher is
+backed up to `<event>.chock-backup` before being regenerated; custom steps belong in `<event>.d/`.
 
 - `--check` — write nothing; exit non-zero listing every compiled artifact that no longer
   matches its manifest. This is the CI drift gate.

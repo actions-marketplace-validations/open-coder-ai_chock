@@ -20,6 +20,7 @@ from chock.output import warn
 from chock.policies import discover_policy_dirs
 from chock.registry.core import save_registry, scan
 from chock.vendored import vendored_differences
+from chock.vendors import CHOCK_AGENT
 
 
 class BookkeepingError(RuntimeError):
@@ -51,6 +52,12 @@ def _compile_all(repo_root: Path, agents: list[str], compiled_root: Path) -> dic
             coverage[policy_id] = result.coverage[policy_id]
 
     return coverage
+
+
+def wired_vendors(agents: list[str]) -> tuple[str, ...]:
+    """The in-agent vendors `sync` wires: those the repo's agent list names, and no other's config file."""
+    chosen = {CHOCK_AGENT[a] for a in agents if a in CHOCK_AGENT}
+    return tuple(v for v in WIRED_VENDORS if v in chosen)
 
 
 def compiled_differences(repo_root: Path | str, agents: list[str]) -> list[str]:
@@ -153,17 +160,18 @@ def recompile(repo_root: Path | str, agents: list[str], *, skip_hooks: bool = Fa
     if not skip_hooks:
         install_policy_hooks(repo_root, get_hooks_dir(repo_root))
 
+        wired = wired_vendors(agents)
         try:
-            if install_sessionstart_hook(repo_root):
+            if CHOCK_AGENT["claude"] in wired and install_sessionstart_hook(repo_root):
                 print("Registered SessionStart arm hook in .claude/settings.json")
         except ValueError as exc:
             warn(str(exc))
 
         def _witness() -> tuple[set[str], ...]:
-            return tuple(installed_policy_ids(repo_root, vendor) for vendor in WIRED_VENDORS)
+            return tuple(installed_policy_ids(repo_root, vendor) for vendor in wired)
 
         before = _witness()
-        for vendor in WIRED_VENDORS:
+        for vendor in wired:
             try:
                 installed = install_hooks(repo_root, vendor)
             except ValueError as exc:
