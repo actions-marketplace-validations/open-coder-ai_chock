@@ -1,6 +1,71 @@
 # Chock changelog
 
-## Unreleased
+## 0.9.0 — In-session enforcement for content policies: the write path, the `stop` backstop, and the waiver that could not be self-served
+
+- **The line waiver is honoured only where a human staged the text** (#145).
+  `scan-secrets`' published message says the per-line pragma is *not* honoured at tool-use,
+  where the scanned text is a live tool argument an appended token could neutralise. The
+  mcp-gateway evaluator agreed and never read `allowlist_pragma`; `gate/runner.py`'s
+  `_kind_content_regex` did not agree and honoured it at every event. Harmless while
+  `tool_use` emitted nothing; the moment the write path and `stop` routed through the runner,
+  an agent refused at the write path could append the pragma to the line it was refused on and
+  pass. `WAIVABLE_EVENTS = {commit, push, ci}` now names the events where a human staged the
+  text and the pragma is read nowhere else -- an allowlist, so a new event defaults to
+  unwaivable. The blob-level waiver for a forbidden path follows the same rule. The test that
+  pinned the wrong side is replaced by four that pin the right one; the same line is still
+  waived at commit. Vendored runner resynced.
+
+- **In-session enforcement for content policies: the write path, and a `stop` backstop
+  behind it** (#144). `emit_pre_tool_use` looked for a bash guard script and returned `[]`
+  for everything else, so a policy declaring `on: [commit, tool_use]` got the commit half and
+  nothing in-session -- four catalog policies had asked for this since August. Two surfaces
+  now emit, because one of them has a hard ceiling:
+  - **Write path.** A pre-tool hook needs a *matcher*, and agentseam records a `tools.write`
+    vocabulary for exactly two of ten wired vendors (`claude_code`, `gemini_cli`). Inventing
+    one would gate a tool name nobody verified, so the other eight get no fragment and keep
+    exactly the coverage they had (`vendors.write_matcher`, `_gate_fragments`,
+    `pretooluse-write.json`; the claude installer glob widens to `pretooluse*.json`).
+  - **`stop`, a new surface** (`Surface.STOP`), the end-of-turn hook: it is handed nothing and
+    reads the worktree, so it sees what a pre-tool hook structurally cannot -- a heredoc or a
+    redirect carries no file argument -- and takes no matcher, so it wires six vendors where
+    the write path wires two. Membership is derived from `matrix.can_block(vendor, STOP)`
+    (`levels.STOP_TODAY`, `vendors.stop_vendors`), never listed: cursor, grok and windsurf are
+    `detect` and excluded; copilot/vscode can refuse a turn but are held back because their
+    hooks live in chock's own `.github/hooks/chock.json` in a shape witnessed for the pre-tool
+    key alone (`vendors.AGENT_HOOKS_VENDORS`, an install cap beside `repo_wirable`).
+  - **`stop` is credited with no coverage**, enforced rather than promised: every tool call in
+    the turn has already run by the time it fires, and a crash or a kill ends the turn without
+    it. `UNCREDITED_SURFACES` holds it and `coverage_cell` subtracts it before grading; two
+    parametrised tests assert adding `stop` moves no cell on any agent. `INSTALLED_SURFACES`,
+    the coverage table, the README caveat and the fan-out figure all change together with the
+    backstop wording attached.
+  - The claude installer's settings file now takes two event keys, so `hooks/in_agent_merged.py`
+    splits out of `in_agent_install.py` with a per-event `Wiring`; `docs/coverage-levels.md`
+    splits out of `enforcement-surfaces.md` -- both at the 300-line budget. `Surface` moves to
+    the leaf `compile/surface_kinds.py`, cutting the import cycle CodeQL found instead of
+    deferring it; `test_no_import_cycles.py` restores both cut edges to prove the checker sees
+    one. `gen_brand_assets.py` and `make_surfaces.py` derive their counts and rows from the
+    package, so a ninth surface moved the picture and its alt text in the same commit.
+
+- **The gate runner judges a write, at both agent events, and the vendored runtime can run a
+  compiled gate** (#143). `WriteContext(GateContext)` answers `staged_paths`/`staged_blob`/
+  `added_lines` from a `{"writes": {path: text}}` document on stdin instead of the index;
+  `AGENT_EVENTS = ("pre-tool-use", "stop")` both map to the policy's own `tool_use` word;
+  `WRITE_PATH_KINDS` names the one kind a write can answer (`content_regex`) and the runner
+  refuses the rest at these events rather than reporting an allow it never made. The stdlib-only
+  `gate/write_gate.py` is extracted into every per-agent runtime beside `guard_runner`: it finds
+  the gate's runner by fixed depth (never by walking up into another repository's `.chock`),
+  reads the tool call's own text at `pre_tool` and the worktree at `stop`, guards
+  `stop_hook_active` re-entry, and refuses rather than allowing when the runner is missing or
+  errors. Runtime goldens regenerated for all ten vendors; the diff is purely additive.
+
+- **`applies_to.paths` bounds a compiled gate's reach** (#142). A policy's declared
+  `applies_to.paths` rides into `gate.json` beside `params` as `paths`, and `GateContext`
+  filters `staged_paths` through `fnmatch.fnmatchcase` (`*` crosses `/`, so
+  `.github/workflows/*` covers nested files). A gate with no scope sees every changed file, as
+  every gate did before. This is what keeps an in-session gate off files a policy was never
+  about: a pattern for `uses: x@v1` must not refuse the README that documents how to pin an
+  action.
 
 - **Guards can ask.** A pre-tool guard that exits **3** holds the command for the user's
   confirmation, and its first output line is the prompt they see (`gate/guard_runner.py`,
