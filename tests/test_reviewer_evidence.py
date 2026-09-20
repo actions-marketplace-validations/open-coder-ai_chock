@@ -12,16 +12,14 @@ import yaml
 from jsonschema import Draft202012Validator
 
 from chock.review.evidence import (
-    DEFAULT_UNATTESTABLE,
     EMPTY_DIFF_SHA,
     SCHEMA_URL,
     EvidenceError,
     build,
-    check_registry,
     diff_sha,
-    unattestable_paths,
     verify,
 )
+from chock.review.policy import DEFAULT_UNATTESTABLE, check_registry, unattestable_paths
 
 SCHEMA_PATH = (
     Path(__file__).resolve().parents[1] / "src" / "chock" / "validation" / "schemas" / "reviewer-evidence-v1.json"

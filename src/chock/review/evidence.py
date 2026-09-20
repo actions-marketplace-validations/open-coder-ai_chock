@@ -13,7 +13,13 @@ from pathlib import Path
 from typing import Any
 
 from chock.cli import main as cli_main
-from chock.config import load_config
+from chock.review.policy import (
+    attestation_floor,
+    check_registry,
+    command_set_hash,
+    required_checks,
+    unattestable_paths,
+)
 
 SCHEMA_URL = "https://open-coder-ai.github.io/chock/schemas/v0/reviewer-evidence-v1.json"
 _GIT = shutil.which("git") or "git"
@@ -21,15 +27,6 @@ _GIT = shutil.which("git") or "git"
 EMPTY_DIFF_SHA = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 EVIDENCE_DIR = Path(".chock") / "evidence"
-
-BUILTIN_CHECKS: dict[str, list[str]] = {
-    "validate": ["validate", "{root}"],
-    "eval": ["eval", "--repo", "{root}"],
-    "recompile-check": ["recompile", "--repo", "{root}", "--check"],
-    "verify": ["verify", "--root", "{root}"],
-}
-
-DEFAULT_UNATTESTABLE = ["tools/", ".github/workflows/"]
 
 
 class EvidenceError(RuntimeError):
@@ -62,50 +59,6 @@ def diff_sha(root: Path, base_ref: str) -> str:
         f":(exclude){EVIDENCE_DIR.as_posix()}/*",
     )
     return hashlib.sha256(diff.encode("utf-8")).hexdigest()
-
-
-def unattestable_paths(root: Path) -> list[str]:
-    """The repository's own list. Never taken from evidence."""
-    review = (load_config(root).get("chock") or {}).get("review") or {}
-    paths = review.get("unattestable_paths")
-    return sorted(paths) if isinstance(paths, list) and paths else sorted(DEFAULT_UNATTESTABLE)
-
-
-def required_checks(root: Path) -> list[str]:
-    """The repository's own required set, or empty when it declares none. Never from evidence."""
-    review = (load_config(root).get("chock") or {}).get("review") or {}
-    names = review.get("required_checks")
-    return sorted(names) if isinstance(names, list) and names else []
-
-
-def attestation_floor(root: Path) -> int:
-    """Minimum attestations needed once the diff touches an unattestable path. 0 = no floor."""
-    floor = ((load_config(root).get("chock") or {}).get("review") or {}).get("attestation_floor")
-    return floor if isinstance(floor, int) and floor > 0 else 0
-
-
-def applies_to(root: Path) -> str:
-    """Who `review require` gates: all | forks | first_time. Informational -- for the adopter's own CI wiring."""
-    value = ((load_config(root).get("chock") or {}).get("review") or {}).get("applies_to")
-    return value if value in {"all", "forks", "first_time"} else "all"
-
-
-def command_set_hash(root: Path) -> str:
-    """Digest over the required set's names AND resolved commands -- a redefinition changes it, not just an omission."""
-    registry = check_registry(root)
-    resolved = {name: registry.get(name, []) for name in required_checks(root)}
-    canonical = json.dumps(resolved, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def check_registry(root: Path) -> dict[str, list[str]]:
-    """Built-in checks plus any the repository declares."""
-    registry = dict(BUILTIN_CHECKS)
-    review = (load_config(root).get("chock") or {}).get("review") or {}
-    for name, argv in (review.get("checks") or {}).items():
-        if isinstance(argv, list) and all(isinstance(a, str) for a in argv):
-            registry[str(name)] = argv
-    return registry
 
 
 def run_check(root: Path, argv: list[str]) -> tuple[str, str]:
@@ -148,7 +101,7 @@ def build(
         )
         raise EvidenceError(msg)
 
-    registry = check_registry(root)
+    registry = check_registry(root, base_ref)
     unknown = [c for c in checks if c not in registry]
     if unknown:
         msg = f"unknown check(s): {', '.join(sorted(unknown))}. Known: {', '.join(sorted(registry))}"
@@ -175,8 +128,8 @@ def build(
         "produced_by": produced_by,
         "verified": verified,
         "attested": [],
-        "unattestable": unattestable_paths(root),
-        "command_set_hash": command_set_hash(root),
+        "unattestable": unattestable_paths(root, base_ref),
+        "command_set_hash": command_set_hash(root, base_ref),
     }
 
 
@@ -191,16 +144,16 @@ def verify(root: Path, evidence: dict[str, Any], base_ref: str) -> list[str]:
             f"the branch is now {current[:12]}. Re-run `chock review emit`."
         ]
 
-    expected_unattestable = unattestable_paths(root)
+    expected_unattestable = unattestable_paths(root, base_ref)
     if sorted(evidence.get("unattestable") or []) != expected_unattestable:
         failures.append(
             f"unattestable paths disagree with repository config: evidence says "
             f"{sorted(evidence.get('unattestable') or [])}, repo says {expected_unattestable}"
         )
 
-    registry = check_registry(root)
+    registry = check_registry(root, base_ref)
     named = {entry.get("check") for entry in evidence.get("verified") or []}
-    missing = sorted(set(required_checks(root)) - named)
+    missing = sorted(set(required_checks(root, base_ref)) - named)
     if missing:
         failures.append(
             f"evidence does not cover the checks this repository requires; missing: "
@@ -238,7 +191,7 @@ def _touched_unattestable_paths(root: Path, base_ref: str) -> list[str]:
     """Which of the repo's unattestable prefixes the diff actually touches."""
     diff_range = f"{merge_base(root, base_ref)}...HEAD"
     changed = [p for p in _git(root, "diff", "--no-color", "--name-only", diff_range).splitlines() if p.strip()]
-    prefixes = unattestable_paths(root)
+    prefixes = unattestable_paths(root, base_ref)
     return sorted({prefix for prefix in prefixes for path in changed if path.startswith(prefix)})
 
 
@@ -257,9 +210,9 @@ def require(root: Path, base_ref: str) -> list[str]:
     if invalid:
         return invalid
 
-    required = required_checks(root)
+    required = required_checks(root, base_ref)
     if required:
-        expected_hash = command_set_hash(root)
+        expected_hash = command_set_hash(root, base_ref)
         if evidence.get("command_set_hash") != expected_hash:
             return [
                 f"evidence's command_set_hash does not match this repository's required checks "
@@ -267,17 +220,14 @@ def require(root: Path, base_ref: str) -> list[str]:
                 f"changed since the evidence was produced. Re-run "
                 f"`chock review emit --base {base_ref}` and push the regenerated evidence."
             ]
-        failing = sorted(
-            entry["check"]
-            for entry in evidence.get("verified") or []
-            if entry.get("check") in required and entry.get("result") == "fail"
-        )
-        if failing:
-            return [
-                f"required check(s) recorded failing: {', '.join(failing)}. Fix the underlying "
-                f"issue, then re-run `chock review emit --base {base_ref}` and push the evidence."
-            ]
-    floor = attestation_floor(root)
+    failing = sorted(str(e.get("check")) for e in evidence.get("verified") or [] if e.get("result") == "fail")
+    if failing:
+        label = "required check(s)" if set(failing) <= set(required) else "check(s)"
+        return [
+            f"{label} recorded failing: {', '.join(failing)}. Fix the underlying "
+            f"issue, then re-run `chock review emit --base {base_ref}` and push the evidence."
+        ]
+    floor = attestation_floor(root, base_ref)
     if floor:
         touched = _touched_unattestable_paths(root, base_ref)
         attested = evidence.get("attested") or []

@@ -25,7 +25,7 @@ DEFAULT_BASE = "origin/main"
 
 def _emit(args: argparse.Namespace) -> int:
     root = Path(args.repo).resolve()
-    registry = sorted(check_registry(root))
+    registry = sorted(check_registry(root, args.base))
     checks = args.checks or registry
     evidence = build(root, args.base, {"kind": args.kind, "id": args.by}, checks, allow_empty=args.allow_empty)
 
@@ -63,11 +63,11 @@ def _verify(args: argparse.Namespace) -> int:
         return 1
 
     who = evidence.get("produced_by", {})
-    registry = sorted(check_registry(root))
+    registry = sorted(check_registry(root, args.base))
     named = {e.get("check") for e in evidence.get("verified") or []}
     print(f"Evidence holds: {len(evidence.get('verified') or [])} check(s) re-derived and matching.")
     uncovered = sorted(set(registry) - named)
-    required = required_checks(root)
+    required = required_checks(root, args.base)
     scope = "required set" if required else "registry"
     print(
         f"  coverage: {len(named & set(registry))} of {len(registry)} registered check(s)"
