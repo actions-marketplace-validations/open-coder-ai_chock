@@ -31,7 +31,9 @@ each guarantee holds.
 > context ends the turn without it running at all. Hence second line, behind the commit hook and
 > CI, never a substitute -- and a policy reads the same word whether or not `stop` is wired.
 > Because it reads the worktree, `applies_to.paths` is what keeps it off files the policy was
-> never about; a pattern broad enough to hit documentation needs that bound first.
+> never about; a pattern broad enough to hit documentation needs that bound first. A per-line
+> `allowlist_pragma` is **not** honoured here or at the write path -- only where a human staged
+> the text (`WAIVABLE_EVENTS`). The agent that was refused is the one holding the pen.
 
 > **`agent-hooks` shell caveat, stated rather than glossed.** The surface genuinely
 > enforces: it runs the guard before the tool call and honours exit 2 as deny (witnessed on
