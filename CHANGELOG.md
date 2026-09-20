@@ -1,6 +1,6 @@
 # Chock changelog
 
-## 0.9.1 — The suite passes on Windows, a policy-less repo keeps its runtime, and a pull request may not weaken the policy set
+## 0.9.1 — The suite passes on Windows, a policy-less repo keeps its runtime, a pull request may not weaken the policy set, and a pre-release review closes the boundary cases
 
 - **Fixed: Windows.** The `v0.9.0` tag ran the full matrix and every Windows `validate` job
   failed at the test step, on fifteen tests, while Linux was green -- the release shipped on
@@ -50,6 +50,56 @@
   backstop, and listed in `docs/baseline-policies.md` and `docs/agentic-risk-coverage.md`.
   The bound is what keeps it off `docs/installation.md` and `docs/reviewer-evidence.md`, which
   quote an unpinned `uses:` line on purpose.
+
+- **`chock add` refuses what a catalog must not hand it.** `shutil.copytree` dereferenced
+  symlinks, so a pack carrying `leak -> ~/.ssh/id_rsa` installed the adopter's private key as
+  a regular file in their repo; a manifest whose `id` differed from its folder installed as
+  two policies (the lock and compiled tree under one name, the config under the other);
+  `--ref <sha>` failed (`git clone --branch` takes a branch or tag) and `--ref` with a local
+  path was ignored; a path-like id was a traceback. `add` now refuses symlinks and foreign
+  ids before hashing, fetches a commit id by name, honours `--ref` for a local checkout, and
+  reports a bad id as an error (`scaffold/add.py`).
+
+- **`chock check --only verify` attests every pack `sync` compiles.** An empty or missing
+  `chock.lock` over installed packs verified clean -- nothing was compared -- and a pack nested
+  under `.agents/policies/<group>/` was compiled but never locked, since `build_lock()` read one
+  level and `discover_policy_dirs()` every level. Both are drift now (a nested pack records its
+  `path`), and a lock that is not JSON is a named failure rather than a traceback (`lock.py`).
+
+- **`chock review require` judges by the stricter of the base's policy and the head's.** It
+  read `required_checks`, the check registry, `attestation_floor` and `unattestable_paths` from
+  the pull request's own `.chock/config.yaml`, so the change being judged chose what it was
+  judged on. The required set and unattestable paths are now the union of base and head, the
+  floor the higher, and a check both define runs as the base defines it; a recorded failure is
+  never merge-ready, required or not (`review/policy.py`, `docs/reviewer-evidence.md`).
+
+- **The baseline check compares reach, not size.** `{git-hook, ci-gate} -> {git-hook,
+  ambient-rule}` kept the surface count and lost a gate, and a strict-subset test passed it;
+  a base ref that did not resolve read as "no config there", which is every policy enabled;
+  a base config that was not YAML was a traceback. A head that lacks any base surface is a
+  weakening; an unresolvable ref and unreadable YAML are errors (`checks_baseline.py`).
+
+- **A config of the wrong shape neither crashes nor quietly widens.** `policies:` null,
+  `disabled: scan-secrets` (iterated as letters), a null or string override and
+  `surfaces: 5` each crashed the resolver or the baseline check; `validate` now names each
+  (`policy_toggles`), the resolver treats a bare string as one id or surface, and POL-1 holds
+  in `sync` too: a mandatory policy listed in `policies.disabled` is compiled in full.
+
+- **`egress_allowlist` reads a URL the way a fetch library will.** `https:\\evil.io`,
+  `https:/evil.io` and `https:///evil.io` yielded no host and passed; `example.com\@evil.io`
+  is one host to a browser and another to curl; `evil.io%00.example.com` matched the
+  allowlist's suffix. Backslashes and slash runs are normalised, a host outside the DNS and
+  IP character set is refused as undecidable, and an international host is matched by its
+  punycode name (`gateway/gates.py`).
+
+- **A gate pattern that does not compile fails `validate`, not the first commit it guards.**
+  `content_pattern: "("` passed schema validation and `sync`, then every commit died with a
+  `re.error` traceback (`checks_gate_shape.py`).
+
+- **`sync` wires in-agent hooks for `supported_agents` only.** `chock init . --agents claude`
+  followed by `sync` wrote ten vendors' hook files (`.cursor/`, `.codex/`, `.windsurf/`,
+  `.devin/`, ...) and vendored ten runtimes; the SessionStart arm hook was installed whether
+  or not claude was named (`recompile.wired_vendors()`).
 
 ## 0.9.0 — In-session enforcement for content policies: the write path, the `stop` backstop, and the waiver that could not be self-served
 
