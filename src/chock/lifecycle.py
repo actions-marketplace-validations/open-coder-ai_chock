@@ -47,7 +47,7 @@ def sync_main(argv: list[str] | None) -> int:
     return rc
 
 
-CHECKS = ("validate", "verify", "evals", "matrix", "mechanisms", "index", "conflicts")
+CHECKS = ("validate", "verify", "evals", "matrix", "mechanisms", "index", "conflicts", "baseline")
 
 
 def _run_validate(args: argparse.Namespace) -> int:
@@ -66,7 +66,7 @@ def _run_matrix(args: argparse.Namespace) -> int:
 
     matrix_file = Path(args.repo) / MATRIX_RELATIVE_PATH
     if not matrix_file.exists() and not args.only:
-        print(f"== enforcement matrix (skipped: no {MATRIX_RELATIVE_PATH} in this repo)")
+        print(f"== enforcement matrix (skipped: no {MATRIX_RELATIVE_PATH.as_posix()} in this repo)")
         return 0
     from chock.authoring.matrix import main as matrix_main
 
@@ -79,7 +79,7 @@ def _run_mechanisms(args: argparse.Namespace) -> int:
 
     matrix_file = Path(args.repo) / MATRIX_RELATIVE_PATH
     if not matrix_file.exists() and not args.only:
-        print(f"== matrix mechanisms (skipped: no {MATRIX_RELATIVE_PATH} in this repo)")
+        print(f"== matrix mechanisms (skipped: no {MATRIX_RELATIVE_PATH.as_posix()} in this repo)")
         return 0
 
     return _run("matrix mechanisms", mechanisms_main, ["--repo", args.repo])
@@ -92,6 +92,7 @@ def check_main(argv: list[str] | None) -> int:
     parser.add_argument("--only", default=None, help=f"Comma-separated subset of: {', '.join(CHECKS)}")
     parser.add_argument("--mode", default=None, help="Validation mode (passed to validate, e.g. frontier-claude)")
     parser.add_argument("--event", default=None, help="Hook event context (passed to validate, e.g. commit)")
+    parser.add_argument("--base", default=None, help="Git ref the policy set may not be weaker than (baseline)")
     args = parser.parse_args(argv)
 
     selected = [s.strip() for s in args.only.split(",")] if args.only else list(CHECKS)
@@ -123,7 +124,21 @@ def check_main(argv: list[str] | None) -> int:
         from chock.validation.checks_conflicts import main as conflicts_main
 
         rc = max(rc, _run("ambient conflicts", conflicts_main, ["--repo", args.repo]))
+    if "baseline" in selected:
+        rc = max(rc, _run_baseline(args))
     return rc
+
+
+def _run_baseline(args: argparse.Namespace) -> int:
+    from chock.validation.checks_baseline import main as baseline_main
+
+    if not args.base:
+        if args.only:
+            print("baseline needs --base <ref>: the branch whose policy set this one may not weaken", file=sys.stderr)
+            return 2
+        print("== policy baseline (skipped: no --base given; CI passes the pull request's base branch)")
+        return 0
+    return _run("policy baseline", baseline_main, ["--repo", args.repo, "--base", args.base])
 
 
 def status_main(argv: list[str] | None) -> int:

@@ -100,7 +100,7 @@ lockfile-write failure fails the command. An adopter-edited dispatcher is backed
 ### `check` — is this repo sound?
 
 ```bash
-chock check [--repo .] [--only validate,verify,evals,matrix,mechanisms,index] [--mode MODE] [--event EVENT]
+chock check [--repo .] [--only validate,verify,evals,matrix,mechanisms,index,conflicts,baseline] [--mode MODE] [--event EVENT] [--base REF]
 ```
 
 Runs every truth check, read-only — `check` never regenerates what it measures (that is
@@ -114,11 +114,11 @@ Runs every truth check, read-only — `check` never regenerates what it measures
 | `matrix` | Spec invariants are traceable in the enforcement matrix. Framework-repo homework: auto-skipped (with a note) in repos that have no `spec/enforcement-matrix.md`. |
 | `mechanisms` | Every enforcement-matrix row naming a `` `function()` `` names a real, invoked, severity-capable one — presence in `matrix` is not the same as being real. Same auto-skip as `matrix`. |
 | `index` | `INDEX.md` and the `AGENTS.md` pointer are fresh. |
+| `baseline` | The policy set is no weaker than `--base REF`'s: nothing newly in `policies.disabled`, nothing downgraded to advisory, no surfaces dropped. Bare `chock check` skips it with a note; CI runs it against the pull request's base branch. |
 
 - `--only` — comma-separated subset, e.g. `--only validate,verify`.
 - `--mode` — frontier validation profile (e.g. `frontier-claude`), passed to `validate`.
-- `--event` — hook event context (e.g. `commit`), passed to `validate`; softens
-  pre-existing-drift findings at commit time.
+- `--event` — hook event context (e.g. `commit`), passed to `validate`; softens pre-existing-drift findings at commit time.
 - `eval export --format context-report --out DIR [POLICY_ID ...]` — exports a policy's tier-3
   cases (no `execute` block) as a context-report run/v0.1 directory; see [Evals](evals.md#exporting-tier-3-cases-to-context-report).
 

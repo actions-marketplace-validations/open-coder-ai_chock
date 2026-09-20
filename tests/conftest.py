@@ -21,6 +21,26 @@ def no_gate_log(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CHOCK_GATE_LOG", "0")
 
 
+def bash_executable() -> str:
+    """The bash that runs chock's shell shims: Git Bash on Windows, never the WSL stub.
+
+    `subprocess.run(["bash", ...])` on a Windows runner resolves to System32's bash.exe,
+    the WSL launcher, which prints a UTF-16 Store notice and exits 1 with no distribution
+    installed. Git for Windows ships the bash the shims are written for, beside git itself.
+    """
+    if sys.platform != "win32":
+        return shutil.which("bash") or "bash"
+    git = shutil.which("git")
+    if git:
+        for candidate in (
+            Path(git).parent.parent / "bin" / "bash.exe",
+            Path(git).parent.parent / "usr" / "bin" / "bash.exe",
+        ):
+            if candidate.is_file():
+                return str(candidate)
+    return shutil.which("bash") or "bash"
+
+
 def baseline_policy(policy_id: str) -> Path:
     """Directory of one of this repo's own baseline-derived policies."""
     path = REPO_POLICIES / policy_id

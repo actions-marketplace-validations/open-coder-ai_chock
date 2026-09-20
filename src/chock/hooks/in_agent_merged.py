@@ -211,7 +211,7 @@ def install_merged(repo_root: Path, vendor: str) -> list[str]:
         installed_any = installed_any or bool(wanted)
         reported.extend(_merge_event(hooks, wiring, wanted, markers))
 
-    if installed_any:
+    if installed_any or _runtime_referenced(hooks, vendor):
         vendor_runtime(repo_root, vendor)
     else:
         if not hooks and vendor_wiring.write_when_absent:
@@ -226,6 +226,16 @@ def install_merged(repo_root: Path, vendor: str) -> list[str]:
     config_path.parent.mkdir(parents=True, exist_ok=True)
     write_generated_json(config_path, settings)
     return reported
+
+
+def _runtime_referenced(hooks: dict, vendor: str) -> bool:
+    """Whether any entry under any event key still runs this vendor's runtime.
+
+    The session-start arm hook shares `claude_code.py` with the pre-tool and stop entries and
+    is installed by a different installer. A repo with no in-agent fragments still has that
+    hook, so unlinking the runtime for want of fragments left it pointing at nothing.
+    """
+    return runtime_rel(vendor).as_posix() in json.dumps(hooks)
 
 
 def installed_merged_ids(repo_root: Path, vendor: str) -> set[str]:

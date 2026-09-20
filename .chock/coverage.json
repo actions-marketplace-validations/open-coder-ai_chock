@@ -736,6 +736,73 @@
       "witnessed": false
     }
   },
+  "pin-github-actions": {
+    "aider": {
+      "level": "enforced-at-commit",
+      "basis": null,
+      "witnessed": false
+    },
+    "claude": {
+      "level": "best-effort",
+      "basis": "live-run",
+      "witnessed": false
+    },
+    "codex": {
+      "level": "best-effort",
+      "basis": "live-run-partial",
+      "witnessed": false
+    },
+    "copilot": {
+      "level": "enforced-at-commit",
+      "basis": null,
+      "witnessed": false
+    },
+    "cursor": {
+      "level": "enforced-at-commit",
+      "basis": null,
+      "witnessed": false
+    },
+    "devin": {
+      "level": "best-effort",
+      "basis": "vendor-docs",
+      "witnessed": false
+    },
+    "gemini": {
+      "level": "best-effort",
+      "basis": "vendor-source",
+      "witnessed": false
+    },
+    "grok": {
+      "level": "enforced-at-commit",
+      "basis": null,
+      "witnessed": false
+    },
+    "kimi-code": {
+      "level": "enforced-at-commit",
+      "basis": null,
+      "witnessed": false
+    },
+    "replit": {
+      "level": "enforced-at-commit",
+      "basis": null,
+      "witnessed": false
+    },
+    "tabnine": {
+      "level": "best-effort",
+      "basis": "vendor-docs",
+      "witnessed": false
+    },
+    "vscode": {
+      "level": "enforced-at-commit",
+      "basis": null,
+      "witnessed": false
+    },
+    "windsurf": {
+      "level": "enforced-at-commit",
+      "basis": null,
+      "witnessed": false
+    }
+  },
   "pre-generated-scripts": {
     "aider": {
       "level": "advisory",
