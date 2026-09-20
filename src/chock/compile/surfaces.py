@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from enum import Enum
-
 from chock.compile.levels import IN_AGENT_TODAY, Grade, _matrix_can_block, in_agent_grade
+from chock.compile.surface_kinds import Surface
 from chock.hooks.in_agent_install import AGENT_HOOKS_VENDORS
 from chock.vendors import CHOCK_AGENT
 
@@ -12,15 +11,8 @@ from chock.vendors import CHOCK_AGENT
 AGENTS_ARG_REQUIRED_MSG = "--agents requires at least one agent name"
 
 
-class Surface(str, Enum):
-    AMBIENT_RULE = "ambient-rule"
-    GIT_HOOK = "git-hook"
-    CI_GATE = "ci-gate"
-    PRE_TOOL_USE = "pre-tool-use"
-    MANAGED_SETTING = "managed-setting"
-    GATEWAY = "gateway"
-    MCP_GATEWAY = "mcp-gateway"
-    AGENT_HOOKS = "agent-hooks"
+#: Re-exported: every caller still reaches the vocabulary through this module.
+__all__ = ["AGENTS_ARG_REQUIRED_MSG", "INSTALLED_SURFACES", "SURFACE_AGENTS", "Surface"]
 
 
 #: Derived, never hand-rowed: every aliased agent gets the advisory floor, claude keeps

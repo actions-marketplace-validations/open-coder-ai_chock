@@ -7,7 +7,8 @@ from typing import Any
 
 import yaml
 
-from chock.compile.surfaces import SURFACE_AGENTS, Surface
+from chock.compile.surface_kinds import Surface
+from chock.vendors import CHOCK_AGENT
 
 CONFIG_DIR = ".chock"
 CONFIG_NAME = "config.yaml"
@@ -26,12 +27,12 @@ def agents_from_config(repo_root: Path) -> list[str]:
     config = load_config(repo_root)
     configured = config.get("chock", {}).get("supported_agents")
     if not configured:
-        return sorted(SURFACE_AGENTS)
-    unknown = [a for a in configured if a not in SURFACE_AGENTS]
+        return sorted(CHOCK_AGENT)
+    unknown = [a for a in configured if a not in CHOCK_AGENT]
     if unknown:
         msg = (
             f".chock/config.yaml supported_agents: unknown agent(s): {', '.join(unknown)}"
-            f" -- valid: {', '.join(sorted(SURFACE_AGENTS))}"
+            f" -- valid: {', '.join(sorted(CHOCK_AGENT))}"
         )
         raise ValueError(msg)
     deduped: list[str] = []

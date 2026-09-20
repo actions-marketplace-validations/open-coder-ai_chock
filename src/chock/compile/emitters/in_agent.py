@@ -8,7 +8,10 @@ from typing import Any
 
 from chock import vendors
 from chock.compile.emitters import DATA_DIR, GUARD_SUFFIXES, policy_rel_path
+from chock.compile.emitters.advisory import repo_root_from_output
 from chock.emit import write_generated_json
+from chock.gate.build import build_gate_json
+from chock.gate.runner import WRITE_PATH_KINDS
 
 _BASH_TEMPLATE = DATA_DIR.joinpath("agent_hook_bash.sh").read_text(encoding="utf-8").rstrip("\n")
 _POWERSHELL_TEMPLATE = DATA_DIR.joinpath("agent_hook_powershell.ps1").read_text(encoding="utf-8").rstrip("\n")
@@ -127,12 +130,6 @@ def _tool_use_gate(policy_dir: Path, output_dir: Path) -> dict[str, Any] | None:
     asking a question a write cannot answer. The runner refuses that last case anyway, so
     emitting a hook certain to refuse would be installing noise.
     """
-    # Deferred: chock.compile.surfaces imports this module, and the gate builder reaches
-    # chock.config which imports surfaces back. Module-level here closes that cycle.
-    from chock.compile.emitters.advisory import repo_root_from_output  # noqa: PLC0415
-    from chock.gate.build import build_gate_json  # noqa: PLC0415
-    from chock.gate.runner import WRITE_PATH_KINDS  # noqa: PLC0415
-
     spec = build_gate_json(policy_dir, repo_root_from_output(output_dir))
     if spec is None or TOOL_USE not in spec.get("on", []):
         return None
