@@ -287,8 +287,7 @@ optimize_playbook: MAY NOT raise tier
 
 > Invariant: **POL-1** — A mandatory policy cannot be disabled through `.chock/config.yaml` or the `chock disable` CLI.
 
-- `mandatory: true` in a policy manifest is an enforceable lock
-- `chock check` and `chock disable` both reject disabling a mandatory policy
+- `mandatory: true` in a policy manifest is an enforceable lock: `chock check` and `chock disable` both reject disabling a mandatory policy
 
 > Invariant: **POL-2** — Unknown policy ids in `policies.disabled` or `policies.overrides` trigger a validation warning.
 
@@ -296,5 +295,6 @@ optimize_playbook: MAY NOT raise tier
 
 > Invariant: **POL-3** — Block security guards (`scan-secrets`, `protect-main-branch`) must not be silently downgraded to advisory.
 
-- `enforcement: block` guards that are scoped to `advisory` via `policies.overrides` are reported as warnings
-- this is a guard against accidental weakening of compliance-stakes controls
+- `enforcement: block` guards that are scoped to `advisory` via `policies.overrides` are reported as warnings — a guard against accidental weakening of compliance-stakes controls
+
+> Invariant: **POL-4** — A pull request may not leave the policy set weaker than its base branch's: no policy newly in `policies.disabled`, none newly downgraded to advisory, none with fewer surfaces. `chock check --only baseline --base <ref>` reads `.chock/config.yaml` at both revisions and errors on every policy the head lets run less of (a base with no config is every policy enabled; widening is never a finding). A hook cannot guard its own config: `protect-agent-config` refuses the agent's shell edit best-effort, and nothing else refused the same edit committed by another path.

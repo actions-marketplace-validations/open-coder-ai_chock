@@ -196,6 +196,13 @@ jobs:
       - name: Ambient rule conflicts
         run: chock check --only conflicts
 
+      # A hook cannot guard its own config (POL-4): refuse a PR that disables or narrows a policy.
+      - name: Policy set is no weaker than the base branch
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: git fetch --quiet --depth=1 origin "$BASE_REF" && chock check --only baseline --base "origin/$BASE_REF"
+
       # Tier 2. Deterministic mode replays each policy's own gate or guard, so it needs no
       # model, no budget, and no sandbox -- which is why it can gate every build rather
       # than only policy PRs. Non-zero exit means a policy stopped doing what it declares.

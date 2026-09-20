@@ -35,6 +35,29 @@ def _config(repo: Path, vendor: str) -> dict:
     return json.loads((repo / vendors.config_path(vendor)).read_text(encoding="utf-8"))
 
 
+def _commands(node) -> list[str]:
+    """Every `command` string in a vendor config, whatever shape the vendor nests them in."""
+    if isinstance(node, dict):
+        found = [v for k, v in node.items() if k == "command" and isinstance(v, str)]
+        return found + [c for v in node.values() for c in _commands(v)]
+    if isinstance(node, list):
+        return [c for v in node for c in _commands(v)]
+    return []
+
+
+def _replace_in_commands(node, old: str, new: str) -> None:
+    """Rewrite `command` strings in place, so the edit survives JSON escaping of the path."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "command" and isinstance(value, str):
+                node[key] = value.replace(old, new)
+            else:
+                _replace_in_commands(value, old, new)
+    elif isinstance(node, list):
+        for value in node:
+            _replace_in_commands(value, old, new)
+
+
 @pytest.mark.parametrize("vendor", GENERIC_VENDORS)
 def test_install_writes_config_runtime_and_reports(tmp_path: Path, vendor: str) -> None:
     repo = _repo(tmp_path)
@@ -43,10 +66,12 @@ def test_install_writes_config_runtime_and_reports(tmp_path: Path, vendor: str) 
 
     assert installed == [POLICY]
     assert (repo / ".chock" / "bin" / f"{vendor}.py").exists()
-    text = json.dumps(_config(repo, vendor))
-    assert f".chock/bin/{vendor}.py" in text
-    assert sys.executable in text, "the interpreter placeholder must be baked at install"
-    assert "@CHOCK_PYTHON@" not in text
+    commands = _commands(_config(repo, vendor))
+    assert any(f".chock/bin/{vendor}.py" in c for c in commands)
+    # Compared on the parsed strings, not the JSON text: a Windows interpreter path is
+    # backslash-escaped on disk and would never match its own `sys.executable`.
+    assert any(sys.executable in c for c in commands), "the interpreter placeholder must be baked at install"
+    assert not any("@CHOCK_PYTHON@" in c for c in commands)
     assert installed_policy_ids(repo, vendor) == {POLICY}
 
 
@@ -111,11 +136,12 @@ def test_a_stale_interpreter_is_rebaked_not_reused(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     install_hooks(repo, "devin")
     config_path = repo / vendors.config_path("devin")
-    stale = config_path.read_text(encoding="utf-8").replace(sys.executable, "/no/such/python3")
-    config_path.write_text(stale, encoding="utf-8")
+    stale = json.loads(config_path.read_text(encoding="utf-8"))
+    _replace_in_commands(stale, sys.executable, "/no/such/python3")
+    config_path.write_text(json.dumps(stale, indent=2), encoding="utf-8")
 
     install_hooks(repo, "devin")
 
-    text = config_path.read_text(encoding="utf-8")
-    assert "/no/such/python3" not in text
-    assert sys.executable in text
+    commands = _commands(_config(repo, "devin"))
+    assert not any("/no/such/python3" in c for c in commands)
+    assert any(sys.executable in c for c in commands)

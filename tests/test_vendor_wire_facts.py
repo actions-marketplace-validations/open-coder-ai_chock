@@ -23,7 +23,7 @@ def test_derived_wire_facts_still_produce_todays_bytes() -> None:
     """Mutating any of these upstream now moves chock's emitted bytes -- this is the alarm."""
     assert vendors.config_path("claude_code") == ".claude/settings.json"
     assert vendors.config_path("cursor") == ".cursor/hooks.json"
-    assert str(agent_hooks_rel()) == ".github/hooks/chock.json"
+    assert agent_hooks_rel().as_posix() == ".github/hooks/chock.json"
     assert vendors.pre_tool_event("claude_code") == "PreToolUse"
     assert vendors.pre_tool_event("codex_cli") == "PreToolUse"
     assert vendors.pre_tool_event("vscode_copilot") == "PreToolUse"

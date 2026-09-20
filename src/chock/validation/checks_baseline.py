@@ -1,0 +1,116 @@
+"""Refuse a branch whose policy set is weaker than its base's: a hook cannot guard its own config."""
+
+from __future__ import annotations
+
+import argparse
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from chock.config import policy_status
+from chock.validation.report import Finding, Report, emit
+
+CONFIG_REL = Path(".chock") / "config.yaml"
+_CATEGORY = "policy_baseline"
+
+
+@dataclass(frozen=True)
+class Weakening:
+    """One policy this branch enforces less of than its base does."""
+
+    policy_id: str
+    was: str
+    now: str
+
+    def render(self) -> str:
+        return f"{self.policy_id}: {self.was} -> {self.now}"
+
+
+def config_at(repo_root: Path, ref: str) -> dict[str, Any] | None:
+    """The config as of `ref`, or None when that revision carried none."""
+    result = subprocess.run(  # noqa: S603 -- reading a git revision is this check's whole job
+        ["git", "-C", str(repo_root), "show", f"{ref}:{CONFIG_REL.as_posix()}"],  # noqa: S607 -- git from PATH
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    loaded = yaml.safe_load(result.stdout)
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def config_in_worktree(repo_root: Path) -> dict[str, Any] | None:
+    """The config this branch would merge, read from the checkout CI already has."""
+    path = Path(repo_root) / CONFIG_REL
+    if not path.is_file():
+        return None
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _named(config: dict[str, Any] | None) -> set[str]:
+    policies = (config or {}).get("policies") or {}
+    return set(policies.get("disabled") or []) | set((policies.get("overrides") or {}).keys())
+
+
+def _reach(config: dict[str, Any] | None, policy_id: str) -> tuple[int, frozenset[str], str]:
+    """How much of a policy a config lets run: (rank, surfaces, description)."""
+    status = policy_status(config or {}, policy_id)
+    if status["state"] == "disabled":
+        return 0, frozenset(), "disabled"
+    targets = frozenset(status["targets"] or ())
+    if status["state"] == "enabled":
+        return 1, targets, "enabled"
+    return 1, targets, "limited to " + ", ".join(sorted(targets))
+
+
+def weakenings(base: dict[str, Any] | None, head: dict[str, Any] | None) -> list[Weakening]:
+    """Every policy the head config lets run less of than the base config does.
+
+    A policy named by neither config is enabled in both, so only the ids either one names
+    can differ. No config at all is not an absence of policy: it is every policy enabled.
+    """
+    found = []
+    for policy_id in sorted(_named(base) | _named(head)):
+        base_rank, base_targets, was = _reach(base, policy_id)
+        head_rank, head_targets, now = _reach(head, policy_id)
+        if head_rank < base_rank or (head_rank == base_rank and head_targets < base_targets):
+            found.append(Weakening(policy_id, was, now))
+    return found
+
+
+def check_baseline(repo_root: Path, base: str, report: Report) -> None:
+    """One error per policy `.chock/config.yaml` weakens relative to `base`."""
+    repo_root = Path(repo_root)
+    for weakening in weakenings(config_at(repo_root, base), config_in_worktree(repo_root)):
+        report.add(
+            Finding(
+                str(repo_root / CONFIG_REL),
+                _CATEGORY,
+                "error",
+                f"{weakening.render()} -- weaker than {base}. A policy is switched off or narrowed in a "
+                "pull request a human approves, never as a side effect of the change that needed it gone.",
+            )
+        )
+
+
+def main(argv: list[str] | None = None) -> int:
+    """`chock check --only baseline --base <ref>`: every policy the head lets run less of than `ref`."""
+    parser = argparse.ArgumentParser(prog="chock check --only baseline")
+    parser.add_argument("--repo", default=".", help="Repo root")
+    parser.add_argument("--base", required=True, help="Git ref whose policy set this branch may not weaken")
+    parser.add_argument("--json", action="store_true", help="Emit JSON report")
+    args = parser.parse_args(argv)
+
+    report = Report()
+    check_baseline(Path(args.repo).resolve(), args.base, report)
+    emit(report, use_json=args.json)
+    return 0 if report.is_clean() else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
