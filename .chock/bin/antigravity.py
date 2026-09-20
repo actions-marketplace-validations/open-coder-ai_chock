@@ -885,7 +885,7 @@ def evaluate_gate(argv, event):
     return None
 
 
-def handle(event):
+def _judge(event):
     if event.event == "pre_tool" and event.command:
         verdict = evaluate(sys.argv[1:], event.command, event.tool or "")
         if verdict is not None:
@@ -895,6 +895,19 @@ def handle(event):
     if gated is not None:
         return Decision.deny(gated[1])
     return None
+
+
+def handle(event):
+    # A door that cannot decide refuses. An exception escaping here would exit the hook
+    # with a traceback, which every client reads as a non-blocking error: fail-open, with
+    # the reason on a stderr nobody watches. The refusal carries the reason instead.
+    try:
+        return _judge(event)
+    except Exception as exc:  # noqa: BLE001 -- any failure here must refuse, never fall through
+        return Decision.deny(
+            "chock could not check this call (%s: %s). Refusing rather than reporting an "
+            "allow it never established." % (type(exc).__name__, exc)
+        )
 # <<< agentseam handler <<<
 
 

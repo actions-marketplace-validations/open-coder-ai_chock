@@ -2,6 +2,20 @@
 
 ## 0.9.0 — In-session enforcement for content policies: the write path, the `stop` backstop, and the waiver that could not be self-served
 
+- **The vendored runtime refuses when it cannot decide.** `handle()` in every
+  `.chock/bin/<agent>.py` now wraps the judge: an exception escaping it used to exit the hook
+  with a traceback, which every client reads as a non-blocking error -- fail-open, with the
+  reason on a stderr nobody watches. It now returns a deny that carries the exception's type
+  and message, the same rule chock-java-security's four doors adopted. Runtime goldens
+  regenerated; the diff is the wrap and nothing else. `tests/test_runtime_fail_closed.py`
+  raises inside the rendered bundle and asserts the deny.
+
+- **The composite action installs the release it ships with.** `action.yml` defaulted
+  `version` to `0.1.0`, so `uses: open-coder-ai/chock@vX` with no `version:` installed a
+  release eight versions old. The default now tracks `pyproject.toml`, as does the
+  `docs/installation.md` example, and `tests/test_release_surfaces.py` fails the build when
+  either drifts from the version being released.
+
 - **The line waiver is honoured only where a human staged the text** (#145).
   `scan-secrets`' published message says the per-line pragma is *not* honoured at tool-use,
   where the scanned text is a live tool argument an appended token could neutralise. The
