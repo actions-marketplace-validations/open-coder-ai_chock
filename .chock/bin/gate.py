@@ -163,11 +163,19 @@ class WriteContext(GateContext):
 WRITE_PATH_KINDS = frozenset({"content_regex"})
 
 
-def _kind_content_regex(ctx: GateContext, params: dict, _event: str) -> GateResult:
+#: Events at which a line-level waiver is honoured: the ones where a human staged the text. At
+#: tool use the scanned text is a live tool argument, and at the turn's end it is a file the
+#: same agent just wrote, so a pragma there is the refused party waiving itself -- the gateway
+#: evaluator never read it for that reason, and the published policy message says so.
+WAIVABLE_EVENTS = frozenset({"commit", "push", "ci"})
+
+
+def _kind_content_regex(ctx: GateContext, params: dict, event: str) -> GateResult:
     content_re = re.compile(params["content_pattern"])
     forbidden_path_regex = params.get("forbidden_path_regex")
     path_re = re.compile(forbidden_path_regex) if forbidden_path_regex else None
-    pragma_re = re.compile(params["allowlist_pragma"]) if params.get("allowlist_pragma") else None
+    pragma = params.get("allowlist_pragma") if event in WAIVABLE_EVENTS else None
+    pragma_re = re.compile(pragma) if pragma else None
     scan = params.get("scan", "added_lines")
     diff_filter = params.get("diff_filter", "ACMRT")
 

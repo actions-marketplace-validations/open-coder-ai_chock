@@ -68,10 +68,50 @@ def test_the_same_judgement_is_made_at_the_turns_end(tmp_path: Path) -> None:
     assert run(_gate(tmp_path), "stop", None, tmp_path, writes={"app.py": CLEAN}) == 0
 
 
-def test_the_line_pragma_works_here_too(tmp_path: Path) -> None:
+# --- the waiver is a second lever, and the agent must not be able to pull it ----------------------
+
+WAIVED = 'KEY = "AKIAIOSFODNN7EXAMPLE"  # pragma: allowlist secret\n'
+
+
+def test_the_line_pragma_is_not_honoured_at_the_write_path(tmp_path: Path) -> None:
+    """The refused party could append the token to the very line it was refused on.
+
+    The published policy message says the pragma is not honoured at tool-use, and the gateway
+    evaluator never read it. This runner honoured it anyway, so the sentence became false the
+    moment a write path was emitted through here. tests/test_gate_core.py pins that the same
+    line IS waived at commit, where a human staged it.
+    """
     init_repo(tmp_path)
-    waived = 'KEY = "AKIAIOSFODNN7EXAMPLE"  # pragma: allowlist secret\n'
-    assert run(_gate(tmp_path), "pre-tool-use", None, tmp_path, writes={"app.py": waived}) == 0
+    assert run(_gate(tmp_path), "pre-tool-use", None, tmp_path, writes={"app.py": WAIVED}) == 1
+
+
+def test_the_line_pragma_is_not_honoured_at_the_turns_end_either(tmp_path: Path) -> None:
+    """At stop the text is a file the agent just wrote; the same hand held both pens."""
+    init_repo(tmp_path)
+    assert run(_gate(tmp_path), "stop", None, tmp_path, writes={"app.py": WAIVED}) == 1
+
+
+def test_a_forbidden_path_cannot_be_waived_from_inside_itself(tmp_path: Path) -> None:
+    """The blob-level waiver for a forbidden path is the same lever, held the same way."""
+    init_repo(tmp_path)
+    spec = {
+        "kind": "content_regex",
+        "on": ["commit", "tool_use"],
+        "action": "block",
+        "message": "secret file",
+        "params": {**PARAMS, "forbidden_path_regex": r"\.env$"},
+    }
+    gate = write_gate(tmp_path, spec)
+    assert run(gate, "pre-tool-use", None, tmp_path, writes={".env": "# pragma: allowlist secret\nx=1\n"}) == 1
+
+
+def test_the_waivable_events_are_exactly_the_staged_ones() -> None:
+    """A new event defaults to unwaivable: an omission here fails closed, never open."""
+    from chock.gate.runner import _EVENT_NAME, WAIVABLE_EVENTS
+
+    agent_names = {_EVENT_NAME[event] for event in AGENT_EVENTS}
+    assert not (agent_names & WAIVABLE_EVENTS), "an agent event has become waivable"
+    assert WAIVABLE_EVENTS == {"commit", "push", "ci"}
 
 
 def test_a_gate_that_does_not_declare_tool_use_stays_out_of_the_session(tmp_path: Path) -> None:
