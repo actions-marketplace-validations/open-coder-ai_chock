@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -43,19 +44,38 @@ def _run(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProces
     )
 
 
+def _fetch_commit(remote: str, ref: str, into: Path) -> str | None:
+    """`git clone --branch` takes a branch or tag only; a commit id is fetched by name instead."""
+    into.mkdir(parents=True, exist_ok=True)
+    for args in (
+        ["git", "init", "--quiet", str(into)],
+        ["git", "-C", str(into), "fetch", "--quiet", "--depth", "1", remote, ref],
+        ["git", "-C", str(into), "checkout", "--quiet", "FETCH_HEAD"],
+    ):
+        result = _run(args)
+        if result.returncode != 0:
+            return result.stderr.strip() or f"{' '.join(args[:2])} failed"
+    return None
+
+
 def fetch_catalog(source: str, ref: str | None, into: Path) -> tuple[Path, str | None]:
     """Make the catalog available locally. Returns (root, resolved commit or None)."""
     local = Path(source).expanduser()
-    if local.exists():
+    if local.exists() and not ref:
         return local.resolve(), None
+    remote = str(local.resolve()) if local.exists() else source
 
     args = ["git", "clone", "--quiet", "--depth", "1"]
     if ref:
         args += ["--branch", ref]
-    args += [source, str(into)]
+    args += [remote, str(into)]
     result = _run(args)
-    if result.returncode != 0:
-        msg = f"could not fetch catalog {source}:\n{result.stderr.strip()}"
+    failure = result.stderr.strip() if result.returncode != 0 else None
+    if failure is not None and ref:
+        shutil.rmtree(into, ignore_errors=True)
+        failure = _fetch_commit(remote, ref, into)
+    if failure is not None:
+        msg = f"could not fetch catalog {source}" + (f" at {ref}" if ref else "") + f":\n{failure}"
         raise RuntimeError(msg)
 
     resolved = _run(["git", "rev-parse", "HEAD"], cwd=into)
@@ -67,6 +87,33 @@ def _reject_unsafe_id(artifact_id: str) -> None:
     if artifact_id in ("", ".", "..") or "/" in artifact_id or "\\" in artifact_id or Path(artifact_id).is_absolute():
         msg = f"invalid artifact id {artifact_id!r}: expected a single name, not a path"
         raise ValueError(msg)
+
+
+def _reject_symlinks(pack_dir: Path, artifact_id: str) -> None:
+    """Refuse a pack carrying a symlink: copying it would read a file the catalog never held."""
+    links = []
+    for parent, dirs, files in os.walk(pack_dir):
+        links += [
+            Path(parent, n).relative_to(pack_dir).as_posix() for n in dirs + files if Path(parent, n).is_symlink()
+        ]
+    if links:
+        msg = f"{artifact_id}: the catalog pack contains symlink(s): {', '.join(sorted(links))}. Nothing was installed."
+        raise IntegrityError(msg)
+
+
+def _reject_foreign_id(pack_dir: Path, artifact_id: str) -> None:
+    """Refuse a pack whose manifest names another id: the folder name is the id everywhere else."""
+    manifest = pack_dir / "manifest.yaml"
+    if not manifest.is_file():
+        return
+    try:
+        declared = (yaml.safe_load(manifest.read_text(encoding="utf-8")) or {}).get("id")
+    except (yaml.YAMLError, AttributeError) as exc:
+        msg = f"{artifact_id}: the catalog pack's manifest.yaml does not parse ({exc}). Nothing was installed."
+        raise IntegrityError(msg) from exc
+    if declared is not None and str(declared) != artifact_id:
+        msg = f"{artifact_id}: the catalog pack's manifest says `id: {declared}`. Nothing was installed."
+        raise IntegrityError(msg)
 
 
 def locate(catalog_root: Path, artifact_id: str) -> tuple[Path, Path]:
@@ -118,6 +165,8 @@ def add(
     with tempfile.TemporaryDirectory(prefix="chock-add-") as tmp:
         catalog, commit = fetch_catalog(source, ref, Path(tmp) / "catalog")
         src, area = locate(catalog, artifact_id)
+        _reject_symlinks(src, artifact_id)
+        _reject_foreign_id(src, artifact_id)
 
         digest = compute_pack_hash(src)
         if verify_sha and digest != verify_sha:
@@ -170,7 +219,7 @@ def main(argv: list[str] | None = None) -> int:
     repo_root = Path(args.repo).resolve()
     try:
         added = add(repo_root, args.artifact_id, args.source, args.ref, force=args.force, verify_sha=args.verify_sha)
-    except (RuntimeError, FileNotFoundError, FileExistsError) as exc:
+    except (RuntimeError, ValueError, FileNotFoundError, FileExistsError) as exc:
         print(f"chock add: {exc}", file=sys.stderr)
         return 1
 
