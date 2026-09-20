@@ -217,3 +217,12 @@ def test_a_repo_with_neither_hook_nor_policy_keeps_no_runtime() -> None:
     vendor_runtime(repo, "claude_code")
     assert install_hooks(repo, "claude_code") == []
     assert not (repo / ".chock" / "bin" / "claude_code.py").exists()
+
+
+def test_the_vendored_runtime_is_written_with_lf_on_every_platform() -> None:
+    """The drift check compares this file to the render byte for byte; CRLF is a standing diff."""
+    repo = _bare_repo()
+    install_sessionstart_hook(repo)
+    raw = (repo / ".chock" / "bin" / "claude_code.py").read_bytes()
+    assert b"\r" not in raw
+    assert raw.decode("utf-8") == runtime_bundle.render("claude_code")

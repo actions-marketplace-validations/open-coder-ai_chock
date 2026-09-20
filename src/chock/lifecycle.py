@@ -66,7 +66,7 @@ def _run_matrix(args: argparse.Namespace) -> int:
 
     matrix_file = Path(args.repo) / MATRIX_RELATIVE_PATH
     if not matrix_file.exists() and not args.only:
-        print(f"== enforcement matrix (skipped: no {MATRIX_RELATIVE_PATH} in this repo)")
+        print(f"== enforcement matrix (skipped: no {MATRIX_RELATIVE_PATH.as_posix()} in this repo)")
         return 0
     from chock.authoring.matrix import main as matrix_main
 
@@ -79,7 +79,7 @@ def _run_mechanisms(args: argparse.Namespace) -> int:
 
     matrix_file = Path(args.repo) / MATRIX_RELATIVE_PATH
     if not matrix_file.exists() and not args.only:
-        print(f"== matrix mechanisms (skipped: no {MATRIX_RELATIVE_PATH} in this repo)")
+        print(f"== matrix mechanisms (skipped: no {MATRIX_RELATIVE_PATH.as_posix()} in this repo)")
         return 0
 
     return _run("matrix mechanisms", mechanisms_main, ["--repo", args.repo])

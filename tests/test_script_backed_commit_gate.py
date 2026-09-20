@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 import yaml
-from conftest import baseline_policy
+from conftest import baseline_policy, bash_executable
 
 from chock.compile.compiler import compile_policy
 from chock.compile.surfaces import Surface
@@ -128,11 +128,11 @@ def test_the_shim_runs_the_guard_and_the_guard_refuses(tmp_path: Path) -> None:
 
     page.write_text("MARKER stays, and more\n", encoding="utf-8")
     git("add", "page.txt")
-    assert subprocess.run(["bash", str(shim)], cwd=tmp_path, capture_output=True).returncode == 0
+    assert subprocess.run([bash_executable(), str(shim)], cwd=tmp_path, capture_output=True).returncode == 0
 
     page.write_text("erased\n", encoding="utf-8")
     git("add", "page.txt")
-    refused = subprocess.run(["bash", str(shim)], cwd=tmp_path, capture_output=True, text=True)
+    refused = subprocess.run([bash_executable(), str(shim)], cwd=tmp_path, capture_output=True, text=True)
     assert refused.returncode == 1
     assert "the marker was erased" in refused.stderr
 
@@ -145,6 +145,6 @@ def test_a_missing_guard_fails_closed(tmp_path: Path) -> None:
     (policy_dir / "implementations" / f"{POLICY_ID}-pre-commit.py").unlink()
 
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, capture_output=True)
-    result = subprocess.run(["bash", str(shim)], cwd=tmp_path, capture_output=True, text=True)
+    result = subprocess.run([bash_executable(), str(shim)], cwd=tmp_path, capture_output=True, text=True)
     assert result.returncode == 2
     assert "ships no guard" in result.stderr

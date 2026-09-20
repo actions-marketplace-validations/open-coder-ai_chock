@@ -6,6 +6,7 @@ import contextlib
 import json
 from pathlib import Path
 
+from chock.emit import write_generated
 from chock.gate import runtime_bundle
 from chock.resources import package_data_dir
 
@@ -34,7 +35,9 @@ def vendor_runtime(repo_root: Path, agent: str) -> Path:
     """Write `agent`'s self-contained runtime into `.chock/bin/`. Returns the path written."""
     dest = Path(repo_root) / runtime_rel(agent)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(runtime_bundle.render(agent), encoding="utf-8")
+    # LF on every platform: the drift check compares this file to the render byte for byte,
+    # and a text-mode write on Windows turned every runtime into a standing "differs".
+    write_generated(dest, runtime_bundle.render(agent))
     with contextlib.suppress(OSError):
         dest.chmod(0o755)
     return dest
