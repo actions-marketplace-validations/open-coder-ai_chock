@@ -32,5 +32,7 @@ def test_the_action_installs_the_version_being_released() -> None:
 def test_the_installation_example_pins_the_version_being_released() -> None:
     text = (ROOT / "docs" / "installation.md").read_text(encoding="utf-8")
     version = _released_version()
-    assert f"uses: open-coder-ai/chock@v{version}" in text, "docs/installation.md's action example names another release"
+    assert f"uses: open-coder-ai/chock@v{version}" in text, (
+        "docs/installation.md's action example names another release"
+    )
     assert f"version: {version}" in text, "docs/installation.md's action example installs another release"
