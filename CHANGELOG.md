@@ -1,5 +1,38 @@
 # Chock changelog
 
+## Unreleased
+
+- **Fixed: a repo with no policies lost the runtime its session-start hook runs.** `chock sync`
+  installs the arm hook first, which vendors `.chock/bin/claude_code.py` and points
+  `SessionStart` at it, then the pre-tool/stop installer for the same file found no fragments
+  and unlinked the runtime -- leaving a fresh `chock init` (chock-quickstart) with a hook to
+  nothing. The installer now keeps a runtime any entry under any event key still runs
+  (`_runtime_referenced()` in `hooks/in_agent_merged.py`); the unlink stands when nothing
+  references the file. Two tests in `tests/test_sessionstart_arm.py` pin both sides.
+
+- **`chock check --only baseline --base <ref>`: a pull request may not weaken the policy set**
+  (POL-4). `protect-agent-config` refuses the agent's *shell* edit of `.chock/config.yaml`,
+  best-effort, and nothing refused the same edit committed through any other path -- a policy
+  could be disabled in the PR that needed it gone. `validation/checks_baseline.py` reads the
+  config at the base ref and at the head and errors on every policy the head disables,
+  downgrades to advisory or narrows to fewer surfaces; a base with no config is every policy
+  enabled; widening is never a finding. CI runs it against the pull request's base branch;
+  bare `chock check` skips it with a note because it needs a ref. Modelled on
+  chock-java-security's `check-baseline`.
+
+- **`gateway/gates.py` and `gate/runner.py` are asked the same question.** #145 found the
+  two `content_regex` evaluators disagreeing on the per-line waiver at tool-use, and nothing
+  had put the same text to both. `tests/test_content_regex_evaluators_agree.py` runs one
+  fixture through the gateway evaluator and through the runner at each agent event and
+  asserts one verdict per case, waiver cases included.
+
+- **chock dogfoods `pin-github-actions`.** Its workflows were SHA-pinned by discipline alone;
+  the catalog's policy (0.0.3, with the `applies_to.paths` bound from chock-catalog#93) is
+  now in `.agents/policies/`, compiled to the git hook, the write path and the turn-end
+  backstop, and listed in `docs/baseline-policies.md` and `docs/agentic-risk-coverage.md`.
+  The bound is what keeps it off `docs/installation.md` and `docs/reviewer-evidence.md`, which
+  quote an unpinned `uses:` line on purpose.
+
 ## 0.9.0 — In-session enforcement for content policies: the write path, the `stop` backstop, and the waiver that could not be self-served
 
 - **The vendored runtime refuses when it cannot decide.** `handle()` in every

@@ -91,6 +91,14 @@
       "artifacts_sha256": "318e534a8fbca46a300a7dc0d6ee0c3f2c5d9bbd5952999a188bf19ee092c29f"
     },
     {
+      "id": "pin-github-actions",
+      "version": "0.0.1",
+      "managed": false,
+      "sha256": "e73dbc039cdcbf137049a1f5035e4b595d12afe74a12a0f78e2e102d20d29479",
+      "source": "local",
+      "artifacts_sha256": "635b7255986d30064f7e5ff8c564098b07a964c1880e654d814c77e5c8e6ce0e"
+    },
+    {
       "id": "pre-generated-scripts",
       "version": "0.0.1",
       "managed": false,
