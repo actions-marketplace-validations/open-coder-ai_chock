@@ -11,10 +11,13 @@ from urllib.parse import unquote
 GATEWAY_DIRNAME = "mcp-gateway"
 GATE_FILENAME = "gateway-gate.json"
 
+# A web scheme takes any run of slashes (browsers read `https:/x` and `https:///x` as `https://x`);
+# the authority runs to the first delimiter, backslash included so `a\@b` keeps the reading curl gives it.
 _AUTHORITY_RE = re.compile(
-    r"""(?:(?:[a-z][a-z0-9+.\-]*:)//|(?:^|[\s"'<>=(),|])//)([^/?#\s"'<>()|\\]*)""",
+    r"""(?:(?:https?|wss?|ftp):/+|(?:[a-z][a-z0-9+.\-]*:)//|(?:^|[\s"'<>=(),|])//)([^/?#\s"'<>()|]*)""",
     re.IGNORECASE,
 )
+_HOST_RE = re.compile(r"^(?:[a-z0-9_\-.]+|[0-9a-f:.]+)$")
 
 _DOTTED_DNS = r"(?:[a-z0-9](?:[a-z0-9\-]*[a-z0-9])?\.)+[a-z]{2,}\.?"
 _IPV4 = r"\d{1,3}(?:\.\d{1,3}){3}"
@@ -76,7 +79,8 @@ def _hosts_in(text: str) -> Iterator[str]:
             seen.add(key)
             yield host
 
-    for hay in (text, unquote(text)):
+    decoded = unquote(text)
+    for hay in (text, decoded, text.replace("\\", "/"), decoded.replace("\\", "/")):
         for match in _AUTHORITY_RE.finditer(hay):
             yield from _emit(match.group(1))
         stripped = hay.strip()
@@ -103,11 +107,24 @@ def _eval_egress_allowlist(spec: dict[str, Any], arguments: Any) -> str | None:
     if not allowed:
         return str(spec.get("message") or "egress allowlist is empty; refusing all egress")
     for text in _string_values(arguments):
-        for host in _hosts_in(text):
+        for raw in _hosts_in(text):
+            host = _ascii_host(raw)
+            if host is None:
+                return str(spec.get("message") or "") + " [blocked egress: undecidable host]"
             if not host or not any(host == a or host.endswith("." + a) for a in allowed):
                 shown = host or "<no-host URL>"
                 return str(spec.get("message") or "") + f" [blocked egress: {shown}]"
     return None
+
+
+def _ascii_host(host: str) -> str | None:
+    """The host as DNS would see it, or None when no resolver could: that is a block, not a match."""
+    if not host.isascii():
+        try:
+            host = host.encode("idna").decode("ascii")
+        except UnicodeError:
+            return None
+    return host if not host or _HOST_RE.match(host) else None
 
 
 _EVALUATORS = {
