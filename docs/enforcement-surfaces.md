@@ -4,7 +4,7 @@ A **surface** is *where* a compiled control runs. The same policy is emitted to 
 each agent supports — that's how "author once, enforce everywhere" stays honest about *how* strongly
 each guarantee holds.
 
-## The eight surfaces
+## The nine surfaces
 
 | Surface | Determinism | Bypassable? | What it is |
 | :--- | :--- | :--- | :--- |
@@ -12,10 +12,26 @@ each guarantee holds.
 | `ci-gate` | Hard, un-bypassable | No, **once marked a required status check** -- see [the branch-protection gap](adopting.md#the-branch-protection-gap): the workflow file itself is tracked content a PR can delete, so `ci-gate`'s un-bypassable claim rests on a server-side branch-protection setting nothing in this repository can edit | The backstop for a skipped git hook |
 | `ambient-rule` | Advisory | Yes | Compiled `AGENTS.md` block the agent is asked to follow |
 | `pre-tool-use` | Hard, pre-execution | No | Blocks a command **before** the agent runs it, in each client's own deny dialect — every matrix-blocking vendor with a repo-level config (see the Cursor caveat) |
+| `stop` | Hard, **post-execution** | No, but it fires after the tool calls it judges | Reads what the turn left in the worktree and refuses to end the turn. Credited with **no coverage word** -- see the backstop note below |
 | `agent-hooks` | Hard, pre-execution | No | The same exit-2 deny for Copilot CLI + VS Code agent mode, from `.github/hooks/chock.json` (witnessed blocking on both, 2026-08-23) |
 | `managed-setting` | Hard, org-level | No | Admin-deployed allow/ask/deny rules |
 | `gateway` | Hard, un-circumventable | No | Budget/egress backstop — *modeled now, emitted later* |
 | `mcp-gateway` | Hard, **MCP-routed tools only** | Yes (P3c) | A stdio proxy the client launches instead of the real MCP server; refuses matching `tools/call` payloads. Emitted today; **credits no agent** until the per-client config witness ships |
+
+> **`stop` is a backstop, and is deliberately worth nothing.** It exists for what
+> `pre-tool-use` structurally *cannot* see: a pre-tool hook is handed the tool call, so it
+> matches only a recorded write vocabulary, and a heredoc or a redirect carries no file argument
+> at all. A turn-end hook is handed nothing and reads the worktree, so it sees those bytes
+> however they got there -- and it takes no matcher, so it wires **six vendors** where the write
+> path wires two.
+>
+> What it does not buy is coverage, and `coverage_cell` refuses it any (`UNCREDITED_SURFACES`).
+> Every tool call in the turn has already run by the time it fires, so it cannot prevent a
+> command, only refuse to end a turn that wrote something; and a crash, a kill or an exhausted
+> context ends the turn without it running at all. Hence second line, behind the commit hook and
+> CI, never a substitute -- and a policy reads the same word whether or not `stop` is wired.
+> Because it reads the worktree, `applies_to.paths` is what keeps it off files the policy was
+> never about; a pattern broad enough to hit documentation needs that bound first.
 
 > **`agent-hooks` shell caveat, stated rather than glossed.** The surface genuinely
 > enforces: it runs the guard before the tool call and honours exit 2 as deny (witnessed on
@@ -90,119 +106,40 @@ per gateway process; wrap N servers with N entries.
 
 Which surfaces each agent supports today (from `src/chock/compile/surfaces.py`):
 
-| Agent | ambient | git-hook | ci-gate | pre-tool-use | managed-setting | agent-hooks |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Claude Code** | ✅ | ✅ | ✅ | ✅ | ✅ | — |
-| **Cursor** | ✅ | ✅ | ✅ | ✅ | — | — |
-| Copilot | ✅ | ✅ | ✅ | — | — | ✅ |
-| Codex | ✅ | ✅ | ✅ | ✅ | — | — |
-| Gemini | ✅ | ✅ | ✅ | ✅ | — | — |
-| Windsurf | ✅ | ✅ | ✅ | ✅ | — | — |
-| Devin | ✅ | ✅ | ✅ | ✅ | — | — |
-| Aider | ✅ | ✅ | ✅ | — | — | — |
-| Grok | ✅ | ✅ | ✅ | ✅ | — | — |
-| Junie | ✅ | ✅ | ✅ | — | — | — |
-| Kimi Code | ✅ | ✅ | ✅ | — | — | — |
-| Replit | ✅ | ✅ | ✅ | — | — | — |
-| Tabnine | ✅ | ✅ | ✅ | ✅ | — | — |
-| VS Code | ✅ | ✅ | ✅ | — | — | ✅ |
-| Antigravity CLI | ✅ | ✅ | ✅ | ✅ | — | — |
+| Agent | ambient | git-hook | ci-gate | pre-tool-use | stop | managed-setting | agent-hooks |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Claude Code** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| **Cursor** | ✅ | ✅ | ✅ | ✅ | — | — | — |
+| Copilot | ✅ | ✅ | ✅ | — | — | — | ✅ |
+| Codex | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
+| Gemini | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
+| Windsurf | ✅ | ✅ | ✅ | ✅ | — | — | — |
+| Devin | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
+| Aider | ✅ | ✅ | ✅ | — | — | — | — |
+| Grok | ✅ | ✅ | ✅ | ✅ | — | — | — |
+| Junie | ✅ | ✅ | ✅ | — | — | — | — |
+| Kimi Code | ✅ | ✅ | ✅ | — | — | — | — |
+| Replit | ✅ | ✅ | ✅ | — | — | — | — |
+| Tabnine | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
+| VS Code | ✅ | ✅ | ✅ | — | — | — | ✅ |
+| Antigravity CLI | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
 
 In-agent membership derives from agentseam's matrix: every adapted vendor whose row can block
 a pre-tool call from a repo-level JSON hook config gets `pre-tool-use` (Copilot CLI and VS Code:
-`agent-hooks`, chock's owned file). Junie and Kimi Code block only via home-level configs (Kimi
+`agent-hooks`, chock's owned file). `stop` is derived the same way from the **turn-end** row, which
+is a different question with a different answer: Cursor, Grok and Windsurf can observe a finished
+turn but not refuse one, so they are `detect` and get no column mark. Copilot and VS Code *can*
+refuse one and are still held back -- their hooks live in chock's own file in a shape witnessed
+live, that witness covers the pre-tool key alone, and a guessed turn-end key installs a hook that
+silently never runs while the table claims it does. Junie and Kimi Code block only via home-level configs (Kimi
 Code's in TOML), outside what `chock sync --repo` may write; Aider and Replit cannot block. A
 checkmark is a wiring claim: new-vendor cells stay `witnessed: false` until a real client run is recorded.
 
 ## Coverage levels
 
-For each policy × agent, the compiler records one of eight levels in `.chock/coverage.json`.
-The first four come from the **in-agent ladder** — agentseam's own honest, per-agent vocabulary
-(`agentseam.matrix.enforcement_level`, owner decision #9) for an installed, in-agent pre-execution
-control, plus one level of chock's own — because a hook that fails OPEN on a crash is a materially
-weaker promise than one that fails closed, and an adopter deciding on trust needs to see the difference.
-
-| Level | Meaning |
-| :--- | :--- |
-| **`enforced`** | An installed, hard, pre-execution in-agent control that fails CLOSED — a crashed hook still blocks. |
-| **`enforceable`** | Installed and blocks, and CAN be told to fail closed, but does not by default — what an adopter may claim depends on how the hook was installed. |
-| **`fail-to-ask`** | Installed and blocks, and when the control itself cannot decide the action does **not** proceed unattended — it is put to a human. The host may still fail open if the hook never runs at all, which is why this sits below `enforceable`. **Chock does not earn this level today**; see below. |
-| **`best-effort`** | Installed and blocks, but fails OPEN — a crashed hook silently allows. claude_code's PreToolUse is this tier today. |
-| **`enforced-at-commit`** | The policy emitted a git-hook (installed automatically) or a CI gate whose workflow `install-ci` has actually written — hard at commit time or over the PR's commit range, advisory in-agent. Chock's own commit-time mechanism, outside agentseam's per-agent-hook model. |
-| **`advisory`** | Only the ambient rule applies — compiled prose the agent is asked to follow. Also outside agentseam's model: an ambient rule is not a lifecycle hook of any kind. |
-| **`none`** | Nothing the policy emitted reaches this agent. |
-| **`disabled`** | The policy is listed in `policies.disabled` and produces no artifacts or hooks. |
-
-### The in-agent ladder is ordered, and the order is the point
-
-The four in-agent levels plus `none` form a strength ladder, weakest first — the order
-`compile.levels.level_rank` returns, and the order this page is checked against:
-
-```
-none  <  detect  <  best-effort  <  fail-to-ask  <  enforceable  <  enforced
-```
-
-The ordering axis is **how little the guarantee depends on someone being there.** A
-`fail-to-ask` control does not let the action through, but a person has to answer and can say
-yes; an `enforceable` one, configured, holds in an unattended CI run where there is nobody to
-ask. That is the whole reason `fail-to-ask` ranks below `enforceable` despite being the
-stronger *default* posture, and it is the placement to argue with if you disagree.
-
-`detect` — the control observes but cannot block — has a rank so that a control chock does
-**not** ship can be graded on the same ladder, but it is never a verdict in
-`.chock/coverage.json`: an agent only gets an in-agent surface here once agentseam confirms it
-can block there, and a row that stopped confirming that is a hard failure at import, not a
-quiet downgrade to observation. `enforced-at-commit`, `advisory` and `disabled` have **no**
-rank at all, deliberately: a git hook and an in-agent hook are different mechanisms, and a
-number comparing them would invent a scale that does not exist.
-
-> **Why the ladder needed a fourth word, and what it costs us to say so.** The five-word
-> vocabulary grades on one axis: what the *host* does when our hook never runs. It therefore
-> gave the same word — `best-effort` — to a control that degrades to silently allowing and to
-> one that degrades to prompting a human. Those are not the same promise, and the second is
-> strictly stronger. A grading layer that cannot rank a control above ours is not measuring
-> anything, so the distinction is now derived from two inputs rather than one: the host's
-> block behaviour and fail mode (from agentseam's matrix), and the control's own degradation
-> (`compile.levels.CONTROL_DEGRADES_TO`).
->
-> **Chock's own guard is a mixed control, so it is graded at its weakest path.** Of the five
-> ways `gate.guard_runner.evaluate` can fail to reach a verdict, two now ask — the guard
-> crashed, or it timed out — and three still allow, because they are preconditions rather
-> than anomalies. The section [What happens when the guard cannot decide](#what-happens-when-the-guard-cannot-decide)
-> gives the per-path reasoning and the per-client evidence. `DEGRADES_TO_DENY`'s own rule
-> settles the grade: a control mixing the two is declared at its weakest path, so
-> `CONTROL_DEGRADES_TO` stays `allow`, chock's `pre-tool-use` and `agent-hooks` stay at
-> `best-effort`, and this level still names something we do not earn. That is the intended
-> result: the ladder is only worth trusting where it flatters us if it can also report that
-> we are behind — including when we have genuinely improved and still fall short.
-
-> **`enforced` is raised by the install step, not by `compile`.** Compiling writes a
-> fragment; installing merges it into `.claude/settings.json` / `.cursor/hooks.json` and
-> vendors the adapter that feeds the agent's JSON payload to the guard. Every `chock sync`
-> runs that install step (`install-hooks` is its alias), so the documented adopter flow
-> wires the guards it compiles. The claim is made by the step that performs the wiring, so
-> it cannot get ahead of the mechanism. `ci-gate`'s contribution to `enforced-at-commit`
-> follows the identical rule with `install-ci` in place of the hook installers.
-
-> **The SessionStart arm hook is wiring, not a surface.** `chock sync` also installs a
-> `SessionStart` entry (running the vendored `.chock/bin/claude_code.py`) into
-> `.claude/settings.json`. It carries no coverage claim: its only job is re-installing the
-> git hooks on a fresh clone — git never clones them — or printing the `chock sync`
-> command into the session context when it cannot. See
-> [Arming a fresh clone](adopting.md#arming-a-fresh-clone).
-
-Example for `protect-main-branch` (targets git-hook + CI + PreToolUse + managed-setting):
-
-```json
-{
-  "protect-main-branch": {
-    "claude":  "best-effort",
-    "cursor":  "enforced-at-commit",
-    "copilot": "enforced-at-commit",
-    "aider":   "enforced-at-commit"
-  }
-}
-```
+For each policy x agent, the compiler records one level in `.chock/coverage.json`. The whole
+vocabulary -- what each word means, the ladder order and the reasoning behind it, and the
+evidence cap that bounds every grade -- is on its own page: **[Coverage Levels](coverage-levels.md)**.
 
 ## How a policy picks its surfaces
 
@@ -281,20 +218,6 @@ the gate exits 2 rather than passing an unscanned range.
 
 ## Reading the coverage report
 
-`chock compile <id>` (and `init`) write `.chock/coverage.json`. Treat it as the source
-of truth for "where does this guarantee actually hold?" — it's the foundation for the compliance
-attestation on the [roadmap](../README.md#-roadmap).
-
-Each cell is `{"level", "basis", "witnessed"}`, printed as `best-effort (vendor-docs)`. The level
-is the weaker of the matrix word and the ceiling of the weakest basis it rests on:
-
-| Weakest basis under the grade | May back at most |
-| :--- | :--- |
-| `live-run` | `enforced` |
-| `live-run-partial` | `enforceable` |
-| `vendor-source`, `vendor-docs`, `third-party-install` | `best-effort` |
-| `inherited` | `detect` — unreportable, so the cell reads `none` |
-
-`witnessed` is true only where `src/chock/data/witnesses.json` records chock seeing that surface
-block in that vendor's real client — distinct from **tested** (`src/chock/data/claims.json`, our
-suite against our runtime). Neither ever raises a level: evidence caps a claim, never grants one.
+`chock compile <id>` (and `init`) write `.chock/coverage.json`, one `{"level", "basis",
+"witnessed"}` cell per policy x agent. What each field means, and the evidence ceiling that
+bounds every level, are on [Coverage Levels](coverage-levels.md#reading-the-coverage-report).

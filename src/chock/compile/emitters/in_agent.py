@@ -8,7 +8,10 @@ from typing import Any
 
 from chock import vendors
 from chock.compile.emitters import DATA_DIR, GUARD_SUFFIXES, policy_rel_path
+from chock.compile.emitters.advisory import repo_root_from_output
 from chock.emit import write_generated_json
+from chock.gate.build import build_gate_json
+from chock.gate.runner import WRITE_PATH_KINDS
 
 _BASH_TEMPLATE = DATA_DIR.joinpath("agent_hook_bash.sh").read_text(encoding="utf-8").rstrip("\n")
 _POWERSHELL_TEMPLATE = DATA_DIR.joinpath("agent_hook_powershell.ps1").read_text(encoding="utf-8").rstrip("\n")
@@ -51,10 +54,19 @@ AGENT_HOOKS_EVENT = "preToolUse"
 AGENT_HOOKS_ENVELOPE = {"version": 1}
 SHELL_MATCHER = "bash|powershell|pwsh|sh|shell"
 
+#: The content fragment claude_code's installer merges, named apart from the shell one so a
+#: policy could one day carry both without either overwriting the other.
+WRITE_FRAGMENT = "pretooluse-write.json"
+
 
 def _adapter_rel(vendor: str) -> str:
     """Where the vendored runtime lives in a consumer repo: chock's convention + agent id."""
     return f".chock/bin/{vendor}.py"
+
+
+def _compiled_rel(policy_id: str) -> str:
+    """Where this policy's pre-tool-use artifacts land, from chock's own compiled layout."""
+    return f".chock/compiled/{policy_id}/pre-tool-use"
 
 
 #: Vendors wired through hand-shaped fragments that predate the derivation (claude/cursor
@@ -104,17 +116,30 @@ def cursor_hooks_file(command: str) -> dict[str, Any]:
     }
 
 
-def emit_pre_tool_use(policy_dir: Path, output_dir: Path, manifest: dict[str, Any]) -> list[Path]:
-    """Write the pre-tool-use fragments (Claude Code entry shape, cursor entry shape)."""
-    policy_id = manifest.get("id", policy_dir.name)
-    script = _guard_script(policy_dir, policy_id)
-    if not script:
-        return []
+GATE_FILE = "gate.json"
 
+#: A gate reaches this surface only when the policy asked for this event by name.
+TOOL_USE = "tool_use"
+
+
+def _tool_use_gate(policy_dir: Path, output_dir: Path) -> dict[str, Any] | None:
+    """The compiled gate this policy wants run at tool use, or None when it wants none.
+
+    Three ways to want none, each the policy's own statement rather than a judgement made
+    here: no declarative gate at all, tool_use not among its declared events, or a kind
+    asking a question a write cannot answer. The runner refuses that last case anyway, so
+    emitting a hook certain to refuse would be installing noise.
+    """
+    spec = build_gate_json(policy_dir, repo_root_from_output(output_dir))
+    if spec is None or TOOL_USE not in spec.get("on", []):
+        return None
+    return spec if spec.get("kind") in WRITE_PATH_KINDS else None
+
+
+def _guard_fragments(policy_dir: Path, script: str, output_dir: Path) -> list[Path]:
+    """The shell-command fragments, one per wired vendor. Behaviour unchanged."""
     rel = policy_rel_path(policy_dir)
     guard = f"{PROJECT_DIR_TOKEN}/{rel}/implementations/{script}"
-
-    output_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
     for vendor, name, build in (
         ("claude_code", "pretooluse.json", lambda cmd: hook_entry(cmd, matcher=MATCHER)),
@@ -131,6 +156,94 @@ def emit_pre_tool_use(policy_dir: Path, output_dir: Path, manifest: dict[str, An
         write_generated_json(dest, generic_hooks_file(vendor, command))
         written.append(dest)
     return written
+
+
+def _gate_fragments(policy_id: str, spec: dict[str, Any], output_dir: Path) -> list[Path]:
+    """The content fragments, for the vendors whose write vocabulary is actually recorded.
+
+    Most vendors record no `tools.write`, and a pre-tool hook needs a matcher. Inventing one
+    would gate a tool name nobody verified the vendor uses, so those vendors get no fragment
+    and the coverage they are credited with stays exactly what it was.
+    """
+    gate = output_dir / GATE_FILE
+    write_generated_json(gate, spec)
+    written: list[Path] = [gate]
+
+    reference = f"{PROJECT_DIR_TOKEN}/{_compiled_rel(policy_id)}/{GATE_FILE}"
+    for vendor in sorted(vendors.in_agent_vendors()):
+        matcher = vendors.write_matcher(vendor)
+        if matcher is None:
+            continue
+        adapter = f"{PROJECT_DIR_TOKEN}/{_adapter_rel(vendor)}"
+        command = f'@CHOCK_PYTHON@ "{adapter}" --gate "{reference}"'
+        name = WRITE_FRAGMENT if vendor == "claude_code" else f"{vendor}-write-hooks.json"
+        dest = output_dir / name
+        write_generated_json(dest, hook_entry(command, matcher=matcher))
+        written.append(dest)
+    return written
+
+
+#: The claude fragment the stop installer merges, named apart from the two pre-tool ones
+#: because it lands under a different event key in the same settings file.
+STOP_FRAGMENT = "stop.json"
+
+
+def _stop_rel(policy_id: str) -> str:
+    """Where this policy's stop artifacts land, from chock's own compiled layout."""
+    return f".chock/compiled/{policy_id}/stop"
+
+
+def _stop_fragments(policy_id: str, spec: dict[str, Any], output_dir: Path) -> list[Path]:
+    """One fragment per stop vendor, plus the gate they all run.
+
+    Every vendor `stop_vendors` admits gets one. A turn-end hook carries no tool to match
+    on, so nothing here depends on a write vocabulary -- the reason this surface reaches
+    six vendors where the write path reaches two.
+    """
+    gate = output_dir / GATE_FILE
+    write_generated_json(gate, spec)
+    written: list[Path] = [gate]
+
+    for vendor in vendors.stop_vendors():
+        token = vendors.repo_root_token(vendor)
+        root = f"{token}/" if token else ""
+        command = f'@CHOCK_PYTHON@ "{root}{_adapter_rel(vendor)}" --gate "{root}{_stop_rel(policy_id)}/{GATE_FILE}"'
+        if vendor == "claude_code":
+            dest, doc = output_dir / STOP_FRAGMENT, hook_entry(command)
+        else:
+            dest, doc = output_dir / f"{vendor}-hooks.json", vendors.stop_hook_config(vendor, command)
+        write_generated_json(dest, doc)
+        written.append(dest)
+    return written
+
+
+def emit_stop(policy_dir: Path, output_dir: Path, manifest: dict[str, Any]) -> list[Path]:
+    """Write the end-of-turn fragments for a policy whose gate can judge what a turn wrote.
+
+    Gate-only, deliberately: the shell half of `pre-tool-use` judges a command, and a
+    finished turn has none to judge. A policy carrying only a guard script emits nothing
+    here rather than a hook that would have nothing to look at.
+    """
+    policy_id = str(manifest.get("id", policy_dir.name))
+    spec = _tool_use_gate(policy_dir, output_dir)
+    if spec is None:
+        return []
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return _stop_fragments(policy_id, spec, output_dir)
+
+
+def emit_pre_tool_use(policy_dir: Path, output_dir: Path, manifest: dict[str, Any]) -> list[Path]:
+    """Write the pre-tool-use fragments: a shell guard's, a content gate's, or neither."""
+    policy_id = manifest.get("id", policy_dir.name)
+    script = _guard_script(policy_dir, policy_id)
+    spec = None if script else _tool_use_gate(policy_dir, output_dir)
+    if not script and spec is None:
+        return []
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if script:
+        return _guard_fragments(policy_dir, script, output_dir)
+    return _gate_fragments(str(policy_id), spec or {}, output_dir)
 
 
 def _bash_command(adapter: str, guard: str) -> str:
@@ -176,4 +289,5 @@ def emit_agent_hooks(policy_dir: Path, output_dir: Path, manifest: dict[str, Any
 
 
 pre_tool_use = SimpleNamespace(emit=emit_pre_tool_use)
+stop = SimpleNamespace(emit=emit_stop)
 agent_hooks = SimpleNamespace(emit=emit_agent_hooks)

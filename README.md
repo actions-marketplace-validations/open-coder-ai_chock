@@ -122,7 +122,7 @@ produces one small, self-contained manifest; compiling reads it and emits the st
 each target agent actually supports, from a universal git hook and CI gate up to a native
 pre-tool-use hook where one exists; enforcing is what happens on the next commit, the next PR,
 or the next tool call, with no LLM in the loop and nothing left to the agent's discretion. Full
-write-up, including all eight surfaces and the per-agent matrix: [Architecture](docs/architecture.md).
+write-up, including all nine surfaces and the per-agent matrix: [Architecture](docs/architecture.md).
 
 ## Author your own policy
 
@@ -167,10 +167,12 @@ rule, which is why those three columns aren't repeated below. What varies is whe
 also exposes a native hook chock can wire directly into its own tool-call loop, and where the
 file that wiring lives. A row here is support, not installation — coverage is only credited on
 a given repo once `chock sync` has actually written the file, which is why the CLI's own
-`chock status` always beats this table for what's true *here*. Three of the eight surfaces are
+`chock status` always beats this table for what's true *here*. Four of the nine surfaces are
 absent from this page entirely because they credit no agent today — `managed-setting` is
-compiled but not installed, `gateway` is modelled but not yet emitted, and `mcp-gateway` credits
-nothing until its per-client witness ships. Full eight-surface matrix and per-agent caveats:
+compiled but not installed, `gateway` is modelled but not yet emitted, `mcp-gateway` credits
+nothing until its per-client witness ships, and `stop` installs and refuses on six vendors but is
+a deliberate backstop for what a pre-tool hook cannot see, so it is worth no grade of its own.
+Full nine-surface matrix and per-agent caveats:
 [Enforcement Surfaces](docs/enforcement-surfaces.md).
 
 | Agent | What it enforces | Config file |

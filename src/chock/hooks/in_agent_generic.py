@@ -127,9 +127,17 @@ def _install_form(entry: Any, prior: dict[str, dict]) -> Any:
     return _bake(entry)
 
 
+#: The compiled surfaces whose fragments are whole hook-config documents for this vendor.
+#: Named rather than globbed over `*/`: a surface dir that happens to hold a like-named file
+#: is not thereby something to merge into a vendor config.
+FRAGMENT_SURFACES = ("pre-tool-use", "stop")
+
+
 def _fragments(repo_root: Path, vendor: str) -> list[tuple[str, dict]]:
+    compiled = repo_root / ".chock" / "compiled"
+    globs = [f"*/{surface}/{vendor}-hooks.json" for surface in FRAGMENT_SURFACES]
     found: list[tuple[str, dict]] = []
-    for path in sorted((repo_root / ".chock" / "compiled").glob(f"*/pre-tool-use/{vendor}-hooks.json")):
+    for path in sorted(path for glob in globs for path in compiled.glob(glob)):
         try:
             fragment = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):

@@ -12,7 +12,7 @@ cairosvg is NOT a dependency of chock. This is design tooling a maintainer runs 
 when the artwork changes, and its output is committed.
 
 Every list and count on the card is READ FROM THE PACKAGE at render time -- agents from
-config.SURFACE_AGENTS, surfaces from the Surface enum, commands from cli.EVERYDAY, the
+surfaces.SURFACE_AGENTS, surfaces from the Surface enum, commands from cli.EVERYDAY, the
 rest from pyproject.toml. A social preview is a claim surface, and the surest way to keep
 one honest is to leave it no independent copy of the truth to drift from. The counts
 printed beside each list are len() of that list, and an over-long row raises rather than
@@ -30,8 +30,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 
 from chock.cli import EVERYDAY  # noqa: E402
-from chock.compile.surfaces import INSTALLED_SURFACES, Surface  # noqa: E402
-from chock.config import SURFACE_AGENTS  # noqa: E402
+from chock.compile.surfaces import INSTALLED_SURFACES, SURFACE_AGENTS, Surface  # noqa: E402
 
 
 def chock_mark(cx, cy, s):
