@@ -1,5 +1,27 @@
 # Chock changelog
 
+## Unreleased
+
+- **`devin` plugin format**: `chock plugin build --format devin` packages a policy as a native
+  Devin plugin (`.devin-plugin/plugin.json` + `skills/<id>/SKILL.md` + a root-level `hooks.json`,
+  not the nested `hooks/hooks.json` every other format uses). Same guard, same adapter,
+  byte-identical to every other format -- only the envelope differs, and the hook command reaches
+  its own bundled copies via a shell expansion of `$DEVIN_PLUGIN_ROOT`, the environment variable
+  the vendor documents hook commands receive (agentseam records no `${...}` plugin-root token for
+  Devin, unlike Codex or Cursor -- that expansion is chock's own inference, not a vendor-recorded
+  token). Unlike every other hook format, the package claims no enforcement tier: the vendor's own
+  docs call plugin hooks "currently best effort and fail open ... so don't rely on them for
+  crucial guardrails yet," for local Devin sessions (the CLI and Devin Desktop) only, and the
+  posture text says so instead of claiming a block.
+- **`chock marketplace build --tree devin`**: Devin has no marketplace index file -- `devin
+  plugins install` instead reads a repo's root `.devin-plugin/plugin.json` as a meta-plugin whose
+  `optionalPlugins` point `git-subdir` entries at each built plugin, so `--tree devin` writes that
+  root manifest in place of an index (a new `--url` is required; chock never reads `git remote`
+  for it). `chock-market.lock` and `PLUGINS.md` cover the devin tree the same way they cover every
+  other tree.
+- **Pinned `agentseam==0.3.2`**, which records Devin's native plugin layout; the vendored runtime
+  goldens moved with it (version stamp only, no handler change).
+
 ## 0.9.2 — `sync` no longer leaves a vendor's hook config pointing at a runtime it just deleted
 
 - **Fixed: narrowing `supported_agents` on 0.9.1 left dangling hook entries behind (#151).**

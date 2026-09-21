@@ -29,6 +29,22 @@ def owned_subtrees(store: str) -> tuple[str, ...]:
     return tuple(data["owned_subtrees"])
 
 
+def _owned_candidates(out_dir: Path, sub: str) -> list[Path]:
+    """Files an owned-subtree entry can name: everything under a directory, or itself.
+
+    Every existing store's entries are directories (`hooks/`, `scripts/`); Devin's native
+    hooks file sits at the plugin root instead of nested under a directory (`hooks.json`,
+    not `hooks/hooks.json`), so an entry that is a plain file is checked directly rather
+    than walked.
+    """
+    target = out_dir / sub
+    if target.is_dir():
+        return sorted(target.rglob("*"))
+    if target.is_file():
+        return [target]
+    return []
+
+
 def stale_store_files(
     store: str, files_fn: FilesFn, policy_dir: Path, manifest: dict[str, Any], repo_root: Path, out_dir: Path
 ) -> list[Path]:
@@ -39,7 +55,7 @@ def stale_store_files(
     expected = set(files_fn(Path(policy_dir), manifest, Path(repo_root)))
     stale: list[Path] = []
     for sub in owned_subtrees(store):
-        for path in sorted((out_dir / sub).rglob("*")) if (out_dir / sub).is_dir() else []:
+        for path in _owned_candidates(out_dir, sub):
             if path.is_file() and path.relative_to(out_dir) not in expected:
                 stale.append(path)
     return stale

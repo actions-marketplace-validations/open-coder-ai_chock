@@ -188,3 +188,44 @@ def test_codex_tree_reuses_the_witnessed_legacy_index(dist: Path) -> None:
     sources = [entry["source"] for entry in index["plugins"]]
     assert sources and all(s.startswith("./codex/") for s in sources)
     assert not (dist / ".github" / "plugin" / "marketplace.json").exists()
+
+
+DEVIN_URL = "https://github.com/open-coder-ai/chock-devin-plugins"
+
+
+def test_devin_tree_requires_url(dist: Path, capsys) -> None:
+    assert marketplace_main(["build", "--dist", str(dist), "--tree", "devin"]) == 2
+    assert "requires --url" in capsys.readouterr().err
+    assert not (dist / ".devin-plugin" / "plugin.json").exists()
+
+
+def test_devin_tree_writes_a_root_meta_plugin_not_an_index_file(dist: Path) -> None:
+    """`--tree devin` writes a root `.devin-plugin/plugin.json` meta-plugin, no index file."""
+    assert (
+        marketplace_main(["build", "--dist", str(dist), "--name", "chock-devin", "--tree", "devin", "--url", DEVIN_URL])
+        == 0
+    )
+    manifest = json.loads((dist / ".devin-plugin" / "plugin.json").read_text(encoding="utf-8"))
+
+    assert manifest["name"] == "chock-devin"
+    assert "enforces" not in manifest["description"] and "block" not in manifest["description"]
+    assert manifest["optionalPlugins"], "at least one plugin from the built tree"
+    for plugin in manifest["optionalPlugins"]:
+        assert set(plugin) == {"source", "url", "path"}
+        assert plugin["source"] == "git-subdir"
+        assert plugin["url"] == DEVIN_URL
+        assert plugin["path"].startswith("devin/")
+    assert not (dist / ".claude-plugin" / "marketplace.json").exists()
+    assert not (dist / ".cursor-plugin" / "marketplace.json").exists()
+
+
+def test_devin_tree_check_catches_missing_stale_and_hand_edited(dist: Path, capsys) -> None:
+    assert marketplace_main(["build", "--dist", str(dist), "--tree", "devin", "--url", DEVIN_URL, "--check"]) == 1
+    assert "missing" in capsys.readouterr().out
+
+    marketplace_main(["build", "--dist", str(dist), "--tree", "devin", "--url", DEVIN_URL])
+    assert marketplace_main(["build", "--dist", str(dist), "--tree", "devin", "--url", DEVIN_URL, "--check"]) == 0
+
+    (dist / ".devin-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+    assert marketplace_main(["build", "--dist", str(dist), "--tree", "devin", "--url", DEVIN_URL, "--check"]) == 1
+    assert "differs" in capsys.readouterr().out

@@ -21,17 +21,19 @@ from chock.plugin.claude import build_claude_plugin, claude_plugin_differences
 from chock.plugin.codex import build_codex_plugin, codex_plugin_differences
 from chock.plugin.copilot import build_copilot_plugin, copilot_plugin_differences
 from chock.plugin.cursor import build_cursor_plugin, cursor_plugin_differences
+from chock.plugin.devin import build_devin_plugin, devin_plugin_differences
 from chock.scaffold.recompile import discover_policy_dirs
 
-FORMATS = ("agent-plugins", "claude", "copilot", "cursor", "codex")
+FORMATS = ("agent-plugins", "claude", "copilot", "cursor", "codex", "devin")
 
-HOOK_FORMATS = frozenset({"claude", "copilot", "cursor", "codex"})
+HOOK_FORMATS = frozenset({"claude", "copilot", "cursor", "codex", "devin"})
 
 HOOK_EMITTERS = {
     "claude": (claude_plugin_differences, build_claude_plugin),
     "copilot": (copilot_plugin_differences, build_copilot_plugin),
     "cursor": (cursor_plugin_differences, build_cursor_plugin),
     "codex": (codex_plugin_differences, build_codex_plugin),
+    "devin": (devin_plugin_differences, build_devin_plugin),
 }
 
 
@@ -216,5 +218,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  .cursor-plugin/plugin.json + hooks/ (beforeShellExecution) per guard policy")
     if "codex" in formats:
         print("  .codex-plugin/plugin.json + hooks/ (PreToolUse) per guard policy")
+    if "devin" in formats:
+        print("  .devin-plugin/plugin.json + hooks.json (PreToolUse, best-effort) per guard policy")
     print("  Skills are advisory in any client. Repo-level enforcement still needs `chock sync`.")
     return 0
