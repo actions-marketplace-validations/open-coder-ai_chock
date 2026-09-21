@@ -12,7 +12,13 @@ from chock.compile.compiler import _load_manifest, compile_policy
 from chock.compile.levels import DISABLED, Grade
 from chock.config import agents_from_config, load_config, policy_status
 from chock.emit import write_generated_json
-from chock.hooks.in_agent_install import WIRED_VENDORS, install_hooks, install_label, installed_policy_ids
+from chock.hooks.in_agent_install import (
+    WIRED_VENDORS,
+    install_hooks,
+    install_label,
+    installed_policy_ids,
+    uninstall_hooks,
+)
 from chock.hooks.installers import get_hooks_dir, install_policy_hooks
 from chock.hooks.runtime_vendor import runtime_rel
 from chock.hooks.sessionstart_install import install_sessionstart_hook
@@ -61,18 +67,29 @@ def wired_vendors(agents: list[str]) -> tuple[str, ...]:
     return tuple(v for v in WIRED_VENDORS if v in chosen)
 
 
-def _prune_unwired_runtimes(repo_root: Path, wired: tuple[str, ...]) -> None:
-    """Delete a vendored runtime for a vendor `wired` no longer names.
+def _uninstall_unwired_vendors(repo_root: Path, wired: tuple[str, ...]) -> None:
+    """Undo chock's install for a vendor `wired` no longer names, then prune its runtime.
 
-    `install_hooks`/`vendor_runtime` only ever write a runtime for a wired vendor, so one a
-    vendor lost (dropped from `supported_agents`, or never in `CHOCK_AGENT`) is never
-    rewritten and never removed either -- it sits stale, drifting against every future
-    render, and `vendored_differences` still checks any file it finds on disk.
+    A vendored runtime is only ever written for a wired vendor (`install_hooks` /
+    `vendor_runtime`), so its presence here is exactly the signal that this vendor was wired
+    at some past sync -- a vendor the adopter never had stays untouched. Compiling is
+    agent-agnostic (a vendor `supported_agents` no longer names still gets its fragments
+    compiled), so `uninstall_hooks` takes the removal path directly rather than relying on
+    the compiled tree actually being empty for it: chock's entries come out, a config file
+    that held only chock's is deleted, and (for the vendors whose installer does not already
+    do this itself) the leftover runtime is unlinked once nothing references it. A vendor the
+    adopter never had is a no-op: without a runtime on disk there is nothing here to undo.
     """
     for vendor in WIRED_VENDORS:
         if vendor in wired:
             continue
         stale = repo_root / runtime_rel(vendor)
+        if not stale.exists():
+            continue
+        try:
+            uninstall_hooks(repo_root, vendor)
+        except ValueError as exc:
+            warn(str(exc))
         if stale.exists():
             stale.unlink()
             print(f"Removed {runtime_rel(vendor).as_posix()} ({vendor} not in supported_agents)")
@@ -179,7 +196,7 @@ def recompile(repo_root: Path | str, agents: list[str], *, skip_hooks: bool = Fa
         install_policy_hooks(repo_root, get_hooks_dir(repo_root))
 
         wired = wired_vendors(agents)
-        _prune_unwired_runtimes(repo_root, wired)
+        _uninstall_unwired_vendors(repo_root, wired)
         try:
             if CHOCK_AGENT["claude"] in wired and install_sessionstart_hook(repo_root):
                 print("Registered SessionStart arm hook in .claude/settings.json")

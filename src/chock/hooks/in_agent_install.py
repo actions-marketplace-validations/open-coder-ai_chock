@@ -21,6 +21,7 @@ __all__ = [
     "install_hooks",
     "install_label",
     "installed_policy_ids",
+    "uninstall_hooks",
 ]
 
 _OWNED_FILE_VENDOR = "vscode_copilot"
@@ -66,10 +67,10 @@ def _compiled_agent_hooks(repo_root: Path) -> dict[str, dict]:
     return entries
 
 
-def _install_agent_hooks(repo_root: Path) -> list[str]:
+def _install_agent_hooks(repo_root: Path, *, uninstall: bool = False) -> list[str]:
     """Rewrite chock's own agent-hooks file from compiled entries."""
     repo_root = Path(repo_root)
-    entries = _compiled_agent_hooks(repo_root)
+    entries = {} if uninstall else _compiled_agent_hooks(repo_root)
     dest = repo_root / agent_hooks_rel()
     if not entries:
         if dest.exists():
@@ -92,6 +93,24 @@ def install_hooks(repo_root: Path, vendor: str) -> list[str]:
         return _install_agent_hooks(repo_root)
     msg = f"no in-agent wiring for vendor {vendor!r}; wired: {WIRED_VENDORS}"
     raise ValueError(msg)
+
+
+def uninstall_hooks(repo_root: Path, vendor: str) -> None:
+    """Remove chock's entries for `vendor`, as if its compiled tree carried no fragments.
+
+    Compiling is agent-agnostic -- a vendor `supported_agents` no longer names still gets its
+    fragments compiled -- so `install_hooks` would find them and reinstall rather than remove.
+    `sync` calls this for a vendor it no longer wires, before pruning its vendored runtime.
+    """
+    if vendor in MERGED:
+        install_merged(repo_root, vendor, uninstall=True)
+    elif vendor in GENERIC_VENDORS:
+        install_generic(repo_root, vendor, uninstall=True)
+    elif vendor == _OWNED_FILE_VENDOR:
+        _install_agent_hooks(repo_root, uninstall=True)
+    else:
+        msg = f"no in-agent wiring for vendor {vendor!r}; wired: {WIRED_VENDORS}"
+        raise ValueError(msg)
 
 
 def _installed_agent_hooks_entries(repo_root: Path) -> list[dict]:

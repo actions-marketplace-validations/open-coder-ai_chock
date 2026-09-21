@@ -64,3 +64,22 @@ def test_a_vendor_dropped_from_supported_agents_has_its_runtime_pruned(tmp_path:
 
     assert not (repo / ".chock" / "bin" / "cursor.py").exists()
     assert (repo / ".chock" / "bin" / "claude_code.py").exists()
+
+
+def test_dropping_a_vendor_removes_its_hook_config_entries_too(tmp_path: Path) -> None:
+    """#151: 0.9.1 pruned `.chock/bin/cursor.py` but left `.cursor/hooks.json` naming it.
+
+    A repo synced on 0.9.0 wired every vendor chock knew; narrowing `supported_agents` on
+    0.9.1 deleted the runtime but never touched the vendor's own hook config, so every tool
+    call in that client ran a hook whose command failed before the gate ran.
+    """
+    repo = _repo(tmp_path)
+    recompile(repo, sorted(CHOCK_AGENT), skip_hooks=False)
+    cursor_hooks = repo / ".cursor" / "hooks.json"
+    assert cursor_hooks.exists()
+    assert ".chock/bin/cursor.py" in cursor_hooks.read_text(encoding="utf-8")
+
+    recompile(repo, ["claude"], skip_hooks=False)
+
+    assert not (repo / ".chock" / "bin" / "cursor.py").exists()
+    assert not cursor_hooks.exists() or ".chock/bin/cursor.py" not in cursor_hooks.read_text(encoding="utf-8")
