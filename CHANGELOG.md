@@ -1,5 +1,24 @@
 # Chock changelog
 
+## 0.9.2 — `sync` no longer leaves a vendor's hook config pointing at a runtime it just deleted
+
+- **Fixed: narrowing `supported_agents` on 0.9.1 left dangling hook entries behind (#151).**
+  0.9.1 wired in-agent hooks only for the vendors `supported_agents` names and pruned a
+  vendored runtime once its vendor fell out of that list, but neither step touched the
+  vendor's own hook config file, which 0.9.0 had written for every vendor chock knew. An
+  adopter who synced on 0.9.0 and then narrowed `supported_agents` on 0.9.1 (chock-example,
+  chock-mise) ended up with `.cursor/hooks.json`, `.codex/hooks.json`, `.windsurf/hooks.json`
+  and four more config files still naming a `.chock/bin/<vendor>.py` that `sync` had just
+  deleted -- a hook whose command failed on every tool call, in a client that reported no
+  error, while both `chock sync --check` and `chock check` reported clean. `sync` now
+  uninstalls chock's entries from every vendor it no longer wires before pruning that
+  vendor's runtime, the same removal path the installers already take when a policy stops
+  compiling (deleting a config file that held only chock's entries).
+- **`chock check` catches a dangling hook target.** A new repo check
+  (`check_dangling_hook_targets()`) reads every hook config chock can write and reports an
+  error on any chock-written entry naming a `.chock/bin/` path that does not exist, with
+  `chock sync` as the fix -- the exact shape of drift #151 left silent.
+
 ## 0.9.1 — The suite passes on Windows, a policy-less repo keeps its runtime, a pull request may not weaken the policy set, and a pre-release review closes the boundary cases
 
 - **Fixed: Windows.** The `v0.9.0` tag ran the full matrix and every Windows `validate` job
