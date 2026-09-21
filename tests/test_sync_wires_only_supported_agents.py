@@ -83,3 +83,20 @@ def test_dropping_a_vendor_removes_its_hook_config_entries_too(tmp_path: Path) -
 
     assert not (repo / ".chock" / "bin" / "cursor.py").exists()
     assert not cursor_hooks.exists() or ".chock/bin/cursor.py" not in cursor_hooks.read_text(encoding="utf-8")
+
+
+def test_a_repo_already_broken_by_0_9_1_self_heals_on_the_next_sync(tmp_path: Path) -> None:
+    """A repo that hit #151 under 0.9.1 already lost the runtime -- only the stale config
+    entry is left to find it by. The next `sync` must still clean it up, not just repos that
+    still have the runtime lying around when they narrow `supported_agents`.
+    """
+    repo = _repo(tmp_path)
+    recompile(repo, sorted(CHOCK_AGENT), skip_hooks=False)
+    cursor_hooks = repo / ".cursor" / "hooks.json"
+    assert cursor_hooks.exists()
+
+    (repo / ".chock" / "bin" / "cursor.py").unlink()  # simulate 0.9.1's buggy prune
+
+    recompile(repo, ["claude"], skip_hooks=False)
+
+    assert not cursor_hooks.exists() or ".chock/bin/cursor.py" not in cursor_hooks.read_text(encoding="utf-8")

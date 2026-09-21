@@ -13,7 +13,11 @@
   error, while both `chock sync --check` and `chock check` reported clean. `sync` now
   uninstalls chock's entries from every vendor it no longer wires before pruning that
   vendor's runtime, the same removal path the installers already take when a policy stops
-  compiling (deleting a config file that held only chock's entries).
+  compiling (deleting a config file that held only chock's entries). A repo already broken
+  by 0.9.1 -- whose runtime is already gone, and only the config entry says a vendor was
+  ever wired -- self-heals on the next `sync` too, as this repo's own `.agents/hooks.json`
+  did (dogfooding turned up a live instance of #151 here: `antigravity` left `supported_agents`
+  under #150 and its runtime was pruned, but the stale entry was never removed until now).
 - **`chock check` catches a dangling hook target.** A new repo check
   (`check_dangling_hook_targets()`) reads every hook config chock can write and reports an
   error on any chock-written entry naming a `.chock/bin/` path that does not exist, with

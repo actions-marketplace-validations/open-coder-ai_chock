@@ -8,19 +8,21 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from chock import vendors
 from chock.compile.compiler import _load_manifest, compile_policy
 from chock.compile.levels import DISABLED, Grade
 from chock.config import agents_from_config, load_config, policy_status
 from chock.emit import write_generated_json
 from chock.hooks.in_agent_install import (
     WIRED_VENDORS,
+    agent_hooks_rel,
     install_hooks,
     install_label,
     installed_policy_ids,
     uninstall_hooks,
 )
 from chock.hooks.installers import get_hooks_dir, install_policy_hooks
-from chock.hooks.runtime_vendor import runtime_rel
+from chock.hooks.runtime_vendor import owned_markers, runtime_rel
 from chock.hooks.sessionstart_install import install_sessionstart_hook
 from chock.index.cli import cmd_refresh
 from chock.output import warn
@@ -67,29 +69,47 @@ def wired_vendors(agents: list[str]) -> tuple[str, ...]:
     return tuple(v for v in WIRED_VENDORS if v in chosen)
 
 
+def _vendor_needs_uninstall(repo_root: Path, vendor: str) -> bool:
+    """Whether `vendor` shows any trace of a past chock install worth undoing.
+
+    A vendored runtime still on disk is the ordinary signal -- `install_hooks`/`vendor_runtime`
+    only ever write one for a wired vendor. But a vendor whose runtime an earlier, buggy sync
+    already deleted without touching its config (#151) leaves no such trace, so this also
+    recognises chock's own marker still sitting in the vendor's config: naming a `.chock/bin/`
+    path that no longer resolves is exactly what made #151 silent. A vendor the adopter never
+    had matches neither and is a true no-op: nothing here is read or written for it.
+    """
+    if (repo_root / runtime_rel(vendor)).exists():
+        return True
+    if vendor in vendors.AGENT_HOOKS_VENDORS:
+        return (repo_root / agent_hooks_rel(vendor)).exists()
+    config_path = repo_root / vendors.config_path(vendor)
+    if not config_path.exists():
+        return False
+    try:
+        text = config_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return any(marker.lstrip("/") in text for marker in owned_markers(vendor))
+
+
 def _uninstall_unwired_vendors(repo_root: Path, wired: tuple[str, ...]) -> None:
     """Undo chock's install for a vendor `wired` no longer names, then prune its runtime.
 
-    A vendored runtime is only ever written for a wired vendor (`install_hooks` /
-    `vendor_runtime`), so its presence here is exactly the signal that this vendor was wired
-    at some past sync -- a vendor the adopter never had stays untouched. Compiling is
-    agent-agnostic (a vendor `supported_agents` no longer names still gets its fragments
-    compiled), so `uninstall_hooks` takes the removal path directly rather than relying on
-    the compiled tree actually being empty for it: chock's entries come out, a config file
-    that held only chock's is deleted, and (for the vendors whose installer does not already
-    do this itself) the leftover runtime is unlinked once nothing references it. A vendor the
-    adopter never had is a no-op: without a runtime on disk there is nothing here to undo.
+    Compiling is agent-agnostic (a vendor `supported_agents` no longer names still gets its
+    fragments compiled), so `uninstall_hooks` takes the removal path directly rather than
+    relying on the compiled tree actually being empty for it: chock's entries come out, a
+    config file that held only chock's is deleted, and (for the vendors whose installer does
+    not already do this itself) the leftover runtime is unlinked once nothing references it.
     """
     for vendor in WIRED_VENDORS:
-        if vendor in wired:
-            continue
-        stale = repo_root / runtime_rel(vendor)
-        if not stale.exists():
+        if vendor in wired or not _vendor_needs_uninstall(repo_root, vendor):
             continue
         try:
             uninstall_hooks(repo_root, vendor)
         except ValueError as exc:
             warn(str(exc))
+        stale = repo_root / runtime_rel(vendor)
         if stale.exists():
             stale.unlink()
             print(f"Removed {runtime_rel(vendor).as_posix()} ({vendor} not in supported_agents)")
