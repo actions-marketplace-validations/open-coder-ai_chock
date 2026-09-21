@@ -14,6 +14,7 @@ from chock.config import agents_from_config, load_config, policy_status
 from chock.emit import write_generated_json
 from chock.hooks.in_agent_install import WIRED_VENDORS, install_hooks, install_label, installed_policy_ids
 from chock.hooks.installers import get_hooks_dir, install_policy_hooks
+from chock.hooks.runtime_vendor import runtime_rel
 from chock.hooks.sessionstart_install import install_sessionstart_hook
 from chock.index.cli import cmd_refresh
 from chock.output import warn
@@ -58,6 +59,23 @@ def wired_vendors(agents: list[str]) -> tuple[str, ...]:
     """The in-agent vendors `sync` wires: those the repo's agent list names, and no other's config file."""
     chosen = {CHOCK_AGENT[a] for a in agents if a in CHOCK_AGENT}
     return tuple(v for v in WIRED_VENDORS if v in chosen)
+
+
+def _prune_unwired_runtimes(repo_root: Path, wired: tuple[str, ...]) -> None:
+    """Delete a vendored runtime for a vendor `wired` no longer names.
+
+    `install_hooks`/`vendor_runtime` only ever write a runtime for a wired vendor, so one a
+    vendor lost (dropped from `supported_agents`, or never in `CHOCK_AGENT`) is never
+    rewritten and never removed either -- it sits stale, drifting against every future
+    render, and `vendored_differences` still checks any file it finds on disk.
+    """
+    for vendor in WIRED_VENDORS:
+        if vendor in wired:
+            continue
+        stale = repo_root / runtime_rel(vendor)
+        if stale.exists():
+            stale.unlink()
+            print(f"Removed {runtime_rel(vendor).as_posix()} ({vendor} not in supported_agents)")
 
 
 def compiled_differences(repo_root: Path | str, agents: list[str]) -> list[str]:
@@ -161,6 +179,7 @@ def recompile(repo_root: Path | str, agents: list[str], *, skip_hooks: bool = Fa
         install_policy_hooks(repo_root, get_hooks_dir(repo_root))
 
         wired = wired_vendors(agents)
+        _prune_unwired_runtimes(repo_root, wired)
         try:
             if CHOCK_AGENT["claude"] in wired and install_sessionstart_hook(repo_root):
                 print("Registered SessionStart arm hook in .claude/settings.json")

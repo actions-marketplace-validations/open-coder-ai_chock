@@ -49,3 +49,18 @@ def test_a_cursor_only_repo_gets_no_claude_settings(tmp_path: Path) -> None:
 
     assert (repo / ".cursor" / "hooks.json").exists()
     assert not (repo / ".claude" / "settings.json").exists()
+
+
+def test_a_vendor_dropped_from_supported_agents_has_its_runtime_pruned(tmp_path: Path) -> None:
+    """A vendor's `.chock/bin/<vendor>.py` outlives it leaving `supported_agents` otherwise:
+
+    nothing rewrites it once it is unwired, so it drifts against every future render forever.
+    """
+    repo = _repo(tmp_path)
+    recompile(repo, ["claude", "cursor"], skip_hooks=False)
+    assert (repo / ".chock" / "bin" / "cursor.py").exists()
+
+    recompile(repo, ["claude"], skip_hooks=False)
+
+    assert not (repo / ".chock" / "bin" / "cursor.py").exists()
+    assert (repo / ".chock" / "bin" / "claude_code.py").exists()

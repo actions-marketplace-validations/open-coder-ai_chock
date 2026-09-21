@@ -101,6 +101,16 @@
   `.devin/`, ...) and vendored ten runtimes; the SessionStart arm hook was installed whether
   or not claude was named (`recompile.wired_vendors()`).
 
+- **`agentseam` bumped to 0.3.1.** Its own `dispatch.handle()` now refuses a handler that
+  raises in the vendor's dialect, instead of letting the exception escape; every vendored
+  runtime's `main()` gains the matching `_decide()`/`_report()` wrapping, so a policy handler
+  that raises is answered with a deny instead of an unhandled traceback. `dispatch.py.tmpl`'s
+  own try/except in `gate/runtime_bundle.py` already refused on failure from the outside and
+  is now redundant with agentseam's inner one for the vendored runtimes this repo emits; it
+  stays for this release as defense in depth rather than being pulled the same cycle as the
+  bump. 0.3.1 also writes `dump()` output as LF on every platform, which chock's own code
+  paths never call. Every adopter's next `chock sync` rewrites `.chock/bin/*.py`.
+
 ## 0.9.0 — In-session enforcement for content policies: the write path, the `stop` backstop, and the waiver that could not be self-served
 
 - **The vendored runtime refuses when it cannot decide.** `handle()` in every
