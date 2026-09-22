@@ -82,6 +82,24 @@ def _prepare(repo: Path, spec: dict[str, Any]) -> None:
         _git(repo, "add", *sorted(staged))
 
 
+def _install_script(repo: Path, policy_dir: Path, gate_spec: dict[str, Any]) -> None:
+    """Put a script gate's program where the compiled gate names it, as `chock sync` would have.
+
+    A declarative gate is whole in its JSON, so the throwaway repo needs nothing else. A script
+    gate names a file under the policy's `implementations/`, and the runner resolves that name
+    from the repository root -- a root that, here, holds only the case's own files. Copied, not
+    staged: the material a case puts before the gate is the files it lists, never the gate's
+    own program.
+    """
+    if gate_spec.get("kind") != "script":
+        return
+    named = str((gate_spec.get("params") or {}).get("script", ""))
+    source = Path(policy_dir) / "implementations"
+    if not named or not source.is_dir():
+        return
+    shutil.copytree(source, repo / Path(named).parent, dirs_exist_ok=True)
+
+
 def _run_gate(repo: Path, gate_spec: dict[str, Any], spec: dict[str, Any]) -> tuple[str, str]:
     """Return (verdict, detail) by running the compiled gate as a git hook would."""
     gate_path = repo / "gate.json"
@@ -188,6 +206,7 @@ def run_case(case: Case, policy_dir: Path, repo_root: Path, guards: list[Path]) 
                     }[source]
                     return CaseResult(case, "error", detail=reason)
                 _prepare(repo, spec)
+                _install_script(repo, policy_dir, gate_spec)
                 verdict, detail = _run_gate(repo, gate_spec, spec)
                 if source == "manifest":
                     detail = f"{detail} [gate derived from manifest; policy not compiled]"

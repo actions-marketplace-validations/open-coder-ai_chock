@@ -1,5 +1,22 @@
 # Chock changelog
 
+## Unreleased
+
+- **A script gate's evals replay.** `chock check --only evals` runs a staged-files case against
+  the compiled gate in a throwaway repository that holds only the case's own files -- whole
+  for a declarative gate, whose JSON is the entire check, and empty-handed for a `kind: script`
+  gate, whose program lives under the policy's `implementations/` and is resolved from the
+  repository root. Every such case observed "not installed" and refused, so a suite could only
+  pass by expecting `block`. The runner now copies the policy's `implementations/` to where the
+  compiled gate names the script, as `chock sync` would have, before running the case.
+- **A script gate's ambient line names the script, not its address.** The `on(...)` line an
+  agent reads rendered the compiled `script` param, which is the file's path from the repository
+  root and so differs between a catalog tree (`base/<id>/...`) and an adopter
+  (`.agents/policies/<id>/...`). The packaged `SKILL.md` carries that line, so `chock plugin build
+  --check` could not be clean in both places at once. The bare file name is rendered now, which is
+  what the manifest declares; the `stability-script` golden moves with it (an emitter change, so
+  this is a minor release under the stability rule).
+
 ## 0.9.3 — A `kind: script` gate that runs a policy's own program, and a native Devin plugin format and marketplace tree on agentseam 0.3.2
 
 - **`kind: script` gate**: a `hook.gate` whose check is the policy's own program, for a check no
