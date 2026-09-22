@@ -1,6 +1,6 @@
 # Chock changelog
 
-## Unreleased
+## 0.10.0 — A script gate's evals replay, and its ambient line names the script by file
 
 - **A script gate's evals replay.** `chock check --only evals` runs a staged-files case against
   the compiled gate in a throwaway repository that holds only the case's own files -- whole
