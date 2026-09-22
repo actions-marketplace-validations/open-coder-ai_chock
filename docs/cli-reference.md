@@ -85,15 +85,13 @@ The one "make it so" verb (`uv sync` semantics): recompiles every enabled policy
 `.chock/compiled/`, reinstalls the git-hook dispatchers, policy wrappers and the in-agent hooks of the agents
 `supported_agents` names, uninstalls chock's entries from any vendor it no longer names (deleting a config file that
 held only chock's) before pruning that vendor's runtime, regenerates `INDEX.md` and the `AGENTS.md` pointer, refreshes
-the registry, and rewrites `chock.lock`. Run it after editing a policy, toggling config by hand, or bumping the engine
-version. A failed recompile never removes the existing compiled tree — the build is staged and swapped in only on
-success — and a lockfile-write failure fails the command. An adopter-edited dispatcher is backed up to
-`<event>.chock-backup` before being regenerated; custom steps belong in `<event>.d/`.
+the registry, and rewrites `chock.lock`. Run after editing a policy, toggling config, or bumping the engine version. A
+failed recompile never removes the existing compiled tree — staged and swapped in only on success — and a
+lockfile-write failure fails the command. An adopter-edited dispatcher is backed up to `<event>.chock-backup` before
+being regenerated; custom steps belong in `<event>.d/`.
 
-- `--check` — write nothing; exit non-zero listing every compiled artifact that no longer
-  matches its manifest. This is the CI drift gate.
-- `--ci` — additionally write the GitHub Actions workflow that runs every compiled `ci-gate` on pull requests. Idempotent;
-  refuses to overwrite a workflow it did not write. Until this runs, `ci-gate` output is compiled but not enforced.
+- `--check` — write nothing; exit non-zero listing every compiled artifact that no longer matches its manifest. The CI drift gate.
+- `--ci` — additionally write the GitHub Actions workflow running every compiled `ci-gate` on pull requests. Idempotent; refuses to overwrite a workflow it did not write. Until this runs, `ci-gate` output is compiled but not enforced.
 - `--skills` — additionally refresh the bundled authoring skills in `.agents/skills/`.
 - `--skip-hooks` — compile and refresh bookkeeping without touching `.git/hooks`.
 
@@ -103,8 +101,7 @@ success — and a lockfile-write failure fails the command. An adopter-edited di
 chock check [--repo .] [--only validate,verify,evals,matrix,mechanisms,index,conflicts,baseline] [--mode MODE] [--event EVENT] [--base REF]
 ```
 
-Runs every truth check, read-only — `check` never regenerates what it measures (that is
-`sync`'s job):
+Runs every truth check, read-only — `check` never regenerates what it measures (that is `sync`'s job):
 
 | Target | What it proves |
 | :--- | :--- |
@@ -197,7 +194,7 @@ diffs the result to catch a stale registry. See [Registry & Lockfile](registry-a
 ### `plugin build` — package policies as installable plugins
 
 ```bash
-chock plugin build [--repo .] [--policies-dir base] [--format agent-plugins|claude|copilot|cursor|codex|all] [--out-dir DIST] [--policy ID ...] [--out PATH] [--check]
+chock plugin build [--repo .] [--policies-dir base] [--format agent-plugins|claude|copilot|cursor|codex|devin|all] [--out-dir DIST] [--policy ID ...] [--out PATH] [--check]
 ```
 
 Renders each policy as a plugin. The default `agent-plugins` format writes an
@@ -205,28 +202,33 @@ Renders each policy as a plugin. The default `agent-plugins` format writes an
 `manifest.yaml` stays the source of truth, and a packaged policy is `advisory` wherever it is
 read: v1 defines no enforcement semantics, so packaging changes no value in `coverage.json`.
 
-The four hook formats ship a byte-identical guard and adapter; only the envelope differs.
+The five hook formats ship a byte-identical guard and adapter; only the envelope differs.
 `claude` (`.claude-plugin/`) is read natively by Claude Code, Copilot CLI, VS Code and Grok
 Build; `copilot` is the Agent Plugins 1.0 layout under `com.github.copilot/hooks/`; `cursor`
 (`.cursor-plugin/`, `beforeShellExecution`) and `codex` (`.codex-plugin/`, `PreToolUse`) each
-reach a hook engine no other package can, failing **open** when `python3` is absent. They
-require `--out-dir` (or `--out`); in-place output is refused so a policy folder is never
-mistaken for a published plugin. `--policies-dir` packages a published directory; `--check`
-judges without writing. `--policy ID` (repeatable; manifest `id` or directory name, else a
-named error) narrows the build and skips `--out-dir` stale-package cleanup. `--out PATH`
-(exactly one `--policy`) writes straight to `PATH` instead of `<out-dir>/<format>/<id>/`.
+reach a hook engine no other package can, failing **open** when `python3` is absent. `devin`
+(`.devin-plugin/plugin.json` + `hooks.json`, `PreToolUse`) is best-effort by the vendor's own
+design, fail-open, not enforced. They require `--out-dir` (or `--out`); in-place output is
+refused so a policy folder is never mistaken for a published plugin. `--policies-dir` packages
+a published directory; `--check` judges without writing. `--policy ID` (repeatable; manifest
+`id` or directory name, else a named error) narrows the build and skips `--out-dir`
+stale-package cleanup. `--out PATH` (exactly one `--policy`) writes straight to `PATH` instead
+of `<out-dir>/<format>/<id>/`.
 
 ### `marketplace build` — index a built plugin tree
 
 ```bash
-chock marketplace build [--dist .] [--name chock] [--tree claude|cursor|codex] [--check]
+chock marketplace build [--dist .] [--name chock] [--tree claude|cursor|codex|devin] [--url URL] [--check]
 ```
 
 Scans `<dist>/<tree>/*/` and writes that vendor's index: claude →
 `.claude-plugin/marketplace.json` + `.github/plugin/marketplace.json` (Copilot CLI's
 path), cursor → `.cursor-plugin/marketplace.json`, codex → the legacy `.claude-plugin/`
-shape Codex reads from git marketplaces. Entries derive from built manifests, never
-hand-listed; an empty tree exits 2; `--check` reports drift without writing.
+shape Codex reads from git marketplaces. `devin` has no index format: it writes a root
+`.devin-plugin/plugin.json` meta-plugin whose `optionalPlugins` point `git-subdir` entries at
+each built plugin, and needs `--url` (the marketplace repo's own git URL — never guessed from
+`git remote`). Entries derive from built manifests, never hand-listed; an empty tree exits 2;
+`--check` reports drift without writing.
 
 ### `gateway run` -- the MCP gateway proxy
 
@@ -251,20 +253,17 @@ claims print under **NOT verified**. `require` is the CI-side gate: present, val
 chock compliance report [--repo .] [--framework owasp_asi] [--json]
 ```
 
-Lists the framework controls and which installed policies claim to cover them. Each
-control's state is `covered`, `partial`, or `uncovered` (per-claim `coverage` on a policy
-is `partial` or `full`). The command fails closed with exit 2 on a missing `--repo`, an
-unknown framework nothing claims, or an unknown subcommand. In a repo that has been
-synced, a claim also requires the policy's compiled output to exist — a declared control
-whose compiled mechanism was deleted is not counted.
+Lists the framework controls and which installed policies claim to cover them. Each control's state is `covered`,
+`partial`, or `uncovered` (per-claim `coverage` on a policy is `partial` or `full`). The command fails closed with
+exit 2 on a missing `--repo`, an unknown framework nothing claims, or an unknown subcommand. In a repo that has been
+synced, a claim also requires the policy's compiled output to exist — a declared control whose compiled mechanism
+was deleted is not counted.
 
-Builtin frameworks (one per data file in `src/chock/authoring/data/`, each enumerated
-from its publisher's primary source): `owasp_asi` (ASI01–10), `mitre_atlas` (170
-techniques, from the official machine-readable dataset), `nist_ai_rmf` (the 72 AI RMF 1.0
-subcategories), `eu_ai_act` (a curated set of technical-obligation articles). A policy
-claims controls in its manifest's `compliance:` block, keyed by framework name — unknown
-framework names still validate, so private frameworks work with `--json` and your own
-control list.
+Builtin frameworks (one per data file in `src/chock/authoring/data/`, each enumerated from its publisher's primary
+source): `owasp_asi` (ASI01–10), `mitre_atlas` (170 techniques, from the official machine-readable dataset),
+`nist_ai_rmf` (the 72 AI RMF 1.0 subcategories), `eu_ai_act` (a curated set of technical-obligation articles). A
+policy claims controls in its manifest's `compliance:` block, keyed by framework name — unknown framework names
+still validate, so private frameworks work with `--json` and your own control list.
 
 ## Pre-launch aliases
 

@@ -33,6 +33,21 @@ def enforced_codex(*, ledger=None) -> str:
     )
 
 
+def enforced_devin(*, ledger=None) -> str:
+    """Devin's best-effort posture: the vendor's own fail-open caveat, session-scoped and unwitnessed."""
+    return (
+        "Best-effort in Devin by a PreToolUse hook shipped with the plugin's hooks.json "
+        f"({witness_clause('devin', ledger=ledger)}). In the vendor's own words, plugin hooks "
+        "are 'currently best effort and fail open -- if a hook fails to load or run, the "
+        "session continues without it -- so don't rely on them for crucial guardrails yet', "
+        "documented for local Devin sessions (the CLI and Devin Desktop) only. The hook "
+        "command expands $DEVIN_PLUGIN_ROOT, an environment variable the vendor documents "
+        "hook commands receive; whether that expansion happens inside a hooks.json command "
+        "string is documented, not witnessed here. The hook needs python3 on PATH. Repo-wide "
+        "git-hook and CI coverage still needs `chock sync`."
+    )
+
+
 def enforced_cursor(*, ledger=None) -> str:
     """Cursor's enforced posture: the interpreters it needs, and what it does without them."""
     return (

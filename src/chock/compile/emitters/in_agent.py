@@ -98,9 +98,16 @@ def hook_entry(command: str, *, matcher: str | None = None) -> dict[str, Any]:
 
 
 def hooks_map_file(vendor: str, command: str) -> dict[str, Any]:
-    """A claude-plugin-format hooks file under `vendor`'s own pre-tool event spelling."""
+    """A hooks file under `vendor`'s own pre-tool event spelling.
+
+    Wrapped in a top-level `hooks` key (the claude-plugin format) unless `vendor`'s own
+    hook_entry is bare -- Devin's native `hooks.json` at the plugin root is the event map
+    itself, with no wrapper, unlike the nested `hooks/hooks.json` every other format here
+    shares.
+    """
     matcher = vendors.shell_matcher(vendor)
-    return {"hooks": {vendors.pre_tool_event(vendor): [hook_entry(command, matcher=matcher)]}}
+    event_map = {vendors.pre_tool_event(vendor): [hook_entry(command, matcher=matcher)]}
+    return event_map if vendors.hook_entry_bare(vendor) else {"hooks": event_map}
 
 
 def cursor_entry(command: str) -> dict[str, Any]:
