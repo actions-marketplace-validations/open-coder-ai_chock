@@ -2,6 +2,18 @@
 
 ## 0.9.3 — A native Devin plugin format and a Devin marketplace tree, on agentseam 0.3.2
 
+- **`kind: script` gate**: a `hook.gate` whose check is the policy's own program, for a check no
+  declarative kind can hold -- a parser, a flow model over a method body, a rule table larger
+  than `params`. The runner hands the script the same material every declarative kind reads
+  (`{"event", "repo_root", "writes"}` on stdin: the staged blobs at commit and push, the write
+  itself at tool use and at the turn's end) and carries back its exit code -- `0` allows, `1`
+  refuses in the script's own words. A missing script, a crash or a timeout refuses in the
+  runner's words, never allows. It is a write-path kind, so the existing emitters wire it to the
+  write fragment and to `stop` unchanged: a script-backed policy now reaches every vendor a
+  `content_regex` gate does. Until now a script could only be a shell guard (`--guard`,
+  argv-shaped, never shown the file being written) or a git-event script (commit and push only);
+  the gap a script-backed gate left was named in the catalog's own a11y changelog. `chock check`
+  refuses a script name that is not a bare `.py` file name, and one the policy does not ship.
 - **`devin` plugin format**: `chock plugin build --format devin` packages a policy as a native
   Devin plugin (`.devin-plugin/plugin.json` + `skills/<id>/SKILL.md` + a root-level `hooks.json`,
   not the nested `hooks/hooks.json` every other format uses). Same guard, same adapter,

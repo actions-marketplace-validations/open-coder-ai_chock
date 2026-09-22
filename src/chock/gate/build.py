@@ -7,6 +7,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from chock.compile.emitters import policy_rel_path
 from chock.config import load_config
 from chock.manifest import load_manifest
 
@@ -54,6 +55,12 @@ def build_gate_json(policy_dir: Path, repo_root: Path) -> dict[str, Any] | None:
         if isinstance(resolved, list) and resolved:
             spec["params"]["refs"] = [str(r) for r in resolved]
         spec["params"].pop("config_key", None)
+
+    if spec["kind"] == "script":
+        # The manifest names a file under the policy's own implementations/. The compiled gate
+        # carries where that is from the repository root, which is all the runner has to go on.
+        script = str(spec["params"].get("script", ""))
+        spec["params"]["script"] = f"{policy_rel_path(policy_dir)}/implementations/{script}"
 
     return spec
 

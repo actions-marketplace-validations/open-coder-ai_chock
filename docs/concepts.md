@@ -43,7 +43,8 @@ fields include:
 ## Gate
 
 A hook's `hook.gate` in `manifest.yaml` selects a deterministic **kind** (`content_regex`, `forbidden_ref`,
-`dependency_allowlist`), its `params`, the events it runs on (`on: [commit|push|tool_use]`), and the message
+`dependency_allowlist`, `test_integrity`, or `script` for a check the policy's own program makes), its
+`params`, the events it runs on (`on: [commit|push|tool_use]`), and the message
 shown on block. `chock compile` flattens it to `gate.json`, which the vendored `.chock/bin/gate.py`
 runner enforces at git-hook time. See [Gate DSL](../spec/gate-dsl.md).
 
