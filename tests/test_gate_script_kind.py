@@ -17,7 +17,10 @@ import pytest
 import yaml
 from conftest import init_repo, stage
 
+from chock.compile.emitters.advisory import advisory_lines
 from chock.compile.emitters.in_agent import GATE_FILE, STOP_FRAGMENT, WRITE_FRAGMENT, emit_pre_tool_use, emit_stop
+from chock.eval.execute import run_case
+from chock.eval.model import Case
 from chock.gate import runner
 from chock.gate.build import build_gate_json
 from chock.gate.runner import WRITE_PATH_KINDS, run
@@ -222,3 +225,56 @@ def test_a_declared_script_must_be_shipped(tmp_path: Path) -> None:
 def test_a_shipped_script_validates(tmp_path: Path) -> None:
     policy, _ = _policy(tmp_path)
     assert _messages(_spec(SCRIPT), policy) == []
+
+
+# --- an eval case replays against the script, not against its absence --------------------------
+
+
+def _case(files: dict[str, str], expect: str) -> Case:
+    return Case(
+        id="t",
+        category="trigger",
+        prompt="p",
+        expect="e",
+        policy_id=POLICY_ID,
+        execute={"files": files, "event": "commit", "expect": expect},
+    )
+
+
+@pytest.mark.parametrize(("text", "expect"), [(MARKER, "block"), ("clean", "allow")])
+def test_an_eval_case_finds_the_script_in_the_throwaway_repo(tmp_path: Path, text: str, expect: str) -> None:
+    """The throwaway repo holds only the case's files; the gate's own program has to be put there."""
+    init_repo(tmp_path)
+    policy, _ = _policy(tmp_path)
+    result = run_case(_case({"App.java": text}, expect), policy, tmp_path, guards=[])
+    assert result.outcome == "pass", result.detail
+
+
+def test_an_eval_case_never_stages_the_script_itself(tmp_path: Path) -> None:
+    """A script that refuses its own text must not refuse every case by being in the writes."""
+    init_repo(tmp_path)
+    policy, _ = _policy(tmp_path)
+    (policy / "implementations" / SCRIPT).write_text(GATE_SCRIPT.replace('"FORBIDDEN" in t', '"sys.exit" in t'))
+    result = run_case(_case({"App.java": "clean"}, "allow"), policy, tmp_path, guards=[])
+    assert result.outcome == "pass", result.detail
+
+
+# --- the ambient line names the script wherever the policy sits ------------------------------------
+
+
+def test_the_ambient_line_names_the_script_not_its_address(tmp_path: Path) -> None:
+    """One packaged SKILL.md must be right in a catalog tree and in .agents/policies alike."""
+    adopted, _ = _policy(tmp_path)
+    catalog_root = tmp_path / "catalog"
+    (catalog_root / ".chock").mkdir(parents=True)
+    catalog = catalog_root / "base" / POLICY_ID
+    (catalog / "implementations").mkdir(parents=True)
+    (catalog / "manifest.yaml").write_text((adopted / "manifest.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    (catalog / "implementations" / SCRIPT).write_text(GATE_SCRIPT, encoding="utf-8")
+    assert advisory_lines(adopted, yaml.safe_load((adopted / "manifest.yaml").read_text()), tmp_path) == advisory_lines(
+        catalog, yaml.safe_load((catalog / "manifest.yaml").read_text()), catalog_root
+    )
+    assert (
+        f"script={SCRIPT}"
+        in advisory_lines(adopted, yaml.safe_load((adopted / "manifest.yaml").read_text()), tmp_path)[0]
+    )

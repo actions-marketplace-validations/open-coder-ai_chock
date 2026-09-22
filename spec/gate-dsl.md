@@ -124,9 +124,12 @@ missing script, a crash, a timeout (30s) -- refuses too, in the runner's words: 
 reaches no decision never reports an allow it never established.
 
 `chock compile` rewrites `script` to the file's path from the repository root, which is all
-the runner has. `chock check` refuses a name that is not a bare `.py` file name, and a script
-the policy does not ship. The script is deterministic code under `implementations/`, so SEC-2
-applies to it as to any guard.
+the runner has; the ambient line an agent reads keeps the bare name, so the packaged `SKILL.md`
+is the same wherever the policy sits. `chock check` refuses a name that is not a bare `.py` file
+name, and a script the policy does not ship. The script is deterministic code under
+`implementations/`, so SEC-2 applies to it as to any guard, and `chock check --only evals`
+copies that directory into the throwaway repository a staged-files case is replayed in, where
+the compiled gate names it.
 
 ## Runtime note
 
