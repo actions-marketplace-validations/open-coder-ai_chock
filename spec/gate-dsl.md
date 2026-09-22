@@ -7,7 +7,7 @@ For `artifact: hook` policies, the gate is declared under `hook.gate` in `manife
 
 | field | required | type | notes |
 |-------|----------|------|-------|
-| `kind` | yes | string | `content_regex`, `forbidden_ref`, `dependency_allowlist`, `test_integrity`, or `egress_allowlist` (gateway-only) |
+| `kind` | yes | string | `content_regex`, `forbidden_ref`, `dependency_allowlist`, `test_integrity`, `script`, or `egress_allowlist` (gateway-only) |
 | `on` | yes | list | events: `commit`, `push`, `tool_use`. The key must be quoted `"on"` in YAML. |
 | `action` | yes | string | `block`, `verify`, or `warn` |
 | `message` | yes | string | printed to stderr when the gate blocks |
@@ -99,6 +99,34 @@ change (removed lines matching `assertion_pattern` outnumber added ones, counted
 files matching `test_path_regex`), and a vacuous assertion added in place of a real one.
 Only the staged diff is read (`removed_lines`/`added_lines`), so a file that already
 contained fewer assertions before this commit does not block it.
+
+### `kind: script`
+
+| param | required | type | notes |
+|-------|----------|------|-------|
+| `script` | yes | string | a file name under the policy's `implementations/` directory: bare (no `/`, so nothing outside that directory) and `.py`, run by the runner's own interpreter |
+
+For a check no declarative kind can hold -- one that has to parse, follow a value through a
+method body, or read a rule table too large for `params`. The runner hands the policy's own
+program the same material every kind above reads, as JSON on stdin:
+
+```json
+{"event": "tool_use", "repo_root": "/path/to/repo", "writes": {"src/App.java": "<file text>"}}
+```
+
+`event` is `commit`, `push` or `tool_use`. `writes` is the staged blobs at `commit` and
+`push`, and the write itself at `tool_use` -- the file a tool call is about to write, or what
+the turn left on disk at its end -- so one script serves every surface, and it reaches the
+write path and the turn's end exactly as `content_regex` does. The script answers with its
+exit code: `0` allows; `1` refuses, with its own words on stderr, which become the reason
+shown (the gate's `message` is not printed for a script that spoke). Any other outcome -- a
+missing script, a crash, a timeout (30s) -- refuses too, in the runner's words: a gate that
+reaches no decision never reports an allow it never established.
+
+`chock compile` rewrites `script` to the file's path from the repository root, which is all
+the runner has. `chock check` refuses a name that is not a bare `.py` file name, and a script
+the policy does not ship. The script is deterministic code under `implementations/`, so SEC-2
+applies to it as to any guard.
 
 ## Runtime note
 

@@ -55,6 +55,15 @@ KIND_PARAM_SCHEMAS: dict[str, dict] = {
             "allowlist_pragma": {"type": "string"},
         },
     },
+    "script": {
+        **_CLOSED_OBJECT,
+        "required": ["script"],
+        "properties": {
+            # A bare file name under the policy's own implementations/: no separator, so no
+            # way out of that directory, and .py only, which the runner's own interpreter runs.
+            "script": {"type": "string", "pattern": r"^[A-Za-z0-9._-]+\.py$"},
+        },
+    },
     "egress_allowlist": {
         **_CLOSED_OBJECT,
         "required": ["allowed_hosts"],
