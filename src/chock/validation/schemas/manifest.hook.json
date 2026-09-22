@@ -23,7 +23,8 @@
             "content_regex",
             "forbidden_ref",
             "dependency_allowlist",
-            "test_integrity"
+            "test_integrity",
+            "script"
           ]
         },
         "on": {
