@@ -70,13 +70,30 @@ def test_devin_guard_policy_layout_and_hook(policy, tmp_path: Path) -> None:
     }
 
     hooks = json.loads(files[Path("hooks.json")])
-    assert set(hooks) == {"hooks"}
-    entry = hooks["hooks"]["PreToolUse"][0]
+    assert set(hooks) == {"PreToolUse"}, "devin's own hook_entry is bare: no top-level `hooks` wrapper"
+    entry = hooks["PreToolUse"][0]
     assert "matcher" not in entry, "devin's shell-tool vocabulary is unrecorded, never invented"
     inner = entry["hooks"][0]
     assert inner["type"] == "command"
     assert inner["command"] == (
         'python3 "$DEVIN_PLUGIN_ROOT/scripts/devin.py" --guard "$DEVIN_PLUGIN_ROOT/scripts/block-destructive-commands.sh"'
+    )
+
+
+def test_devin_hooks_shape_matches_agentseams_own_hook_config(policy, tmp_path: Path) -> None:
+    """The emitted file must honour agentseam's `bare` flag, not chock's own wrapping default."""
+    from agentseam import adapters, contract
+
+    files = devin_plugin_files(policy(GUARD_MANIFEST, guard=True), GUARD_MANIFEST, tmp_path)
+    hooks = json.loads(files[Path("hooks.json")])
+    command = hooks["PreToolUse"][0]["hooks"][0]["command"]
+
+    upstream = adapters.get("devin").hook_config((contract.PRE_TOOL,), command, None)
+    assert set(hooks) == set(upstream), "same top-level shape as agentseam's own hook_config for devin"
+    upstream_inner = upstream["PreToolUse"][0]["hooks"][0]
+    ours_inner = hooks["PreToolUse"][0]["hooks"][0]
+    assert {**ours_inner, "timeout": None} == {**upstream_inner, "timeout": None}, (
+        "identical modulo chock's own timeout key"
     )
 
 

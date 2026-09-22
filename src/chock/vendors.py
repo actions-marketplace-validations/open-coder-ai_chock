@@ -134,6 +134,20 @@ def write_matcher(vendor: str) -> str | None:
     return "|".join(tools) if tools else None
 
 
+def hook_entry_bare(vendor: str) -> bool:
+    """Whether `vendor`'s own hook_config is the bare event map, with no top-level `hooks` key.
+
+    Every vendor with a recorded `hook_entry` wraps its event map in `{"hooks": {...}}`,
+    except Devin: its native `hooks.json` (unlike the nested `hooks/hooks.json` the Claude
+    layout writes) is the bare map itself, confirmed by
+    `agentseam.adapters.get("devin").CONFIG["hook_entry"] == {"bare": True, ...}`. A vendor
+    with no recorded `hook_entry` (vscode_copilot, witnessed rather than derived) is not bare.
+    """
+    config = getattr(_adapters.get(vendor), "CONFIG", None)
+    entry = (config or {}).get("hook_entry") if isinstance(config, dict) else None
+    return bool((entry or {}).get("bare"))
+
+
 def pre_tool_hook_config(vendor: str, command: str, matcher: str | None = None) -> dict[str, Any]:
     """The vendor's complete hook-config document gating pre-tool with `command`."""
     return _adapters.get(vendor).hook_config((_contract.PRE_TOOL,), command, matcher)
