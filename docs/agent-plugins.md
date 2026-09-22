@@ -37,10 +37,17 @@ moves; `manifest.yaml` stays the single source of truth and `plugin.json` is gen
 base/scan-secrets/
 ├── manifest.yaml              # canonical — hand-authored
 ├── evals/                     # unchanged
+├── skill/                     # optional, hand-authored: body.md + files the skill ships
 ├── plugin.json                # generated
 └── skills/scan-secrets/
-    └── SKILL.md               # generated
+    ├── SKILL.md               # generated; skill/body.md appended after the constraint block
+    └── ...                    # every other file under skill/, copied as it is
 ```
+
+`skill/` is the one hand-authored input beside the manifest. A policy whose skill needs more
+than its rendered constraints -- a guided setup page, a reference document -- puts the words
+in `skill/body.md` and the files beside it; the builder renders the first and copies the rest,
+and `chock plugin build --check` treats a changed or removed file as drift like any other.
 
 `plugin.json` derives every field from the manifest — `name` from `id`, `license`, `repository` and
 `author` from `provenance`, `keywords` from `artifact`, `enforcement` and any `compliance.owasp_asi`
@@ -194,7 +201,17 @@ real install**:
 | [chock-codex-plugins](https://github.com/open-coder-ai/chock-codex-plugins) | Codex (after its per-hook trust review) | exit 0 + `permissionDecision` JSON |
 
 One guard, one adapter, byte-identical across all four — only the envelope each client
-reads differs. The deny dialects are pinned by `tests/test_pretooluse_protocol.py` (every
+reads differs.
+
+The Claude format also carries a policy's **gate** when the gate declares `tool_use`: the
+compiled `scripts/gate.json`, the stdlib runner beside it as `scripts/gate.py`, and for
+`kind: script` the policy's whole `implementations/` under `scripts/`. `hooks/hooks.json`
+runs the same adapter with `--gate` on the vendor's recorded write tools at `PreToolUse`
+and, with no matcher, at `Stop`, so a file written through a shell heredoc is judged at the
+turn's end. The runtime finds the runner beside the gate and takes the repository from the
+event's working directory, which is where `.chock/` config such as a policy's selection file
+is read from. A gate that declares only `commit` stays advisory in the plugin: a hook that
+could only refuse is not installed. The deny dialects are pinned by `tests/test_pretooluse_protocol.py` (every
 case there reproduces a witnessed failure), and the probe evidence is recorded in the
 0.4.0 CHANGELOG entry. Codex additionally installs every hook **untrusted** until a human approves
 it, and that trust is bound to a hash of the hook command, so a plugin update silently

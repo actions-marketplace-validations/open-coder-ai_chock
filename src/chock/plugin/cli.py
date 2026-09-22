@@ -210,7 +210,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  plugin.json + skills/<id>/SKILL.md per policy; enforcement metadata under {NAMESPACE}")
     if "claude" in formats:
         print(
-            "  .claude-plugin/plugin.json + hooks/ + scripts/ per guard policy; fail posture stated in each description"
+            "  .claude-plugin/plugin.json + hooks/ + scripts/ per guard policy and per policy gating tool_use; "
+            "fail posture stated in each description"
         )
     if "copilot" in formats:
         print("  root plugin.json + com.github.copilot/hooks/ per guard policy; same posture discipline")

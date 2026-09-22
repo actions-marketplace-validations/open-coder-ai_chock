@@ -25,6 +25,9 @@ _GATE_TIMEOUT_SECONDS = 30
 #: a walk upwards could find a different repository's .chock on a nested checkout.
 _GATE_DEPTH_TO_CHOCK = 3
 _RUNNER_PARTS = ("bin", "gate.py")
+#: A plugin package lays the runner beside its gate instead; the repository root is then the
+#: agent's working directory, which the event carries.
+_PACKAGED_RUNNER = "gate.py"
 
 _GIT = "git"
 #: git status codes: a deletion leaves no content to judge, a rename is followed by its old path.
@@ -48,7 +51,10 @@ def gate_path_from_argv(argv):
 
 
 def runner_for(gate):
-    """The vendored gate runner beside this compiled gate, or None when it is not there."""
+    """The gate runner: beside the gate in a plugin, under .chock/bin in a repository, else None."""
+    packaged = gate.resolve().parent / _PACKAGED_RUNNER
+    if packaged.exists():
+        return packaged
     parents = gate.resolve().parents
     if len(parents) <= _GATE_DEPTH_TO_CHOCK:
         return None
@@ -110,7 +116,7 @@ def writes_from_worktree(repo_root):
     return writes
 
 
-def run_gate(gate, writes, event):
+def run_gate(gate, writes, event, root=None):
     """Ask the vendored runner. Returns (outcome, message) and never decides for itself."""
     runner = runner_for(gate)
     if runner is None:
@@ -123,6 +129,7 @@ def run_gate(gate, writes, event):
             text=True,
             timeout=_GATE_TIMEOUT_SECONDS,
             check=False,
+            cwd=str(root) if root is not None else None,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return GATE_ERRORED, str(exc)
@@ -146,7 +153,18 @@ def root_for(gate):
     parents = gate.resolve().parents
     if len(parents) <= _GATE_DEPTH_TO_CHOCK:
         return None
+    if parents[_GATE_DEPTH_TO_CHOCK - 1].name != "compiled" or parents[_GATE_DEPTH_TO_CHOCK].name != ".chock":
+        return None
     return parents[_GATE_DEPTH_TO_CHOCK].parent
+
+
+def repo_root_for(event, gate):
+    """The repository under judgement: the compiled layout's root, else where the agent works."""
+    root = root_for(gate)
+    if root is not None:
+        return root
+    cwd = getattr(event, "cwd", None)
+    return Path(cwd) if cwd else Path.cwd()
 
 
 def writes_for(event, gate):
@@ -156,8 +174,7 @@ def writes_for(event, gate):
     if (event.raw or {}).get("stop_hook_active"):
         # A refusal that re-entered its own stop hook would never terminate.
         return {}
-    root = root_for(gate)
-    return writes_from_worktree(root) if root is not None else {}
+    return writes_from_worktree(repo_root_for(event, gate))
 
 
 def evaluate_gate(argv, event):
@@ -169,7 +186,7 @@ def evaluate_gate(argv, event):
     writes = writes_for(event, gate)
     if not writes:
         return None
-    outcome, message = run_gate(gate, writes, name)
+    outcome, message = run_gate(gate, writes, name, repo_root_for(event, gate))
     if outcome == GATE_BLOCKED:
         return (VERDICT_DENY, message or f"Blocked by chock policy: {gate.parent.parent.name}")
     if outcome == GATE_ERRORED:

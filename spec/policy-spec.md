@@ -42,7 +42,7 @@ wiring:
 .agents/policies/<id>/
 ├── manifest.yaml          # contains hook.gate
 ├── implementations/       # optional: only if the hook needs scripts
-└── evals/suite.yaml
+└── evals/suite.yaml       # + skill/ (optional): body.md joins SKILL.md, other files ship beside it
 ```
 
 ### rule

@@ -9,6 +9,15 @@ from typing import Any
 from chock import vendors
 from chock.compile.emitters import DATA_DIR, GUARD_SUFFIXES, policy_rel_path
 from chock.compile.emitters.advisory import repo_root_from_output
+from chock.compile.emitters.in_agent_hooks import (  # noqa: F401 -- re-exported for the plugin emitters
+    TIMEOUT_SECONDS,
+    cursor_entry,
+    cursor_hooks_file,
+    gate_hooks_map_file,
+    generic_hooks_file,
+    hook_entry,
+    hooks_map_file,
+)
 from chock.emit import write_generated_json
 from chock.gate.build import build_gate_json
 from chock.gate.runner import WRITE_PATH_KINDS
@@ -33,8 +42,6 @@ def _guard_script(policy_dir: Path, policy_id: str) -> str | None:
         return legacy
     return None
 
-
-TIMEOUT_SECONDS = 30
 
 #: claude_code's own recorded shell vocabulary, used for its claude-plugin hooks file.
 MATCHER = vendors.shell_matcher("claude_code")
@@ -77,59 +84,13 @@ BESPOKE_VENDORS = ("claude_code", "cursor", "vscode_copilot")
 GENERIC_VENDORS = tuple(v for v in vendors.in_agent_vendors() if v not in BESPOKE_VENDORS)
 
 
-def generic_hooks_file(vendor: str, command: str) -> dict[str, Any]:
-    """`vendor`'s full hook-config document for one guard command, agentseam's rendering.
-
-    Paths inside `command` are repo-relative: no repo-root token is recorded upstream for
-    these vendors (the `${CLAUDE_PROJECT_DIR}` gap), so the entry resolves only where the
-    vendor runs hooks from the repo root -- the same condition under which the relative
-    adapter path resolves at all.
-    """
-    return vendors.pre_tool_hook_config(vendor, command, matcher=vendors.shell_matcher(vendor))
-
-
-def hook_entry(command: str, *, matcher: str | None = None) -> dict[str, Any]:
-    """One hooks-map entry (agentseam's `hooks_map` wrapper shape) plus chock's timeout."""
-    entry: dict[str, Any] = {}
-    if matcher is not None:
-        entry["matcher"] = matcher
-    entry["hooks"] = [{"type": "command", "command": command, "timeout": TIMEOUT_SECONDS}]
-    return entry
-
-
-def hooks_map_file(vendor: str, command: str) -> dict[str, Any]:
-    """A hooks file under `vendor`'s own pre-tool event spelling.
-
-    Wrapped in a top-level `hooks` key (the claude-plugin format) unless `vendor`'s own
-    hook_entry is bare -- Devin's native `hooks.json` at the plugin root is the event map
-    itself, with no wrapper, unlike the nested `hooks/hooks.json` every other format here
-    shares.
-    """
-    matcher = vendors.shell_matcher(vendor)
-    event_map = {vendors.pre_tool_event(vendor): [hook_entry(command, matcher=matcher)]}
-    return event_map if vendors.hook_entry_bare(vendor) else {"hooks": event_map}
-
-
-def cursor_entry(command: str) -> dict[str, Any]:
-    """One cursor hook entry: the flat `cursor` wrapper shape plus chock's timeout."""
-    return {"command": command, "timeout": TIMEOUT_SECONDS}
-
-
-def cursor_hooks_file(command: str) -> dict[str, Any]:
-    """A cursor-format hooks file: envelope and shell-gate event from the vendor entry."""
-    return {
-        **vendors.config_envelope("cursor"),
-        "hooks": {vendors.shell_gate_event("cursor"): [cursor_entry(command)]},
-    }
-
-
 GATE_FILE = "gate.json"
 
 #: A gate reaches this surface only when the policy asked for this event by name.
 TOOL_USE = "tool_use"
 
 
-def _tool_use_gate(policy_dir: Path, output_dir: Path) -> dict[str, Any] | None:
+def tool_use_gate_spec(policy_dir: Path, repo_root: Path) -> dict[str, Any] | None:
     """The compiled gate this policy wants run at tool use, or None when it wants none.
 
     Three ways to want none, each the policy's own statement rather than a judgement made
@@ -137,10 +98,14 @@ def _tool_use_gate(policy_dir: Path, output_dir: Path) -> dict[str, Any] | None:
     asking a question a write cannot answer. The runner refuses that last case anyway, so
     emitting a hook certain to refuse would be installing noise.
     """
-    spec = build_gate_json(policy_dir, repo_root_from_output(output_dir))
+    spec = build_gate_json(policy_dir, repo_root)
     if spec is None or TOOL_USE not in spec.get("on", []):
         return None
     return spec if spec.get("kind") in WRITE_PATH_KINDS else None
+
+
+def _tool_use_gate(policy_dir: Path, output_dir: Path) -> dict[str, Any] | None:
+    return tool_use_gate_spec(policy_dir, repo_root_from_output(output_dir))
 
 
 def _guard_fragments(policy_dir: Path, script: str, output_dir: Path) -> list[Path]:
