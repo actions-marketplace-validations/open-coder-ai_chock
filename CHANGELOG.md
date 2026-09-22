@@ -1,6 +1,6 @@
 # Chock changelog
 
-## 0.9.3 — A native Devin plugin format and a Devin marketplace tree, on agentseam 0.3.2
+## 0.9.3 — A `kind: script` gate that runs a policy's own program, and a native Devin plugin format and marketplace tree on agentseam 0.3.2
 
 - **`kind: script` gate**: a `hook.gate` whose check is the policy's own program, for a check no
   declarative kind can hold -- a parser, a flow model over a method body, a rule table larger
