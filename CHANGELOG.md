@@ -1,6 +1,6 @@
 # Chock changelog
 
-## Unreleased
+## 0.9.3 — A native Devin plugin format and a Devin marketplace tree, on agentseam 0.3.2
 
 - **`devin` plugin format**: `chock plugin build --format devin` packages a policy as a native
   Devin plugin (`.devin-plugin/plugin.json` + `skills/<id>/SKILL.md` + a root-level `hooks.json`,
