@@ -8,13 +8,8 @@ from typing import Any
 
 from agentseam import packaging
 
-from chock.compile.emitters.in_agent import (
-    GATE_FILE,
-    _guard_script,
-    gate_hooks_map_file,
-    hooks_map_file,
-    tool_use_gate_spec,
-)
+from chock.compile.emitters.in_agent import GATE_FILE, _guard_script, tool_use_gate_spec
+from chock.compile.emitters.in_agent_hooks import gate_hooks_map_file, hooks_map_file
 from chock.gate import runtime_bundle
 from chock.gate.runner import SCRIPT_BASE_GATE
 from chock.plugin import store

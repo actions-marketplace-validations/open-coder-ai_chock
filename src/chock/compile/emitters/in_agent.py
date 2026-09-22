@@ -9,15 +9,7 @@ from typing import Any
 from chock import vendors
 from chock.compile.emitters import DATA_DIR, GUARD_SUFFIXES, policy_rel_path
 from chock.compile.emitters.advisory import repo_root_from_output
-from chock.compile.emitters.in_agent_hooks import (  # noqa: F401 -- re-exported for the plugin emitters
-    TIMEOUT_SECONDS,
-    cursor_entry,
-    cursor_hooks_file,
-    gate_hooks_map_file,
-    generic_hooks_file,
-    hook_entry,
-    hooks_map_file,
-)
+from chock.compile.emitters.in_agent_hooks import TIMEOUT_SECONDS, cursor_entry, generic_hooks_file, hook_entry
 from chock.emit import write_generated_json
 from chock.gate.build import build_gate_json
 from chock.gate.runner import WRITE_PATH_KINDS

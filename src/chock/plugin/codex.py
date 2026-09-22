@@ -8,7 +8,8 @@ from typing import Any
 
 from agentseam import packaging
 
-from chock.compile.emitters.in_agent import _guard_script, hooks_map_file
+from chock.compile.emitters.in_agent import _guard_script
+from chock.compile.emitters.in_agent_hooks import hooks_map_file
 from chock.plugin import posture, store
 from chock.plugin.build import (
     _ADVISORY_NOTE_HOOK,
