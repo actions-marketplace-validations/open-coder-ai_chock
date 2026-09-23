@@ -64,9 +64,9 @@ def stop_vendors() -> tuple[str, ...]:
     """Vendors the stop surface covers: the same predicate, asked about the turn-end event.
 
     A different set from `in_agent_vendors` in both directions, which is the point of
-    deriving each one rather than inheriting: cursor, grok and windsurf can only observe a
-    finished turn, while three vendors here can refuse one without recording any write
-    vocabulary. vscode_copilot can refuse one too and is still held back -- see
+    deriving each one rather than inheriting: grok and windsurf can only observe a finished
+    turn, while three vendors here can refuse one without recording any write vocabulary
+    (cursor hands a refusal back as a follow-up message, witnessed live). vscode_copilot can refuse one too and is still held back -- see
     AGENT_HOOKS_VENDORS for the file chock would have to guess a key in.
     """
     return tuple(
@@ -146,6 +146,18 @@ def hook_entry_bare(vendor: str) -> bool:
     config = getattr(_adapters.get(vendor), "CONFIG", None)
     entry = (config or {}).get("hook_entry") if isinstance(config, dict) else None
     return bool((entry or {}).get("bare"))
+
+
+def hook_entry_flat(vendor: str) -> bool:
+    """Whether `vendor`'s hook entries are the flat `{"command": ...}` shape, with no matcher.
+
+    Cursor's `hooks.json` lists each event's entries as bare command objects, recorded upstream
+    as `CONFIG["hook_entry"] == {"matcher": False, "wrapper": "cursor"}`; every other vendor
+    with a recorded entry nests the command under `hooks` and may carry a matcher.
+    """
+    config = getattr(_adapters.get(vendor), "CONFIG", None)
+    entry = (config or {}).get("hook_entry") if isinstance(config, dict) else None
+    return (entry or {}).get("wrapper") == "cursor"
 
 
 def pre_tool_hook_config(vendor: str, command: str, matcher: str | None = None) -> dict[str, Any]:

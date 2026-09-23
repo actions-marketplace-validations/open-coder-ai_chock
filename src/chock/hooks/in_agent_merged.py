@@ -116,6 +116,20 @@ MERGED = {
                 flat=True,
                 report_key="command",
             ),
+            # The generic pre-tool event, a different key from the shell one above: a content
+            # gate judges the file a Write would leave, the shell guard judges a command.
+            Wiring(
+                event=vendors.pre_tool_event("cursor"),
+                fragment_glob="*/pre-tool-use/cursor-write-hooks.json",
+                flat=True,
+                report_key="command",
+            ),
+            Wiring(
+                event=vendors.stop_event("cursor"),
+                fragment_glob="*/stop/cursor-hooks.json",
+                flat=True,
+                report_key="command",
+            ),
         ),
         unlink_runtime_when_empty=False,
         write_when_absent=False,

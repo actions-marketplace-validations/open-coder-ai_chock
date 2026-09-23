@@ -17,7 +17,7 @@ from agentseam import contract, matrix
 
 from chock import vendors
 from chock.compile.emitters.in_agent import GATE_FILE
-from chock.compile.emitters.in_agent_hooks import hook_entry
+from chock.compile.emitters.in_agent_hooks import cursor_entry, hook_entry
 from chock.gate import runtime_bundle
 from chock.gate.runner import SCRIPT_BASE_GATE
 
@@ -68,11 +68,18 @@ def gate_reaches(vendor: str) -> bool:
 def gate_hooks_file(vendor: str, command: str) -> dict[str, Any]:
     """The hooks document running `command` on every surface the gate reaches in `vendor`."""
     matcher, stop = gate_reach(vendor)
+    flat = vendors.hook_entry_flat(vendor)
     entries: dict[str, list[dict[str, Any]]] = {}
     if matcher is not None:
-        entries[vendors.pre_tool_event(vendor)] = [hook_entry(command, matcher=matcher)]
+        # A flat entry carries no matcher: the runtime answers every tool and judges only a
+        # write it recognises, so an unmatched tool is allowed with nothing said.
+        entries[vendors.pre_tool_event(vendor)] = [
+            cursor_entry(command) if flat else hook_entry(command, matcher=matcher)
+        ]
     if stop:
-        entries[vendors.stop_event(vendor)] = [hook_entry(command)]
+        entries[vendors.stop_event(vendor)] = [cursor_entry(command) if flat else hook_entry(command)]
+    if flat:
+        return {**vendors.config_envelope(vendor), "hooks": entries}
     return entries if vendors.hook_entry_bare(vendor) else {"hooks": entries}
 
 

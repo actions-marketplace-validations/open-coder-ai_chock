@@ -758,8 +758,8 @@
       "witnessed": false
     },
     "cursor": {
-      "level": "enforced-at-commit",
-      "basis": null,
+      "level": "enforceable",
+      "basis": "live-run-partial",
       "witnessed": false
     },
     "devin": {

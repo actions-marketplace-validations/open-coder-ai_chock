@@ -62,7 +62,11 @@ def _hook_command(script: str) -> str:
     return f'python3 "{adapter}" --guard "{guard}"'
 
 
-POSTURE_GATE_CURSOR = gate_package.gate_posture("cursor", "")
+POSTURE_GATE_CURSOR = gate_package.gate_posture(
+    "cursor",
+    "In Cursor the turn's end is not held: a refusal there is handed back to the agent as a "
+    "follow-up message, once, and a hook that fails to answer lets the turn end.",
+)
 _GATE_NOTE_CURSOR = gate_package.gate_skill_note("cursor")
 
 

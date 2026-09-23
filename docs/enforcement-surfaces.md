@@ -111,7 +111,7 @@ Which surfaces each agent supports today (from `src/chock/compile/surfaces.py`):
 | Agent | ambient | git-hook | ci-gate | pre-tool-use | stop | managed-setting | agent-hooks |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Claude Code** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
-| **Cursor** | ✅ | ✅ | ✅ | ✅ | — | — | — |
+| **Cursor** | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
 | Copilot | ✅ | ✅ | ✅ | — | — | — | ✅ |
 | Codex | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
 | Gemini | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
@@ -129,8 +129,11 @@ Which surfaces each agent supports today (from `src/chock/compile/surfaces.py`):
 In-agent membership derives from agentseam's matrix: every adapted vendor whose row can block
 a pre-tool call from a repo-level JSON hook config gets `pre-tool-use` (Copilot CLI and VS Code:
 `agent-hooks`, chock's owned file). `stop` is derived the same way from the **turn-end** row, which
-is a different question with a different answer: Cursor, Grok and Windsurf can observe a finished
-turn but not refuse one, so they are `detect` and get no column mark. Copilot and VS Code *can*
+is a different question with a different answer: Grok and Windsurf can observe a finished turn
+but not refuse one, so they are `detect` and get no column mark. Cursor cannot hold a turn either,
+but its `stop` hook hands a refusal back to the agent as a `followup_message` (witnessed live on
+3.21.18), which is `best-effort` and worth a mark: the agent is sent back to what the turn left
+behind rather than the user being told after the fact. Copilot and VS Code *can*
 refuse one and are still held back -- their hooks live in chock's own file in a shape witnessed
 live, that witness covers the pre-tool key alone, and a guessed turn-end key installs a hook that
 silently never runs while the table claims it does. Junie and Kimi Code block only via home-level configs (Kimi

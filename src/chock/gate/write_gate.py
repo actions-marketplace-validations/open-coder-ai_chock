@@ -171,8 +171,10 @@ def writes_for(event, gate):
     """What this event puts under judgement: the call's own text, or what the turn left behind."""
     if event.event == PRE_TOOL:
         return writes_from_event(event)
-    if (event.raw or {}).get("stop_hook_active"):
-        # A refusal that re-entered its own stop hook would never terminate.
+    raw = event.raw or {}
+    if raw.get("stop_hook_active") or raw.get("loop_count"):
+        # A refusal that re-entered its own stop hook would never terminate: Claude Code marks
+        # the re-entry `stop_hook_active`, Cursor counts it in `loop_count`.
         return {}
     return writes_from_worktree(repo_root_for(event, gate))
 

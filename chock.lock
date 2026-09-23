@@ -96,7 +96,7 @@
       "managed": false,
       "sha256": "e73dbc039cdcbf137049a1f5035e4b595d12afe74a12a0f78e2e102d20d29479",
       "source": "local",
-      "artifacts_sha256": "635b7255986d30064f7e5ff8c564098b07a964c1880e654d814c77e5c8e6ce0e"
+      "artifacts_sha256": "c352efb451fe61dc6aad8f799fa8628d3adb6305e22f3ae2efd1ab1a215b641f"
     },
     {
       "id": "pre-generated-scripts",

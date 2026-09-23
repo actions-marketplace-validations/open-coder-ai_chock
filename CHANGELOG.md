@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Cursor gates a write and reports at the turn's end.** agentseam 0.3.3 records what a live
+  probe of Cursor 3.21.18 showed: the generic `preToolUse` event fires for `Write` with the
+  file's path and full content and honours a deny, and `stop` honours a `followup_message`
+  that sends the agent back into the turn (a silent stop ends it, so that surface fails open).
+  `chock sync` now compiles a Cursor write fragment and a Cursor stop fragment for a policy
+  whose gate declares `tool_use`, and merges both into `.cursor/hooks.json` beside the shell
+  guard, under their own event keys; Cursor's row gains the `stop` column. A flat Cursor entry
+  carries no matcher, so the runtime answers every tool under `preToolUse` and judges only a
+  write it recognises. A stop that already re-entered once (`loop_count`, Cursor's spelling of
+  Claude Code's `stop_hook_active`) is not judged again. Pin: `agentseam==0.3.3`.
 - **A policy's gate rides in its plugin, in every hook-carrying format.** A plugin installs at
   the agent, not in a repository, so it carried a command guard or nothing: a gate lived only
   where `chock sync` compiled it. `chock plugin build` now packages a policy whose gate declares
@@ -11,8 +21,9 @@
   the vendor and no other: Claude Code's package gates the recorded write tools at `PreToolUse`
   and the turn's end at `Stop`; Codex, Devin and Copilot record no write-tool vocabulary but
   block at the turn's end, so their packages carry the gate at `Stop` alone and say that the
-  write itself is not judged; Cursor records neither, so its package stays advisory rather
-  than installing a hook that could only refuse. Each package states its posture (what is
+  write itself is not judged; Cursor records `Write` at its generic `preToolUse` and a turn-end
+  hook that hands a refusal back as a follow-up message, so its package gates the write and
+  reports at `stop`, in Cursor's own flat entry shape. Each package states its posture (what is
   judged and when, refuses when it cannot decide, needs python3, the vendor's own caveat) and
   the skill claims its hooks. The bundled runtime looks for the runner beside the gate before
   the repository layout, and takes the repository from the event's working directory when the

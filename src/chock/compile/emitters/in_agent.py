@@ -142,7 +142,13 @@ def _gate_fragments(policy_id: str, spec: dict[str, Any], output_dir: Path) -> l
         command = f'@CHOCK_PYTHON@ "{adapter}" --gate "{reference}"'
         name = WRITE_FRAGMENT if vendor == "claude_code" else f"{vendor}-write-hooks.json"
         dest = output_dir / name
-        write_generated_json(dest, hook_entry(command, matcher=matcher))
+        if vendors.hook_entry_flat(vendor):
+            # A flat entry carries no matcher: the runtime answers every tool under the event
+            # and judges only a write it recognises; an unmatched tool is allowed unremarked.
+            doc: dict[str, Any] = {vendors.pre_tool_event(vendor): [cursor_entry(command)]}
+        else:
+            doc = hook_entry(command, matcher=matcher)
+        write_generated_json(dest, doc)
         written.append(dest)
     return written
 
@@ -162,7 +168,7 @@ def _stop_fragments(policy_id: str, spec: dict[str, Any], output_dir: Path) -> l
 
     Every vendor `stop_vendors` admits gets one. A turn-end hook carries no tool to match
     on, so nothing here depends on a write vocabulary -- the reason this surface reaches
-    six vendors where the write path reaches two.
+    seven vendors where the write path reaches two.
     """
     gate = output_dir / GATE_FILE
     write_generated_json(gate, spec)
@@ -174,6 +180,11 @@ def _stop_fragments(policy_id: str, spec: dict[str, Any], output_dir: Path) -> l
         command = f'@CHOCK_PYTHON@ "{root}{_adapter_rel(vendor)}" --gate "{root}{_stop_rel(policy_id)}/{GATE_FILE}"'
         if vendor == "claude_code":
             dest, doc = output_dir / STOP_FRAGMENT, hook_entry(command)
+        elif vendors.hook_entry_flat(vendor):
+            # Cursor's fragment is the event's entry list, the shape its merged installer reads,
+            # rooted the way its shell and write entries are so the installer recognises it.
+            command = f'@CHOCK_PYTHON@ "{PROJECT_DIR_TOKEN}/{_adapter_rel(vendor)}" --gate "{PROJECT_DIR_TOKEN}/{_stop_rel(policy_id)}/{GATE_FILE}"'
+            dest, doc = output_dir / f"{vendor}-hooks.json", {vendors.stop_event(vendor): [cursor_entry(command)]}
         else:
             dest, doc = output_dir / f"{vendor}-hooks.json", vendors.stop_hook_config(vendor, command)
         write_generated_json(dest, doc)
