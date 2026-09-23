@@ -159,7 +159,7 @@ chock compile block-console-log      # emit every surface + the coverage report
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/open-coder-ai/chock/main/docs/figures/surfaces-dark.svg">
-  <img alt="One chock policy fans into eight enforcement surfaces. All 15 supported agents get the advisory ambient rule and the two commit-time gates, git hook and CI gate; 9 also get a native pre-tool-use hook and 2 (vscode, copilot) get chock's own agent-hooks file, both enforced live in the agent. Three surfaces -- managed-setting, gateway, mcp-gateway -- are named for honesty even though no agent reaches them yet." src="https://raw.githubusercontent.com/open-coder-ai/chock/main/docs/figures/surfaces-light.svg" width="760">
+  <img alt="One chock policy compiles into 9 enforcement surfaces. All 15 supported agent names get the advisory ambient rule and the two commit-time gates, git hook and CI gate. 9 also get a native pre-tool-use hook, enforced live in the agent, and 2 (vscode, copilot — one underlying vendor) get chock's own agent-hooks file, also enforced in-agent. 7 get an end-of-turn hook that reads what the turn wrote: a backstop for what a pre-tool hook cannot see, carrying no coverage grade of its own. Three surfaces are named for honesty though no agent reaches them yet: managed-setting is compiled for Claude but not installed, gateway is modelled but not emitted, and mcp-gateway emits but is not yet credited to any agent." src="https://raw.githubusercontent.com/open-coder-ai/chock/main/docs/figures/surfaces-light.svg" width="760">
 </picture>
 
 Every agent in this table gets the same floor: a git hook, a CI gate and an ambient `AGENTS.md`
@@ -170,7 +170,7 @@ a given repo once `chock sync` has actually written the file, which is why the C
 `chock status` always beats this table for what's true *here*. Four of the nine surfaces are
 absent from this page entirely because they credit no agent today — `managed-setting` is
 compiled but not installed, `gateway` is modelled but not yet emitted, `mcp-gateway` credits
-nothing until its per-client witness ships, and `stop` installs and refuses on six vendors but is
+nothing until its per-client witness ships, and `stop` installs and refuses on seven vendors but is
 a deliberate backstop for what a pre-tool hook cannot see, so it is worth no grade of its own.
 Full nine-surface matrix and per-agent caveats:
 [Enforcement Surfaces](docs/enforcement-surfaces.md).
@@ -179,8 +179,8 @@ Full nine-surface matrix and per-agent caveats:
 | :--- | :--- | :--- |
 | **Claude Code** | native pre-tool-use hook | `.claude/settings.json` |
 | **Cursor** | native pre-tool-use hook | `.cursor/hooks.json` |
-| **Copilot** | native agent hook | `.github/hooks/agentseam.json` |
-| **VS Code** | native agent hook | `.github/hooks/agentseam.json` |
+| **Copilot** | native agent hook | `.github/hooks/chock.json` |
+| **VS Code** | native agent hook | `.github/hooks/chock.json` |
 | **Codex** | native pre-tool-use hook | `.codex/hooks.json` |
 | **Gemini** | native pre-tool-use hook | `.gemini/settings.json` |
 

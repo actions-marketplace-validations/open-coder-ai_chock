@@ -22,8 +22,8 @@ each guarantee holds.
 > `pre-tool-use` structurally *cannot* see: a pre-tool hook is handed the tool call, so it
 > matches only a recorded write vocabulary, and a heredoc or a redirect carries no file argument
 > at all. A turn-end hook is handed nothing and reads the worktree, so it sees those bytes
-> however they got there -- and it takes no matcher, so it wires **six vendors** where the write
-> path wires two.
+> however they got there -- and it takes no matcher, so it wires **seven vendors** where the
+> write path wires three.
 >
 > What it does not buy is coverage, and `coverage_cell` refuses it any (`UNCREDITED_SURFACES`).
 > Every tool call in the turn has already run by the time it fires, so it cannot prevent a
@@ -150,7 +150,8 @@ evidence cap that bounds every grade -- is on its own page: **[Coverage Levels](
 
 A hook that must stop a command targets `git-hook` + `ci-gate` (the universal floor) and, where
 available, `pre-tool-use` + `managed-setting`. A hook whose `on:` includes `tool_use` is compiled to
-the `pre-tool-use` surface on agents that support it (Claude Code and Cursor; Copilot
+the `pre-tool-use` surface on agents that support it (nine of them, Claude Code and Cursor
+among them; Copilot
 CLI and VS Code get the same guard via `agent-hooks`). A best-practice rule with
 no deterministic check compiles only to `ambient-rule`. The compiler always pairs a control with the
 **strongest available backstop** — e.g. a git hook plus a CI gate, because a git hook alone can be

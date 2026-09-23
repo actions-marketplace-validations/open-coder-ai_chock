@@ -188,10 +188,10 @@ mere presence of two files.
 ## The hook-carrying vendor formats
 
 The Agent Plugins 1.0 standard carries no hooks, so an `agent-plugins` package is advisory
-by construction. Enforcement travels in four vendor plugin formats built from the same
-policies (`chock plugin build --format claude|copilot|cursor|codex`), each published in its
-own generated distribution repo and each **witnessed denying a destructive command on a
-real install**:
+by construction. Enforcement travels in five vendor plugin formats built from the same
+policies (`chock plugin build --format claude|copilot|cursor|codex|devin`). Four of them are
+published in a generated distribution repo of their own, and each of those is **witnessed
+denying a destructive command on a real install**:
 
 | Vendor repo | Client(s) | Deny dialect |
 | :--- | :--- | :--- |

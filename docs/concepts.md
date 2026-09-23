@@ -50,8 +50,9 @@ runner enforces at git-hook time. See [Gate DSL](../spec/gate-dsl.md).
 
 ## Enforcement surface
 
-*Where* a compiled control runs. Chock models eight: `ambient-rule`, `git-hook`,
-`ci-gate`, `pre-tool-use`, `agent-hooks`, `managed-setting`, `gateway`, `mcp-gateway`.
+*Where* a compiled control runs. Chock models nine: `ambient-rule`, `git-hook`,
+`ci-gate`, `pre-tool-use`, `stop`, `agent-hooks`, `managed-setting`, `gateway`,
+`mcp-gateway`.
 Different agents support different surfaces, `gateway`
 is modeled but not emitted yet, and some surfaces need an explicit installer before they enforce
 anything — see [Enforcement Surfaces](enforcement-surfaces.md).

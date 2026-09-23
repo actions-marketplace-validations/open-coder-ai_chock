@@ -202,13 +202,14 @@ Renders each policy as a plugin. The default `agent-plugins` format writes an
 `manifest.yaml` stays the source of truth, and a packaged policy is `advisory` wherever it is
 read: v1 defines no enforcement semantics, so packaging changes no value in `coverage.json`.
 
-The five hook formats ship a byte-identical guard and adapter; only the envelope differs.
-`claude` (`.claude-plugin/`) is read natively by Claude Code, Copilot CLI, VS Code and Grok
-Build; `copilot` is the Agent Plugins 1.0 layout under `com.github.copilot/hooks/`; `cursor`
-(`.cursor-plugin/`, `beforeShellExecution`) and `codex` (`.codex-plugin/`, `PreToolUse`) each
-reach a hook engine no other package can, failing **open** when `python3` is absent. `devin`
-(`.devin-plugin/plugin.json` + `hooks.json`, `PreToolUse`) is best-effort by the vendor's own
-design, fail-open, not enforced. They require `--out-dir` (or `--out`); in-place output is
+The five hook formats ship a byte-identical guard and adapter; since 0.11.0 the policy's own gate rides along too
+(`scripts/gate.json`, the stdlib runner, a script gate's `implementations/` tree), as does its `skill/` folder. Only
+the envelope differs. `claude` (`.claude-plugin/`, `PreToolUse` + `Stop`) is read natively by Claude Code, Copilot
+CLI, VS Code and Grok Build; `copilot` is the Agent Plugins 1.0 layout under `com.github.copilot/hooks/` (`Stop`);
+`cursor` (`.cursor-plugin/`) takes `beforeShellExecution` per guard and, per gate, `preToolUse` on the write plus
+`stop`; `codex` (`.codex-plugin/`, `PreToolUse` per guard, `Stop` per gate) reaches a hook engine no other package
+can, both failing **open** without `python3`; `devin` (`.devin-plugin/plugin.json` + `hooks.json`, same two events)
+is best-effort by the vendor's own design, fail-open, not enforced. They require `--out-dir` (or `--out`); in-place output is
 refused so a policy folder is never mistaken for a published plugin. `--policies-dir` packages
 a published directory; `--check` judges without writing. `--policy ID` (repeatable; manifest
 `id` or directory name, else a named error) narrows the build and skips `--out-dir`
