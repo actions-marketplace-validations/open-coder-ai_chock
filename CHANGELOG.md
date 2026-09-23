@@ -1,5 +1,19 @@
 # Chock changelog
 
+## Unreleased
+
+- **The generated plugins page tells a gate from a guard.** `chock marketplace build` wrote one
+  fixed paragraph per tree describing every enforcing package as a `PreToolUse` guard script
+  that denies a shell command. Since 0.11.0 a package can carry a policy's gate instead, which
+  judges what a turn writes rather than what it runs, so the published `PLUGINS.md` in every
+  distribution repo misdescribed five of its fourteen enforcing packages -- and named
+  `PreToolUse` even in the Cursor tree, whose guards hook `beforeShellExecution`. The paragraph
+  is now derived from the hooks each package publishes: a `--guard` command makes a guard
+  package, a `--gate` command a gate package, and each kind is described with the events its
+  own hooks file wires, in that client's spelling. Where a client records no write-tool
+  vocabulary the page says the gate runs at the turn's end only and the write itself is not
+  judged. The page renderer moves to its own module, `chock.plugin.catalog_page`.
+
 ## 0.11.0 — A policy's gate rides in its plugin, and Cursor gates a write and reports at the turn's end
 
 - **Cursor gates a write and reports at the turn's end.** agentseam 0.3.3 records what a live

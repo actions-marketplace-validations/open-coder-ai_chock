@@ -8,8 +8,8 @@ import sys
 from pathlib import Path
 
 from chock.emit import write_generated
+from chock.plugin.catalog_page import CATALOG_PAGE, catalog_page_differences, render_catalog_page
 from chock.plugin.marketplace_core import (
-    CATALOG_PAGE,
     CLAUDE_TREE,
     DESCRIPTION,
     INDEX_PATHS,
@@ -18,11 +18,9 @@ from chock.plugin.marketplace_core import (
     TREES,
     build_index,
     build_lock,
-    catalog_page_differences,
     collect_entries,
     index_differences,
     lock_differences,
-    render_catalog_page,
 )
 from chock.plugin.marketplace_devin import (
     DEVIN_ROOT_MANIFEST_REL,
