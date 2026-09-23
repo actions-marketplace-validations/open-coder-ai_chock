@@ -1,6 +1,6 @@
 # Chock changelog
 
-## Unreleased
+## 0.11.1 — The plugins page tells a gate from a guard
 
 - **The generated plugins page tells a gate from a guard.** `chock marketplace build` wrote one
   fixed paragraph per tree describing every enforcing package as a `PreToolUse` guard script
@@ -13,6 +13,11 @@
   own hooks file wires, in that client's spelling. Where a client records no write-tool
   vocabulary the page says the gate runs at the turn's end only and the write itself is not
   judged. The page renderer moves to its own module, `chock.plugin.catalog_page`.
+- **Documentation matches the code again.** A full audit of `README.md` and `docs/` against
+  the source: the coverage-grade vocabulary (eight levels, and no agent reaches `enforced`),
+  the adapter files `chock init` actually writes, a schema-valid example manifest, and the
+  surface, vendor and format counts. `chock plugin build`'s summary line for the Cursor format
+  now names its `preToolUse` and `stop` gate events beside `beforeShellExecution`.
 
 ## 0.11.0 — A policy's gate rides in its plugin, and Cursor gates a write and reports at the turn's end
 
