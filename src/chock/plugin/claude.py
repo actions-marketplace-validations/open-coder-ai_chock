@@ -9,10 +9,9 @@ from typing import Any
 from agentseam import packaging
 
 from chock.compile.emitters.in_agent import GATE_FILE, _guard_script, tool_use_gate_spec
-from chock.compile.emitters.in_agent_hooks import gate_hooks_map_file, hooks_map_file
+from chock.compile.emitters.in_agent_hooks import hooks_map_file
 from chock.gate import runtime_bundle
-from chock.gate.runner import SCRIPT_BASE_GATE
-from chock.plugin import store
+from chock.plugin import gate_package, store
 from chock.plugin.build import (
     _ADVISORY_NOTE_HOOK,
     _ADVISORY_NOTE_RULE,
@@ -35,13 +34,7 @@ POSTURE_ENFORCED = (
     "disable the python3 Store alias or install Python. If the guard itself crashes or times "
     "out, the hook asks for confirmation rather than allowing silently."
 )
-POSTURE_ENFORCED_GATE = (
-    "Session-enforced via PreToolUse and Stop hooks; needs python3. PreToolUse judges the file "
-    "a tool call would write; Stop re-reads what the turn actually left on disk, so a file "
-    "written through a shell heredoc is judged too. Without python3, fail-open clients allow "
-    "silently. A gate that cannot reach a decision refuses rather than allowing one it never "
-    "judged. Enforcement at every commit and in CI still needs chock installed in the repo."
-)
+POSTURE_ENFORCED_GATE = gate_package.gate_posture("claude_code")
 POSTURE_ADVISORY = "Advisory skill only; enforcement needs chock installed in the repo."
 
 _ENFORCED_NOTE = (
@@ -50,19 +43,10 @@ _ENFORCED_NOTE = (
     "enforcement across every commit and in CI still needs `chock sync`. "
     "See https://github.com/open-coder-ai/chock"
 )
-_ENFORCED_GATE_NOTE = (
-    "This policy is enforced in this client by the PreToolUse and Stop hooks installed with "
-    "the plugin, subject to the fail conditions stated in the plugin description. Repo-wide "
-    "enforcement across every commit and in CI still needs `chock sync`. "
-    "See https://github.com/open-coder-ai/chock"
-)
+_ENFORCED_GATE_NOTE = gate_package.gate_skill_note("claude_code")
 
-#: Where a packaged gate and everything it runs live inside the plugin: the compiled gate,
-#: the runner beside it (write_gate looks there first), and a script gate's own program with
-#: the files it imports, copied whole so a `sys.path` it sets on its own directory still holds.
 _GATE_REL = _SCRIPTS_TEMPLATE.format(name=GATE_FILE)
-_RUNNER_REL = _SCRIPTS_TEMPLATE.format(name="gate.py")
-_IMPLEMENTATIONS = "implementations"
+_IMPLEMENTATIONS = gate_package.IMPLEMENTATIONS
 
 
 def _adapter_source(agent: str = "claude_code") -> str:
@@ -82,28 +66,6 @@ def _gate_command() -> str:
     adapter = packaging.executable_ref("claude_code", _SCRIPTS_TEMPLATE.format(name="claude_code.py"))
     gate = packaging.executable_ref("claude_code", _GATE_REL)
     return f'python3 "{adapter}" --gate "{gate}"'
-
-
-def _runner_source() -> str:
-    """The stdlib-only gate runner, verbatim -- the one `chock sync` vendors under .chock/bin."""
-    return (Path(runtime_bundle.__file__).resolve().parent / "runner.py").read_text(encoding="utf-8")
-
-
-def _packaged_gate(policy_dir: Path, spec: dict[str, Any]) -> tuple[dict[str, Any], dict[Path, str]]:
-    """The gate as the plugin carries it, plus the files a script gate needs beside it."""
-    packaged = {key: value for key, value in spec.items() if key != "params"}
-    packaged["params"] = dict(spec.get("params") or {})
-    files: dict[Path, str] = {}
-    if spec.get("kind") == "script":
-        name = Path(str(packaged["params"].get("script", ""))).name
-        packaged["params"]["script"] = f"{_IMPLEMENTATIONS}/{name}"
-        packaged["script_base"] = SCRIPT_BASE_GATE
-        root = Path(policy_dir) / _IMPLEMENTATIONS
-        for path in sorted(root.rglob("*")):
-            if path.is_file() and "__pycache__" not in path.parts:
-                rel = Path(_IMPLEMENTATIONS) / path.relative_to(root)
-                files[Path(_SCRIPTS_TEMPLATE.format(name=rel.as_posix()))] = path.read_text(encoding="utf-8")
-    return packaged, files
 
 
 def build_claude_manifest(
@@ -169,12 +131,9 @@ def claude_plugin_files(policy_dir: Path, manifest: dict[str, Any], repo_root: P
             encoding="utf-8"
         )
     elif gate:
-        packaged, carried = _packaged_gate(policy_dir, gate)
-        files[hooks_rel] = json.dumps(gate_hooks_map_file("claude_code", _gate_command()), indent=2) + "\n"
+        files[hooks_rel] = json.dumps(gate_package.gate_hooks_file("claude_code", _gate_command()), indent=2) + "\n"
         files[Path(_SCRIPTS_TEMPLATE.format(name="claude_code.py"))] = _adapter_source("claude_code")
-        files[Path(_RUNNER_REL)] = _runner_source()
-        files[Path(_GATE_REL)] = json.dumps(packaged, indent=2) + "\n"
-        files.update(carried)
+        files.update(gate_package.packaged_gate_files(policy_dir, gate, _SCRIPTS_TEMPLATE))
     return files
 
 

@@ -53,17 +53,3 @@ def cursor_hooks_file(command: str) -> dict[str, Any]:
         **vendors.config_envelope("cursor"),
         "hooks": {vendors.shell_gate_event("cursor"): [cursor_entry(command)]},
     }
-
-
-def gate_hooks_map_file(vendor: str, command: str) -> dict[str, Any]:
-    """A hooks file running `command` on `vendor`'s recorded write tools and at the turn's end.
-
-    The write matcher is the vendor's own recorded vocabulary; a vendor recording none gets
-    no write entry rather than an invented one. The turn-end entry carries no matcher.
-    """
-    entries: dict[str, list[dict[str, Any]]] = {}
-    matcher = vendors.write_matcher(vendor)
-    if matcher is not None:
-        entries[vendors.pre_tool_event(vendor)] = [hook_entry(command, matcher=matcher)]
-    entries[vendors.stop_event(vendor)] = [hook_entry(command)]
-    return entries if vendors.hook_entry_bare(vendor) else {"hooks": entries}

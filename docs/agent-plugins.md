@@ -203,15 +203,23 @@ real install**:
 One guard, one adapter, byte-identical across all four — only the envelope each client
 reads differs.
 
-The Claude format also carries a policy's **gate** when the gate declares `tool_use`: the
-compiled `scripts/gate.json`, the stdlib runner beside it as `scripts/gate.py`, and for
-`kind: script` the policy's whole `implementations/` under `scripts/`. `hooks/hooks.json`
-runs the same adapter with `--gate` on the vendor's recorded write tools at `PreToolUse`
-and, with no matcher, at `Stop`, so a file written through a shell heredoc is judged at the
-turn's end. The runtime finds the runner beside the gate and takes the repository from the
-event's working directory, which is where `.chock/` config such as a policy's selection file
-is read from. A gate that declares only `commit` stays advisory in the plugin: a hook that
-could only refuse is not installed. The deny dialects are pinned by `tests/test_pretooluse_protocol.py` (every
+Every hook-carrying format also carries a policy's **gate** when the gate declares
+`tool_use`: the compiled `scripts/gate.json`, the stdlib runner beside it as `scripts/gate.py`,
+and for `kind: script` the policy's whole `implementations/` under `scripts/`. The hooks file
+runs the same adapter with `--gate` on every surface agentseam records for the vendor, and on
+no other:
+
+| Store | Write path | Turn's end | Package posture |
+| :--- | :--- | :--- | :--- |
+| claude | `PreToolUse` on `Write\|Edit\|MultiEdit\|NotebookEdit` | `Stop` | judges the write, re-reads the turn |
+| codex, devin, copilot | none recorded | `Stop` | re-reads the turn; the write itself is not judged |
+| cursor | none recorded | no blocking stop hook | advisory; no hook is installed |
+
+A file written through a shell heredoc is judged at the turn's end wherever `Stop` reaches.
+The runtime finds the runner beside the gate and takes the repository from the event's working
+directory, which is where `.chock/` config such as a policy's selection file is read from. A
+gate that declares only `commit` stays advisory in every package: a hook that could only
+refuse is not installed. The deny dialects are pinned by `tests/test_pretooluse_protocol.py` (every
 case there reproduces a witnessed failure), and the probe evidence is recorded in the
 0.4.0 CHANGELOG entry. Codex additionally installs every hook **untrusted** until a human approves
 it, and that trust is bound to a hash of the hook command, so a plugin update silently
