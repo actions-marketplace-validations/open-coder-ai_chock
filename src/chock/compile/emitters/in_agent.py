@@ -168,7 +168,7 @@ def _stop_fragments(policy_id: str, spec: dict[str, Any], output_dir: Path) -> l
 
     Every vendor `stop_vendors` admits gets one. A turn-end hook carries no tool to match
     on, so nothing here depends on a write vocabulary -- the reason this surface reaches
-    seven vendors where the write path reaches two.
+    seven vendors where the write path reaches three.
     """
     gate = output_dir / GATE_FILE
     write_generated_json(gate, spec)

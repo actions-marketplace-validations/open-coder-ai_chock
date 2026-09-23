@@ -64,7 +64,8 @@ number comparing them would invent a scale that does not exist.
 > gives the per-path reasoning and the per-client evidence. `DEGRADES_TO_DENY`'s own rule
 > settles the grade: a control mixing the two is declared at its weakest path, so
 > `CONTROL_DEGRADES_TO` stays `allow`, chock's `pre-tool-use` and `agent-hooks` stay at
-> `best-effort`, and this level still names something we do not earn. That is the intended
+> `best-effort` on every client whose hook fails open (Cursor, which can be configured to fail
+> closed, reaches `enforceable`), and this level still names something we do not earn. That is the intended
 > result: the ladder is only worth trusting where it flatters us if it can also report that
 > we are behind — including when we have genuinely improved and still fall short.
 
@@ -83,15 +84,17 @@ number comparing them would invent a scale that does not exist.
 > command into the session context when it cannot. See
 > [Arming a fresh clone](adopting.md#arming-a-fresh-clone).
 
-Example for `protect-main-branch` (targets git-hook + CI + PreToolUse + managed-setting):
+Example for `protect-main-branch`, whose gate declares `on: [commit, push]` and so targets
+git-hook + CI + ambient-rule + managed-setting, with no pre-tool surface at all. Every agent
+reaches the same grade, because the git hook is what earns it:
 
 ```json
 {
   "protect-main-branch": {
-    "claude":  "best-effort",
-    "cursor":  "enforced-at-commit",
-    "copilot": "enforced-at-commit",
-    "aider":   "enforced-at-commit"
+    "claude":  { "level": "enforced-at-commit", "basis": null, "witnessed": false },
+    "cursor":  { "level": "enforced-at-commit", "basis": null, "witnessed": false },
+    "copilot": { "level": "enforced-at-commit", "basis": null, "witnessed": false },
+    "aider":   { "level": "enforced-at-commit", "basis": null, "witnessed": false }
   }
 }
 ```

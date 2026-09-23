@@ -218,7 +218,9 @@ def main(argv: list[str] | None = None) -> int:
             "  root plugin.json + com.github.copilot/hooks/ per guard policy and per gate (Stop); same posture discipline"
         )
     if "cursor" in formats:
-        print("  .cursor-plugin/plugin.json + hooks/ (beforeShellExecution) per guard policy")
+        print(
+            "  .cursor-plugin/plugin.json + hooks/ (beforeShellExecution per guard policy; preToolUse on the write and stop per gate)"
+        )
     if "codex" in formats:
         print("  .codex-plugin/plugin.json + hooks/ (PreToolUse per guard policy; Stop per gate)")
     if "devin" in formats:

@@ -10,7 +10,7 @@ A policy is the umbrella term for rules, hooks, skills, workflows, and subagents
 | hook | `.agents/policies/<id>/` | Commit-time gate |
 | skill | `.agents/skills/<id>/` | Reusable skill |
 | workflow | `.agents/skills/<id>/` | Multi-step procedure |
-| subagent | `subagents/<id>/` (via `subagent.yaml`) | Scoped helper agent |
+| subagent | `.agents/skills/<id>/` (via `subagent.yaml`) | Scoped helper agent |
 
 A skill with `artifact: workflow` sequences other skills/subagents via its `SKILL.md` procedure. A skill with `skill.skill_type: code` or `hybrid` may ship committed deterministic scripts under `scripts/` and invoke them from its procedure.
 

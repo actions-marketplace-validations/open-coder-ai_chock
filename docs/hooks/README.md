@@ -1,6 +1,7 @@
 # Hooks
 
-Hooks are block or verify gates enforced at commit time through git hooks.
+Hooks are block or verify gates. They compile to a git hook and a CI gate at commit time, and,
+where the gate declares `tool_use`, to a native in-agent hook and the turn's end as well.
 
 ## Where hooks live
 

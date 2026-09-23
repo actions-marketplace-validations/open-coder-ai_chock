@@ -6,7 +6,8 @@ Verified against: https://google-gemini.github.io/gemini-cli/docs/cli/gemini-md.
 
 ## Files
 
-- `.gemini/GEMINI.md` — agent-readable wrapper that points to `AGENTS.md`
+- No wrapper file: Gemini CLI reads `AGENTS.md` natively, so `chock init` writes nothing
+  agent-specific for it.
 
 Gemini CLI discovers `GEMINI.md` files hierarchically: global `~/.gemini/GEMINI.md`, project root, `.gemini/`, and subdirectories.
 
@@ -15,4 +16,4 @@ Gemini CLI discovers `GEMINI.md` files hierarchically: global `~/.gemini/GEMINI.
 - Core rules: `AGENTS.md`
 - Skills: `.agents/skills/`
 - Policies: `.agents/policies/`
-- Validator: `the `chock check` CLI (src/chock/validation/)`
+- Validator: the `chock check` CLI (`src/chock/validation/`)

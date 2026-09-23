@@ -48,9 +48,9 @@ for _agent in IN_AGENT_TODAY:
 del _agent, _surface
 
 #: Derived from the matrix asking about the turn-end event, not inherited from the pre-tool
-#: answer: cursor, grok and windsurf can observe a finished turn but not refuse one, and
-#: three of the agents here have no write vocabulary recorded, so neither set contains the
-#: other. `stop` takes no matcher, so no vendor is held back for want of a tool vocabulary;
+#: answer: grok and windsurf can observe a finished turn but not refuse one, and four of the
+#: agents here (antigravity, codex_cli, devin, tabnine) have no write vocabulary recorded, so
+#: neither set contains the other. `stop` takes no matcher, so no vendor is held back for want of a tool vocabulary;
 #: vscode_copilot is held back for want of a witnessed key (chock.vendors.stop_vendors).
 for _agent in STOP_TODAY:
     if not _stop_can_block(_agent):  # pragma: no cover - membership already derives from can_block

@@ -37,7 +37,8 @@ Everything you need to understand, use, and extend Chock. New here? Start with
 1. You write a **policy** — a small folder with a manifest, an optional deterministic script, and evals.
 2. `chock check` checks it against the **spec**.
 3. `chock compile` turns it into the **enforcement surfaces** each agent supports
-   (git hook, CI gate, Claude PreToolUse / managed-settings, `AGENTS.md` rule) and writes a **coverage report**.
+   (git hook, CI gate, a native in-agent hook on the nine clients that have one, the turn's end on
+   seven, and the `AGENTS.md` rule everywhere) and writes a **coverage report**.
 4. `chock init` scaffolds the wiring — **no policies**; `chock add` installs each policy you choose from the catalog, and the **registry** and **lockfile** keep it reproducible.
 
 ## 🔗 Related references

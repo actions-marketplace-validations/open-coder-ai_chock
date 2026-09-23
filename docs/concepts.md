@@ -22,7 +22,7 @@ The manifest's `artifact` field declares what kind of thing the policy is:
 Those four are the complete set — `manifest.yaml` will not validate any other `artifact` value.
 
 **Subagents are declared separately.** A scoped worker an agent can delegate to lives in its own
-`subagent.yaml` under `subagents/`, validated by `subagent.schema.json`, which fixes
+`subagent.yaml` under `.agents/skills/<id>/`, validated by `subagent.schema.json`, which fixes
 `artifact: subagent`. It is not one of the `manifest.yaml` artifact values above.
 
 See [Authoring Policies](authoring-policies.md) for the manifest fields of each.
@@ -38,20 +38,22 @@ fields include:
 - **`approval`** — whether a human must approve before the *action* proceeds (never required for a
   read-only guard).
 - **`provenance` / `lifecycle` / `trust_tier`** — authorship, `draft → review → production`, and how
-  much the artifact is trusted (`sandbox` → `community` → verified).
+  much the artifact is trusted (`sandbox` → `community` → `verified` → `certified`).
 
 ## Gate
 
 A hook's `hook.gate` in `manifest.yaml` selects a deterministic **kind** (`content_regex`, `forbidden_ref`,
-`dependency_allowlist`, `test_integrity`, or `script` for a check the policy's own program makes), its
+`dependency_allowlist`, `test_integrity`, `script` for a check the policy's own program makes, or
+`egress_allowlist` at the gateway), its
 `params`, the events it runs on (`on: [commit|push|tool_use]`), and the message
 shown on block. `chock compile` flattens it to `gate.json`, which the vendored `.chock/bin/gate.py`
 runner enforces at git-hook time. See [Gate DSL](../spec/gate-dsl.md).
 
 ## Enforcement surface
 
-*Where* a compiled control runs. Chock models eight: `ambient-rule`, `git-hook`,
-`ci-gate`, `pre-tool-use`, `agent-hooks`, `managed-setting`, `gateway`, `mcp-gateway`.
+*Where* a compiled control runs. Chock models nine: `ambient-rule`, `git-hook`,
+`ci-gate`, `pre-tool-use`, `stop`, `agent-hooks`, `managed-setting`, `gateway`,
+`mcp-gateway`.
 Different agents support different surfaces, `gateway`
 is modeled but not emitted yet, and some surfaces need an explicit installer before they enforce
 anything — see [Enforcement Surfaces](enforcement-surfaces.md).
@@ -136,7 +138,7 @@ longer inlines those rules; it holds a managed pointer block that tells the agen
 read it — while git hooks are the guaranteed enforcement floor.
 
 **No in-context mechanism is a guarantee, including inlining.** Agents auto-load their own
-client file (`.claude/CLAUDE.md`, `.cursor/rules/*`), which points to `AGENTS.md`, which
+client file where they have one (`CLAUDE.md`), or read `AGENTS.md` directly, which
 points here — every step after the first depends on the agent choosing to follow the
 pointer. This was verified by observation, not assumed. Inlining rules directly into
 `AGENTS.md` would not change that, because `AGENTS.md` is not auto-loaded either.
@@ -160,5 +162,5 @@ upgrade — which is precisely what makes customisation impossible. See [Policie
 ## Adapter
 
 The per-agent wrapper that points an agent at `AGENTS.md` (the compiled source of truth) in the
-format that agent expects — `.claude/CLAUDE.md`, `.cursor/rules/*.mdc`, `.github/copilot-instructions.md`,
-and so on. See [Adapters](adapters/README.md).
+format that agent expects — root `CLAUDE.md` for Claude Code, `CONVENTIONS.md` for Aider, and so
+on. Most agents read `AGENTS.md` natively and get no wrapper at all. See [Adapters](adapters/README.md).
