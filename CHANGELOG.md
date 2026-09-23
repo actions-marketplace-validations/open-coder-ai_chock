@@ -1,6 +1,6 @@
 # Chock changelog
 
-## Unreleased
+## 0.11.0 — A policy's gate rides in its plugin, and Cursor gates a write and reports at the turn's end
 
 - **Cursor gates a write and reports at the turn's end.** agentseam 0.3.3 records what a live
   probe of Cursor 3.21.18 showed: the generic `preToolUse` event fires for `Write` with the
