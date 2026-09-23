@@ -15,4 +15,4 @@ Tabnine Agent reads `guidelines.md` for project-specific instructions.
 - Core rules: `AGENTS.md`
 - Skills: `.agents/skills/`
 - Policies: `.agents/policies/`
-- Validator: `the `chock check` CLI (src/chock/validation/)`
+- Validator: the `chock check` CLI (`src/chock/validation/`)

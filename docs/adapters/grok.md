@@ -15,4 +15,4 @@ Grok Build reads `AGENTS.md` natively, so this file is only a convenience marker
 - Core rules: `AGENTS.md`
 - Skills: `.agents/skills/`
 - Policies: `.agents/policies/`
-- Validator: `the `chock check` CLI (src/chock/validation/)`
+- Validator: the `chock check` CLI (`src/chock/validation/`)

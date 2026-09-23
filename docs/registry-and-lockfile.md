@@ -30,8 +30,8 @@ This catches the classic mistake of editing a policy without rescanning. Two thi
 
 ## The lockfile
 
-`chock.lock` is a pinned record of every installed policy. `init` creates it and
-`recompile` keeps it current, so it learns about a policy the moment you copy one in and compile.
+`chock.lock` is a pinned record of every installed policy. `init` creates it and `sync`
+keeps it current, so it learns about a policy the moment you copy one in and compile.
 
 ```json
 {
@@ -50,9 +50,11 @@ This catches the classic mistake of editing a policy without rescanning. Two thi
 }
 ```
 
-- **`managed: false`, `source: local`** — every pack, always. The framework ships no policies, so
-  there is no framework-owned tree to distinguish from yours: content is installed, and once
-  installed it is yours.
+- **`managed: false`, `source: local`** — every pack after a `sync`. The framework ships no
+  policies, so there is no framework-owned tree to distinguish from yours: content is installed,
+  and once installed it is yours. `chock add` records the catalog URL, `source_ref` and
+  `source_commit` at the moment it fetches; the next `sync` rewrites the lockfile from what is on
+  disk and that provenance goes back to `local`.
 - **`sha256`** — a content hash of the whole pack (`.agents/policies/<id>`) — the source you author.
 - **`artifacts_sha256`** — a content hash of `.chock/compiled/<id>` — the output that
   actually enforces. Absent until the pack has been compiled; a lockfile written before this field
@@ -98,7 +100,7 @@ attestation — worse, because it is the line you would quote as evidence. `arti
 that: the lockfile now pins both what you wrote and what runs.
 
 Two related checks cover the rest of the enforcement path. `chock sync --repo . --check`
-proves the compiled tree still matches the manifests it was generated from, and `chock
-validate` reports the same drift at commit time through the installed pre-commit hook. Both also
+proves the compiled tree still matches the manifests it was generated from, and `chock check
+--only verify` reports the same drift at commit time through the installed pre-commit hook. Both also
 compare the vendored runtimes in `.chock/bin/` — `gate.py` executes every declarative gate,
 so replacing its `run()` with `return 0` would otherwise disable every policy in the repo at once.

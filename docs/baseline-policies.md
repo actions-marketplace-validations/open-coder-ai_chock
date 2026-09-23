@@ -90,10 +90,13 @@ own the same way: a folder, a manifest, and (optionally) an
 
 ## Cross-platform & tested
 
-`scan-secrets`, `protect-main-branch`, `verify-dependency-exists` and `test-integrity` are **declarative**
-(`hook.gate` in `manifest.yaml`); `chock compile` emits the cross-platform git-hook shims and
-a self-contained, stdlib-only Python runner. The remaining guards ship bash implementations invoked
-through the PreToolUse adapter. `.gitattributes` pins scripts to LF so their hashes — and therefore
+Seven policies are **declarative** (`hook.gate` in `manifest.yaml`): `scan-secrets`,
+`protect-main-branch`, `verify-dependency-exists`, `test-integrity`, `block-invisible-unicode`,
+`block-wildcard-agent-permissions` and `pin-github-actions`. For those, `chock compile` emits the
+cross-platform git-hook shims and a self-contained, stdlib-only Python runner. Four ship shell
+implementations invoked through the pre-tool adapter: `block-destructive-commands`,
+`block-no-verify`, `protect-agent-config` and `protect-commit-privacy`. The `.gitattributes` that `chock init` writes pins `chock.lock`, `.chock/**` and `.agents/**`
+to LF so their hashes — and therefore
 the registry and lockfile — are byte-identical across operating systems.
 
 Every catalog policy carries an eval suite, and `chock check --only evals` replays each one's own

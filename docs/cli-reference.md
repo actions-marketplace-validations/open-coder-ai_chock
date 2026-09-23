@@ -22,14 +22,12 @@ which fetches from the catalog you point it at).
 chock init [repo] [--agents claude cursor copilot] [--agent-agnostic] [--skip-hooks] [--force]
 ```
 
-Scaffolds a consumer repo — **wiring only, no policies**: creates `.chock/` (config +
-`chock.lock`) and an empty `.agents/policies/`, writes agent wrapper files, installs the
+Scaffolds a consumer repo — **wiring only, no policies**: creates `.chock/` (config, coverage, vendored runtime), `chock.lock` at the repo root and an empty `.agents/policies/`, writes agent wrapper files, installs the
 git hook dispatchers, and runs a validation self-check. Add policies afterwards with
 `chock add` (or by copying a policy folder in and running `chock sync`). **Idempotent** —
 safe to re-run; it overwrites derived files but never your own policies.
 
-- `--agents` — space-separated target agents (default: `claude copilot gemini` — the agents that
-  can't read `AGENTS.md` natively).
+- `--agents` — space-separated target agents (default: `claude copilot gemini`). A wrapper file is written only for an agent that cannot read `AGENTS.md` natively — of those three, Claude Code alone.
 - `--agent-agnostic` — generate wrappers for all supported agents.
 - `--skip-hooks` — skip git hook installation.
 - `--force` — overwrite scaffolded files that have local edits (destructive).
@@ -111,13 +109,15 @@ Runs every truth check, read-only — `check` never regenerates what it measures
 | `matrix` | Spec invariants are traceable in the enforcement matrix. Framework-repo homework: auto-skipped (with a note) in repos that have no `spec/enforcement-matrix.md`. |
 | `mechanisms` | Every enforcement-matrix row naming a `` `function()` `` names a real, invoked, severity-capable one — presence in `matrix` is not the same as being real. Same auto-skip as `matrix`. |
 | `index` | `INDEX.md` and the `AGENTS.md` pointer are fresh. |
+| `conflicts` | No two installed policies contradict each other — one allowing what another refuses. |
 | `baseline` | The policy set is no weaker than `--base REF`'s: nothing newly in `policies.disabled`, nothing downgraded to advisory, no surfaces dropped. Bare `chock check` skips it with a note; CI runs it against the pull request's base branch. |
 
 - `--only` — comma-separated subset, e.g. `--only validate,verify`.
 - `--mode` — frontier validation profile (e.g. `frontier-claude`), passed to `validate`.
 - `--event` — hook event context (e.g. `commit`), passed to `validate`; softens pre-existing-drift findings at commit time.
-- `eval export --format context-report --out DIR [POLICY_ID ...]` — exports a policy's tier-3
-  cases (no `execute` block) as a context-report run/v0.1 directory; see [Evals](evals.md#exporting-tier-3-cases-to-context-report).
+(`chock eval export --format context-report --out DIR [POLICY_ID ...]` exports a policy's tier-3
+cases as a context-report run/v0.1 directory — its own command, not a `check` flag. See
+[Evals](evals.md#exporting-tier-3-cases-to-context-report).)
 
 ### `status` — what is installed, and what happened
 
@@ -152,9 +152,9 @@ with exit 2 if the policy is `mandatory: true`. Both reject unknown ids.
 chock new {policy|skill|subagent} <id> [--root .]
 ```
 
-Creates a valid, empty artifact folder (`manifest.yaml` with a `hook.gate` block,
-implementation stub, `evals/suite.yaml`) ready to fill in — by hand or with the
-`policy-init` skill in your agent.
+Creates a valid, empty artifact folder to fill in by hand or with the `policy-init` skill. `new policy` writes
+`manifest.yaml` (the gate is its `hook.gate` block) and `evals/suite.yaml`; `new skill` writes a `SKILL.md`, whose
+frontmatter *is* its manifest; `new subagent` writes `subagent.yaml`.
 
 ### `compile` — low-level single-policy compile
 

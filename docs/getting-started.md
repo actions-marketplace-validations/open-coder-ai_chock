@@ -48,10 +48,12 @@ chock init .
 
 `init` is fully deterministic — no AI agent required. It:
 
-- creates `.chock/` (config + lockfile + `dependency-allowlist.txt`) and an empty `.agents/policies/`,
+- creates `.chock/` (config, `coverage.json`, `dependency-allowlist.txt`, the vendored
+runtime under `bin/` and compiled output under `compiled/`) plus `chock.lock` at the repo root and an empty `.agents/policies/`,
 - writes `AGENTS.md`, a `.gitattributes` pinning generated scripts to LF, a `.gitignore` rule for
-  the per-machine gate log (`.chock/log/`), the agent wrapper files
-  (`.claude/CLAUDE.md`, `.cursor/rules/…`, `.github/copilot-instructions.md`, …), and the
+  the per-machine gate log (`.chock/log/`), a wrapper file for each agent that does **not** read
+  `AGENTS.md` natively (root `CLAUDE.md` for Claude Code, and by default nothing else — Cursor,
+  Copilot, Codex, Gemini, VS Code and Windsurf all read `AGENTS.md` directly), and the
   guardrail pairs `.agents/policies/{AGENTS.md,CLAUDE.md}` and `.agents/skills/{AGENTS.md,CLAUDE.md}`,
 - installs the four authoring skills (`policy-init`, `validate`, `eval`, `optimize`) into
   `.agents/skills/`, and
@@ -60,8 +62,9 @@ chock init .
 It installs **no policies**, and tells you so — a freshly initialised repo enforces nothing yet.
 Policies are content, not framework, and you choose which to adopt.
 
-By default it targets the agents that can't read `AGENTS.md` natively: `claude`, `copilot`, and
-`gemini`. Pass `--agents` to change that:
+The default target set is `claude copilot gemini`. Of those, only Claude Code gets a wrapper
+file: Copilot and Gemini read `AGENTS.md` natively, so naming them changes nothing on disk.
+Pass `--agents` to change the set:
 
 ```bash
 chock init . --agents claude cursor copilot codex gemini aider
@@ -101,8 +104,10 @@ git checkout -b feature/x
 git commit -m "on a feature branch"   # ✅ allowed
 ```
 
-The same rule is also compiled into your agents' native controls, so Claude Code (for example)
-is stopped *before* it runs the command — not just at commit time.
+This policy's gate declares `on: [commit, push]`, so it compiles to the git hook, the CI gate
+and the ambient rule — not to a pre-tool hook. A policy whose gate also declares `tool_use`
+(`scan-secrets`, for one) additionally reaches your agent's native controls, stopping it
+*before* it writes, rather than only at commit time.
 
 ## 5. Author your first policy
 
@@ -112,8 +117,8 @@ Scaffold a new guard:
 chock new policy block-console-log
 ```
 
-This creates `.agents/policies/block-console-log/` with a manifest, a gate, an implementation stub,
-and an eval suite. Edit the manifest:
+This creates `.agents/policies/block-console-log/` with a `manifest.yaml` — the gate is the
+`hook.gate` block inside it, not a separate file — and an `evals/suite.yaml`. Edit the manifest:
 
 ```yaml
 # .agents/policies/block-console-log/manifest.yaml
