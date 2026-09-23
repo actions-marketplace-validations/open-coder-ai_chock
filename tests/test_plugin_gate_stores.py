@@ -2,14 +2,17 @@
 
 Claude Code records a write-tool vocabulary and a blocking turn-end hook, so its package gates
 both. Codex, Devin and Copilot record no write tools but block at the turn's end, so their
-packages carry the gate at `Stop` alone and say so. Cursor records neither, so a gate has no
-surface there and its package stays advisory rather than installing a hook that could only
-refuse. None of that is typed here: the test asks agentseam the same question the emitter does.
+packages carry the gate at `Stop` alone and say so. Cursor records `Write` at its generic
+`preToolUse` and a turn-end hook that hands a refusal back as a follow-up message, so its
+package gates the write and reports at `stop`, in Cursor's own flat entry shape. None of that
+is typed here: the test asks agentseam the same question the emitter does.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -56,7 +59,8 @@ def test_the_gate_reaches_what_the_vendor_records(gate_policy, tmp_path: Path, s
     assert ("PreToolUse" in events or "preToolUse" in events) == (matcher is not None)
     assert ("Stop" in events or "stop" in events) == stop
     for entries in hooks.values():
-        assert "--gate" in entries[0]["hooks"][0]["command"]
+        entry = entries[0]
+        assert "--gate" in (entry["command"] if "command" in entry else entry["hooks"][0]["command"])
     gate = json.loads((out / "scripts" / "gate.json").read_text(encoding="utf-8"))
     assert gate["script_base"] == "gate" and gate["params"]["script"] == f"implementations/{SCRIPT}"
     assert (out / "scripts" / "gate.py").exists()
@@ -69,7 +73,7 @@ def test_which_vendors_the_gate_reaches_is_agentseam_s_answer() -> None:
     assert gate_reach("codex_cli") == (None, True)
     assert gate_reach("devin") == (None, True)
     assert gate_reach("vscode_copilot") == (None, True)
-    assert gate_reach("cursor") == (None, False)
+    assert gate_reach("cursor") == ("Write", True)
 
 
 @pytest.mark.parametrize("store", ["codex", "devin", "copilot"])
@@ -86,12 +90,64 @@ def test_a_stop_only_package_says_the_write_is_not_judged(gate_policy, tmp_path:
     assert "advisory: the client reading it" not in skill
 
 
-def test_cursor_stays_advisory_for_a_gate(gate_policy, tmp_path: Path) -> None:
+def _cursor_payload(repo: Path, **fields) -> str:
+    """A Cursor 3.21.18 payload: its envelope markers, and a BOM the way the client writes it."""
+    base = {"conversation_id": "c", "generation_id": "g", "cursor_version": "3.21.18", "workspace_roots": [str(repo)]}
+    return "\ufeff" + json.dumps({**base, "cwd": str(repo), **fields})
+
+
+def _run_cursor_hook(out: Path, repo: Path, payload: str) -> subprocess.CompletedProcess:
+    hooks = json.loads((out / cursor.HOOKS_REL).read_text(encoding="utf-8"))["hooks"]
+    command = hooks["preToolUse"][0]["command"].replace("${CURSOR_PLUGIN_ROOT}", str(out))
+    return subprocess.run(
+        command,
+        cwd=repo,
+        shell=True,
+        env={**os.environ, "CURSOR_PLUGIN_ROOT": str(out)},
+        capture_output=True,
+        text=True,
+        input=payload,
+        check=False,
+    )
+
+
+def test_the_cursor_package_gates_the_write_flat_and_reports_at_stop(gate_policy, tmp_path: Path) -> None:
+    """Cursor's hooks file is its own shape: flat entries, no matcher, no failClosed, `version: 1`."""
     manifest = _manifest()
     out = tmp_path / "dist" / "cursor" / POLICY_ID
     cursor.build_cursor_plugin(gate_policy(manifest), manifest, tmp_path, out)
+    doc = json.loads((out / cursor.HOOKS_REL).read_text(encoding="utf-8"))
+    assert doc["version"] == 1 and set(doc["hooks"]) == {"preToolUse", "stop"}
+    for entries in doc["hooks"].values():
+        assert set(entries[0]) == {"command", "timeout"}, "flat, unmatched, and never failClosed"
     description = json.loads((out / ".cursor-plugin" / "plugin.json").read_text(encoding="utf-8"))["description"]
-    assert cursor.POSTURE_ADVISORY in description
+    assert "PreToolUse and Stop hooks" in description and "follow-up message" in description
+    assert cursor.POSTURE_ADVISORY not in description
+
+
+def test_the_cursor_package_runs_against_the_witnessed_payloads(gate_policy, tmp_path: Path) -> None:
+    """End to end through the bundled adapter: deny at preToolUse, followup_message at stop, once."""
+    manifest = _manifest()
+    out = tmp_path / "dist" / "cursor" / POLICY_ID
+    cursor.build_cursor_plugin(gate_policy(manifest), manifest, tmp_path, out)
+    repo = tmp_path / "project"
+    repo.mkdir()
+    init_repo(repo)
+
+    write = {"hook_event_name": "preToolUse", "tool_name": "Write"}
+    bad = _cursor_payload(repo, **write, tool_input={"file_path": str(repo / "A.java"), "content": "FORBIDDEN"})
+    proc = _run_cursor_hook(out, repo, bad)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout)["permission"] == "deny"
+    fine = _cursor_payload(repo, **write, tool_input={"file_path": str(repo / "A.java"), "content": "ok"})
+    assert json.loads(_run_cursor_hook(out, repo, fine).stdout)["permission"] == "allow"
+
+    (repo / "Leak.java").write_text("FORBIDDEN\n", encoding="utf-8")
+    stop = _run_cursor_hook(out, repo, _cursor_payload(repo, hook_event_name="stop", status="completed", loop_count=0))
+    assert stop.returncode == 0, stop.stderr
+    assert "Leak.java" in json.loads(stop.stdout)["followup_message"]
+    again = _run_cursor_hook(out, repo, _cursor_payload(repo, hook_event_name="stop", status="completed", loop_count=1))
+    assert again.returncode == 0 and again.stdout.strip() == "", "a follow-up that re-entered once is not sent twice"
 
 
 @pytest.mark.parametrize("store", sorted(STORES))

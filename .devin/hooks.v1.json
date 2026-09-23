@@ -38,7 +38,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "\"/tmp/claude-0/-home-user/48152925-4fa4-5342-ac22-0d73478e5b55/scratchpad/ck312/bin/python3.12\" \".chock/bin/devin.py\" --gate \".chock/compiled/pin-github-actions/stop/gate.json\""
+          "command": "\"/tmp/chock-cursor/bin/python3\" \".chock/bin/devin.py\" --gate \".chock/compiled/pin-github-actions/stop/gate.json\""
         }
       ]
     }

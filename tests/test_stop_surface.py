@@ -71,12 +71,20 @@ def test_membership_is_the_matrix_answer_for_the_turn_end_event() -> None:
     assert sorted(a for a, s in SURFACE_AGENTS.items() if Surface.STOP in s) == expected
 
 
-@pytest.mark.parametrize("agent", ["cursor", "grok", "windsurf"])
+@pytest.mark.parametrize("agent", ["grok", "windsurf"])
 def test_an_agent_that_can_only_watch_a_turn_end_gets_no_stop_surface(agent: str) -> None:
     """`detect` is not `block`. A hook that cannot refuse would be a log line sold as a control."""
     assert matrix.enforcement_level(CHOCK_AGENT[agent], contract.STOP) == "detect"
     assert Surface.STOP not in SURFACE_AGENTS[agent]
     assert Surface.PRE_TOOL_USE in SURFACE_AGENTS[agent], "the pre-tool answer is unchanged"
+
+
+def test_cursor_s_turn_end_is_a_follow_up_and_counts_as_a_stop_surface() -> None:
+    """Witnessed on 3.21.18: `stop` honours `followup_message`, so the turn is not held but the
+    agent is sent back to the refusal -- best-effort, and a surface worth wiring."""
+    assert matrix.enforcement_level("cursor", contract.STOP) == "best-effort"
+    assert "cursor" in vendors.stop_vendors()
+    assert Surface.STOP in SURFACE_AGENTS["cursor"]
 
 
 @pytest.mark.parametrize("agent", ["copilot", "vscode"])

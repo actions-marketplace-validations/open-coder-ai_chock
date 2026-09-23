@@ -213,9 +213,9 @@ no other:
 | :--- | :--- | :--- | :--- |
 | claude | `PreToolUse` on `Write\|Edit\|MultiEdit\|NotebookEdit` | `Stop` | judges the write, re-reads the turn |
 | codex, devin, copilot | none recorded | `Stop` | re-reads the turn; the write itself is not judged |
-| cursor | none recorded | no blocking stop hook | advisory; no hook is installed |
+| cursor | `preToolUse` on `Write` (flat entry, no matcher) | `stop`, as a `followup_message` | judges the write, sends the agent back to the turn's leftovers |
 
-A file written through a shell heredoc is judged at the turn's end wherever `Stop` reaches.
+A file written through a shell heredoc is judged at the turn's end wherever `Stop` reaches. In Cursor the turn is not held: the refusal returns to the agent as a follow-up message, once, and a hook that fails to answer lets the turn end.
 The runtime finds the runner beside the gate and takes the repository from the event's working
 directory, which is where `.chock/` config such as a policy's selection file is read from. A
 gate that declares only `commit` stays advisory in every package: a hook that could only
