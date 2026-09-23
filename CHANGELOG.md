@@ -1,5 +1,30 @@
 # Chock changelog
 
+## Unreleased
+
+- **A policy's gate rides in its plugin, in every hook-carrying format.** A plugin installs at
+  the agent, not in a repository, so it carried a command guard or nothing: a gate lived only
+  where `chock sync` compiled it. `chock plugin build` now packages a policy whose gate declares
+  `tool_use` -- the compiled `scripts/gate.json`, the runner beside it as `scripts/gate.py`,
+  and for `kind: script` the policy's whole `implementations/` under `scripts/`, so a program
+  that imports from beside itself still does -- wired to every surface agentseam records for
+  the vendor and no other: Claude Code's package gates the recorded write tools at `PreToolUse`
+  and the turn's end at `Stop`; Codex, Devin and Copilot record no write-tool vocabulary but
+  block at the turn's end, so their packages carry the gate at `Stop` alone and say that the
+  write itself is not judged; Cursor records neither, so its package stays advisory rather
+  than installing a hook that could only refuse. Each package states its posture (what is
+  judged and when, refuses when it cannot decide, needs python3, the vendor's own caveat) and
+  the skill claims its hooks. The bundled runtime looks for the runner beside the gate before
+  the repository layout, and takes the repository from the event's working directory when the
+  gate is packaged; a packaged script gate says `script_base: gate`, which the runner reads as
+  "beside me" instead of "under the repository root". Runtime goldens regenerate (an emitter
+  change, so a minor release).
+- **A policy's own skill files.** A policy may carry a `skill/` folder: `skill/body.md` is
+  appended to its rendered `SKILL.md` after the constraint block, and every other file there
+  rides in the skill's directory in the Agent Plugins package and every store package -- a
+  guided setup page beside the skill that opens it. `--check` sees a changed or removed file;
+  every store now owns `skills/`, so a rebuild removes what the policy stopped shipping.
+
 ## 0.10.0 — A script gate's evals replay, and its ambient line names the script by file
 
 - **A script gate's evals replay.** `chock check --only evals` runs a staged-files case against

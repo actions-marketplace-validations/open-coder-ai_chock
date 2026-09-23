@@ -114,6 +114,11 @@ program the same material every kind above reads, as JSON on stdin:
 {"event": "tool_use", "repo_root": "/path/to/repo", "writes": {"src/App.java": "<file text>"}}
 ```
 
+A compiled gate may carry `script_base: gate` beside `params`, which the runner reads as "the
+script lives beside this gate file" instead of "under the repository root". Only a packaged
+plugin writes it: there the gate, the runner and the script travel together and no repository
+holds them.
+
 `event` is `commit`, `push` or `tool_use`. `writes` is the staged blobs at `commit` and
 `push`, and the write itself at `tool_use` -- the file a tool call is about to write, or what
 the turn left on disk at its end -- so one script serves every surface, and it reaches the

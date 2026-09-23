@@ -8,8 +8,9 @@ from typing import Any
 
 from agentseam import packaging
 
-from chock.compile.emitters.in_agent import _guard_script, hooks_map_file
-from chock.plugin import store
+from chock.compile.emitters.in_agent import _guard_script, tool_use_gate_spec
+from chock.compile.emitters.in_agent_hooks import hooks_map_file
+from chock.plugin import gate_package, store
 from chock.plugin.build import (
     _ADVISORY_NOTE_HOOK,
     _ADVISORY_NOTE_RULE,
@@ -19,6 +20,7 @@ from chock.plugin.build import (
     build_skill,
     license_text,
     plugin_name,
+    skill_assets,
 )
 from chock.plugin.claude import POSTURE_ADVISORY, _adapter_source
 from chock.plugin.store import SCRIPTS_TEMPLATE as _SCRIPTS_TEMPLATE
@@ -58,10 +60,28 @@ def _hook_command(script: str) -> str:
     return f'r="{root}"; [ -n "$r" ] && [ -f {adapter} ] || exit 0; exec python3 {adapter} --guard {guard}'
 
 
-def build_copilot_manifest(manifest: dict[str, Any], policy_dir: Path, *, enforced: bool) -> dict[str, Any]:
+POSTURE_GATE_COPILOT = gate_package.gate_posture(
+    "vscode_copilot",
+    "Enforces only in a client that reads the com.github.copilot namespace and tells the hook where the package lives; a client that exports no plugin-root variable runs the hook, which then allows, so treat this package as advisory unless a deny has been witnessed in your own client.",
+)
+_GATE_NOTE_COPILOT = gate_package.gate_skill_note("vscode_copilot")
+
+
+def _gate_command() -> str:
+    """The same adapter, handed the packaged gate instead of a guard."""
+    assert PLUGIN_ROOT.startswith("${") and PLUGIN_ROOT.endswith("}"), PLUGIN_ROOT  # noqa: S101 -- build-time constant, not request input
+    root = f"{PLUGIN_ROOT[:-1]}:-}}"
+    adapter = f'"$r/{_SCRIPTS_TEMPLATE.format(name="vscode_copilot.py")}"'
+    gate = f'"$r/{_SCRIPTS_TEMPLATE.format(name="gate.json")}"'
+    return f'r="{root}"; [ -n "$r" ] && [ -f {adapter} ] || exit 0; exec python3 {adapter} --gate {gate}'
+
+
+def build_copilot_manifest(
+    manifest: dict[str, Any], policy_dir: Path, *, enforced: bool, gate: bool = False
+) -> dict[str, Any]:
     """Derive the root `plugin.json` from a policy manifest."""
     data = build_manifest(manifest, policy_dir)
-    posture = POSTURE_ENFORCED_COPILOT if enforced else POSTURE_ADVISORY
+    posture = (POSTURE_GATE_COPILOT if gate else POSTURE_ENFORCED_COPILOT) if enforced else POSTURE_ADVISORY
     data["description"] = f"{data['description']} [{posture}]".strip()
     extension = data["extensions"][NAMESPACE]
     del extension["manifest"]
@@ -77,20 +97,30 @@ def copilot_plugin_files(policy_dir: Path, manifest: dict[str, Any], repo_root: 
     policy_id = manifest.get("id") or policy_dir.name
     name = plugin_name(str(policy_id))
     script = _guard_script(policy_dir, str(policy_id))
+    gate = (
+        None
+        if script or not gate_package.gate_reaches("vscode_copilot")
+        else tool_use_gate_spec(policy_dir, Path(repo_root))
+    )
+    enforced = script is not None or gate is not None
 
-    skill = build_skill(policy_dir, manifest, Path(repo_root), hooks=HOOKS_REL if script else None)
+    skill = build_skill(policy_dir, manifest, Path(repo_root), hooks=HOOKS_REL if enforced else None)
     if script:
         skill = skill.replace(_ADVISORY_NOTE_RULE, _COPILOT_ENFORCED_NOTE).replace(
             _ADVISORY_NOTE_HOOK, _COPILOT_ENFORCED_NOTE
         )
+    elif gate:
+        skill = skill.replace(_ADVISORY_NOTE_RULE, _GATE_NOTE_COPILOT).replace(_ADVISORY_NOTE_HOOK, _GATE_NOTE_COPILOT)
 
     files: dict[Path, str] = {
         Path(_LAYOUT["manifest"]): json.dumps(
-            build_copilot_manifest(manifest, policy_dir, enforced=script is not None), indent=2
+            build_copilot_manifest(manifest, policy_dir, enforced=enforced, gate=gate is not None), indent=2
         )
         + "\n",
         Path(packaging.supports("copilot", packaging.SKILL).format(name=name)): skill,
     }
+    for rel, content in skill_assets(policy_dir).items():
+        files[Path(packaging.supports("copilot", packaging.SKILL).format(name=name)).parent / rel] = content
     licence = license_text(manifest)
     if licence:
         files[LICENSE_REL] = licence
@@ -100,6 +130,12 @@ def copilot_plugin_files(policy_dir: Path, manifest: dict[str, Any], repo_root: 
         files[Path(_SCRIPTS_TEMPLATE.format(name=script))] = (policy_dir / "implementations" / script).read_text(
             encoding="utf-8"
         )
+    elif gate:
+        files[Path(HOOKS_REL)] = (
+            json.dumps(gate_package.gate_hooks_file("vscode_copilot", _gate_command()), indent=2) + "\n"
+        )
+        files[Path(_SCRIPTS_TEMPLATE.format(name="vscode_copilot.py"))] = _adapter_source("vscode_copilot")
+        files.update(gate_package.packaged_gate_files(policy_dir, gate, _SCRIPTS_TEMPLATE))
     return files
 
 

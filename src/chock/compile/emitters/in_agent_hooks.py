@@ -1,0 +1,55 @@
+"""The hook-config documents an in-agent surface installs: one entry shape, per vendor dialect."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from chock import vendors
+
+TIMEOUT_SECONDS = 30
+
+
+def generic_hooks_file(vendor: str, command: str) -> dict[str, Any]:
+    """`vendor`'s full hook-config document for one guard command, agentseam's rendering.
+
+    Paths inside `command` are repo-relative: no repo-root token is recorded upstream for
+    these vendors (the `${CLAUDE_PROJECT_DIR}` gap), so the entry resolves only where the
+    vendor runs hooks from the repo root -- the same condition under which the relative
+    adapter path resolves at all.
+    """
+    return vendors.pre_tool_hook_config(vendor, command, matcher=vendors.shell_matcher(vendor))
+
+
+def hook_entry(command: str, *, matcher: str | None = None) -> dict[str, Any]:
+    """One hooks-map entry (agentseam's `hooks_map` wrapper shape) plus chock's timeout."""
+    entry: dict[str, Any] = {}
+    if matcher is not None:
+        entry["matcher"] = matcher
+    entry["hooks"] = [{"type": "command", "command": command, "timeout": TIMEOUT_SECONDS}]
+    return entry
+
+
+def hooks_map_file(vendor: str, command: str) -> dict[str, Any]:
+    """A hooks file under `vendor`'s own pre-tool event spelling.
+
+    Wrapped in a top-level `hooks` key (the claude-plugin format) unless `vendor`'s own
+    hook_entry is bare -- Devin's native `hooks.json` at the plugin root is the event map
+    itself, with no wrapper, unlike the nested `hooks/hooks.json` every other format here
+    shares.
+    """
+    matcher = vendors.shell_matcher(vendor)
+    event_map = {vendors.pre_tool_event(vendor): [hook_entry(command, matcher=matcher)]}
+    return event_map if vendors.hook_entry_bare(vendor) else {"hooks": event_map}
+
+
+def cursor_entry(command: str) -> dict[str, Any]:
+    """One cursor hook entry: the flat `cursor` wrapper shape plus chock's timeout."""
+    return {"command": command, "timeout": TIMEOUT_SECONDS}
+
+
+def cursor_hooks_file(command: str) -> dict[str, Any]:
+    """A cursor-format hooks file: envelope and shell-gate event from the vendor entry."""
+    return {
+        **vendors.config_envelope("cursor"),
+        "hooks": {vendors.shell_gate_event("cursor"): [cursor_entry(command)]},
+    }

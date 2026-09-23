@@ -8,8 +8,9 @@ from typing import Any
 
 from agentseam import packaging
 
-from chock.compile.emitters.in_agent import _guard_script, hooks_map_file
-from chock.plugin import posture, store
+from chock.compile.emitters.in_agent import _guard_script, tool_use_gate_spec
+from chock.compile.emitters.in_agent_hooks import hooks_map_file
+from chock.plugin import gate_package, posture, store
 from chock.plugin.build import (
     _ADVISORY_NOTE_HOOK,
     _ADVISORY_NOTE_RULE,
@@ -18,6 +19,7 @@ from chock.plugin.build import (
     build_skill,
     license_text,
     plugin_name,
+    skill_assets,
 )
 from chock.plugin.claude import POSTURE_ADVISORY, _adapter_source
 from chock.plugin.store import SCRIPTS_TEMPLATE as _SCRIPTS_TEMPLATE
@@ -67,10 +69,26 @@ def _hook_command(script: str) -> str:
     return f'python3 "{adapter}" --guard "{guard}"'
 
 
-def build_devin_manifest(manifest: dict[str, Any], policy_dir: Path, *, enforced: bool) -> dict[str, Any]:
+POSTURE_GATE_DEVIN = gate_package.gate_posture(
+    "devin",
+    "In the vendor's own words, plugin hooks are best effort and fail open, documented for local Devin sessions only.",
+)
+_GATE_NOTE_DEVIN = gate_package.gate_skill_note("devin")
+
+
+def _gate_command() -> str:
+    """The same adapter, handed the packaged gate instead of a guard."""
+    adapter = f"${DEVIN_PLUGIN_ROOT_VAR}/{_SCRIPTS_TEMPLATE.format(name='devin.py')}"
+    gate = f"${DEVIN_PLUGIN_ROOT_VAR}/{_SCRIPTS_TEMPLATE.format(name='gate.json')}"
+    return f'python3 "{adapter}" --gate "{gate}"'
+
+
+def build_devin_manifest(
+    manifest: dict[str, Any], policy_dir: Path, *, enforced: bool, gate: bool = False
+) -> dict[str, Any]:
     """Derive `.devin-plugin/plugin.json` from a policy manifest."""
     policy_id = str(manifest.get("id") or Path(policy_dir).name)
-    posture_text = POSTURE_BESTEFFORT_DEVIN if enforced else POSTURE_ADVISORY
+    posture_text = (POSTURE_GATE_DEVIN if gate else POSTURE_BESTEFFORT_DEVIN) if enforced else POSTURE_ADVISORY
 
     description = _one_line(manifest.get("description"))
 
@@ -90,20 +108,26 @@ def devin_plugin_files(policy_dir: Path, manifest: dict[str, Any], repo_root: Pa
     policy_id = str(manifest.get("id") or policy_dir.name)
     name = plugin_name(policy_id)
     script = _guard_script(policy_dir, policy_id)
+    gate = None if script or not gate_package.gate_reaches("devin") else tool_use_gate_spec(policy_dir, Path(repo_root))
+    enforced = script is not None or gate is not None
 
-    skill = build_skill(policy_dir, manifest, Path(repo_root), hooks=HOOKS_REL if script else None)
+    skill = build_skill(policy_dir, manifest, Path(repo_root), hooks=HOOKS_REL if enforced else None)
     if script:
         skill = skill.replace(_ADVISORY_NOTE_RULE, _BESTEFFORT_NOTE_DEVIN).replace(
             _ADVISORY_NOTE_HOOK, _BESTEFFORT_NOTE_DEVIN
         )
+    elif gate:
+        skill = skill.replace(_ADVISORY_NOTE_RULE, _GATE_NOTE_DEVIN).replace(_ADVISORY_NOTE_HOOK, _GATE_NOTE_DEVIN)
 
     files: dict[Path, str] = {
         Path(_LAYOUT["manifest"]): json.dumps(
-            build_devin_manifest(manifest, policy_dir, enforced=script is not None), indent=2
+            build_devin_manifest(manifest, policy_dir, enforced=enforced, gate=gate is not None), indent=2
         )
         + "\n",
         Path(packaging.supports("devin", packaging.SKILL).format(name=name)): skill,
     }
+    for rel, content in skill_assets(policy_dir).items():
+        files[Path(packaging.supports("devin", packaging.SKILL).format(name=name)).parent / rel] = content
     licence = license_text(manifest)
     if licence:
         files[LICENSE_REL] = licence
@@ -113,6 +137,10 @@ def devin_plugin_files(policy_dir: Path, manifest: dict[str, Any], repo_root: Pa
         files[Path(_SCRIPTS_TEMPLATE.format(name=script))] = (policy_dir / "implementations" / script).read_text(
             encoding="utf-8"
         )
+    elif gate:
+        files[Path(HOOKS_REL)] = json.dumps(gate_package.gate_hooks_file("devin", _gate_command()), indent=2) + "\n"
+        files[Path(_SCRIPTS_TEMPLATE.format(name="devin.py"))] = _adapter_source("devin")
+        files.update(gate_package.packaged_gate_files(policy_dir, gate, _SCRIPTS_TEMPLATE))
     return files
 
 

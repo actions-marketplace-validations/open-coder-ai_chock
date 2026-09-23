@@ -8,8 +8,9 @@ from typing import Any
 
 from agentseam import packaging
 
-from chock.compile.emitters.in_agent import _guard_script, hooks_map_file
-from chock.plugin import posture, store
+from chock.compile.emitters.in_agent import _guard_script, tool_use_gate_spec
+from chock.compile.emitters.in_agent_hooks import hooks_map_file
+from chock.plugin import gate_package, posture, store
 from chock.plugin.build import (
     _ADVISORY_NOTE_HOOK,
     _ADVISORY_NOTE_RULE,
@@ -18,6 +19,7 @@ from chock.plugin.build import (
     _one_line,
     build_skill,
     plugin_name,
+    skill_assets,
 )
 from chock.plugin.claude import POSTURE_ADVISORY, _adapter_source
 from chock.plugin.listing import ICON_REL, LICENSE_REL, icon_svg, interface_block, license_text
@@ -59,11 +61,27 @@ def _hook_command(script: str) -> str:
     return f'python3 "{adapter}" --guard "{guard}"'
 
 
-def build_codex_manifest(manifest: dict[str, Any], policy_dir: Path, *, enforced: bool) -> dict[str, Any]:
+POSTURE_GATE_CODEX = gate_package.gate_posture(
+    "codex_cli",
+    "Codex requires a one-time trust review per hook -- the plugin is ADVISORY until you approve its hook, and a plugin update voids that trust until re-approved.",
+)
+_GATE_NOTE_CODEX = gate_package.gate_skill_note("codex_cli")
+
+
+def _gate_command() -> str:
+    """The same adapter, handed the packaged gate instead of a guard."""
+    adapter = packaging.executable_ref("codex_cli", _SCRIPTS_TEMPLATE.format(name="codex_cli.py"))
+    gate = packaging.executable_ref("codex_cli", _SCRIPTS_TEMPLATE.format(name="gate.json"))
+    return f'python3 "{adapter}" --gate "{gate}"'
+
+
+def build_codex_manifest(
+    manifest: dict[str, Any], policy_dir: Path, *, enforced: bool, gate: bool = False
+) -> dict[str, Any]:
     """Derive `.codex-plugin/plugin.json` from a policy manifest."""
     policy_id = str(manifest.get("id") or Path(policy_dir).name)
     provenance = manifest.get("provenance") or {}
-    posture = POSTURE_ENFORCED_CODEX if enforced else POSTURE_ADVISORY
+    posture = (POSTURE_GATE_CODEX if gate else POSTURE_ENFORCED_CODEX) if enforced else POSTURE_ADVISORY
 
     description = _one_line(manifest.get("description"))
 
@@ -94,21 +112,31 @@ def codex_plugin_files(policy_dir: Path, manifest: dict[str, Any], repo_root: Pa
     policy_id = str(manifest.get("id") or policy_dir.name)
     name = plugin_name(policy_id)
     script = _guard_script(policy_dir, policy_id)
+    gate = (
+        None
+        if script or not gate_package.gate_reaches("codex_cli")
+        else tool_use_gate_spec(policy_dir, Path(repo_root))
+    )
+    enforced = script is not None or gate is not None
 
-    skill = build_skill(policy_dir, manifest, Path(repo_root), hooks=HOOKS_REL if script else None)
+    skill = build_skill(policy_dir, manifest, Path(repo_root), hooks=HOOKS_REL if enforced else None)
     if script:
         skill = skill.replace(_ADVISORY_NOTE_RULE, _ENFORCED_NOTE_CODEX).replace(
             _ADVISORY_NOTE_HOOK, _ENFORCED_NOTE_CODEX
         )
+    elif gate:
+        skill = skill.replace(_ADVISORY_NOTE_RULE, _GATE_NOTE_CODEX).replace(_ADVISORY_NOTE_HOOK, _GATE_NOTE_CODEX)
 
     files: dict[Path, str] = {
         Path(_LAYOUT["manifest"]): json.dumps(
-            build_codex_manifest(manifest, policy_dir, enforced=script is not None), indent=2
+            build_codex_manifest(manifest, policy_dir, enforced=enforced, gate=gate is not None), indent=2
         )
         + "\n",
         Path(packaging.supports("codex_cli", packaging.SKILL).format(name=name)): skill,
         ICON_REL: icon_svg(),
     }
+    for rel, content in skill_assets(policy_dir).items():
+        files[Path(packaging.supports("codex_cli", packaging.SKILL).format(name=name)).parent / rel] = content
     licence = license_text(manifest)
     if licence:
         files[LICENSE_REL] = licence
@@ -118,6 +146,10 @@ def codex_plugin_files(policy_dir: Path, manifest: dict[str, Any], repo_root: Pa
         files[Path(_SCRIPTS_TEMPLATE.format(name=script))] = (policy_dir / "implementations" / script).read_text(
             encoding="utf-8"
         )
+    elif gate:
+        files[Path(HOOKS_REL)] = json.dumps(gate_package.gate_hooks_file("codex_cli", _gate_command()), indent=2) + "\n"
+        files[Path(_SCRIPTS_TEMPLATE.format(name="codex_cli.py"))] = _adapter_source("codex_cli")
+        files.update(gate_package.packaged_gate_files(policy_dir, gate, _SCRIPTS_TEMPLATE))
     return files
 
 
