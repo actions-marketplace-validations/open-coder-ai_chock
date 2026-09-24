@@ -16,7 +16,7 @@ inputs:
   version:
     description: Chock version to install
     required: false
-    default: "0.11.1"
+    default: "0.11.2"
 
 runs:
   using: composite

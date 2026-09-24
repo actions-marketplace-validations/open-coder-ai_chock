@@ -1,6 +1,6 @@
 # Chock changelog
 
-## Unreleased
+## 0.11.2 — The plugins page states each client's own crash answer
 
 - **The plugins page states each client's own answer to a crashed guard.** Every tree's
   `PLUGINS.md` said a crashed guard "asks -- on Codex CLI, denies", naming Codex on the Cursor,
