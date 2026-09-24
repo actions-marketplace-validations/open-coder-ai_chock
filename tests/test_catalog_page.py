@@ -97,3 +97,20 @@ def test_catalog_page_names_each_client_s_own_events(gate_dist: Path) -> None:
     assert "hooked at `beforeShellExecution`" in body
     assert "hooked at `preToolUse` and `stop`" in body
     assert "`PreToolUse`" not in body
+
+
+@pytest.mark.parametrize(
+    ("tree", "on_crash"),
+    [
+        ("claude", "the hook asks for confirmation rather than allowing silently."),
+        ("cursor", "the hook asks for confirmation rather than allowing silently."),
+        ("codex", "the hook refuses the command: this client cannot prompt for confirmation."),
+    ],
+)
+def test_catalog_page_states_this_client_s_own_crash_answer(gate_dist: Path, tree: str, on_crash: str) -> None:
+    """A crashed guard's answer comes from the tested claim for this client, not another's."""
+    marketplace_main(["build", "--dist", str(gate_dist), "--tree", tree])
+    body = (gate_dist / CATALOG_PAGE).read_text(encoding="utf-8")
+
+    assert f"When the guard itself crashes, {on_crash}" in body
+    assert "Codex CLI" not in body

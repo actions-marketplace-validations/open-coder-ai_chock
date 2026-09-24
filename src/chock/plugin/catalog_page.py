@@ -13,7 +13,7 @@ from typing import Any
 
 from agentseam import packaging
 
-from chock import vendors
+from chock import evidence, vendors
 from chock.plugin.marketplace_core import CLAUDE_TREE, NEWLINE, _manifest_rel
 from chock.vendors import CHOCK_AGENT
 
@@ -96,6 +96,16 @@ def _event_list(events: list[str]) -> str:
     return quoted[0] if len(quoted) == 1 else ", ".join(quoted[:-1]) + " and " + quoted[-1]
 
 
+def _on_crash(tree: str) -> str:
+    """What this client does with a crashed guard's ask, per chock's tested claim for it."""
+    row = evidence.claim(CHOCK_AGENT[tree], evidence.HONOURS_ASK)
+    if row is None or row.evidence != evidence.TESTED:
+        return "returns an ask this client has not been tested to honour"
+    if row.honours:
+        return "asks for confirmation rather than allowing silently"
+    return "refuses the command: this client cannot prompt for confirmation"
+
+
 def _explain(tree: str, guards: int, guard_events: list[str], gates: int, gate_events: list[str]) -> str:
     """What an enforcing package here ships and does, derived from what was published."""
     parts: list[str] = []
@@ -103,8 +113,8 @@ def _explain(tree: str, guards: int, guard_events: list[str], gates: int, gate_e
         parts.append(
             f"A guard package ships a guard script and a stdlib-only adapter, hooked at "
             f"{_event_list(guard_events)}, and can deny a shell command before the client runs it. "
-            "It fails open when `python3` or a usable `bash` is unavailable, and asks -- on Codex "
-            "CLI, denies -- when the guard crashes."
+            "It fails open when `python3` or a usable `bash` is unavailable. When the guard itself "
+            f"crashes, the hook {_on_crash(tree)}."
         )
     if gates:
         judges_write = vendors.pre_tool_event(CHOCK_AGENT[tree]) in gate_events
