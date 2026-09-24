@@ -1,5 +1,13 @@
 # Chock changelog
 
+## Unreleased
+
+- **The plugins page states each client's own answer to a crashed guard.** Every tree's
+  `PLUGINS.md` said a crashed guard "asks -- on Codex CLI, denies", naming Codex on the Cursor,
+  Copilot and Devin pages alike. The sentence is now taken from the tested `honours_ask` claim for
+  the tree's client: an ask where the client prompts (Claude Code, Cursor, VS Code Copilot), a
+  refusal where it cannot (Codex CLI, Devin), and an untested ask where chock holds no tested claim.
+
 ## 0.11.1 — The plugins page tells a gate from a guard
 
 - **The generated plugins page tells a gate from a guard.** `chock marketplace build` wrote one
