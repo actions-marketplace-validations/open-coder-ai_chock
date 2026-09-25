@@ -150,3 +150,79 @@ def test_require_passes_once_the_attestation_floor_is_met(repo: Path) -> None:
     _write_evidence(repo, fresh)
 
     assert require(repo, "main") == []
+
+
+# --- the base's review policy binds until it is merged away ----------------------------------------
+
+
+def _commit_base_config(repo: Path, review: dict) -> None:
+    """Put a review policy on `main` after the branch forked, the way an adopter's main carries one."""
+    _git(repo, "checkout", "-q", "main")
+    _write_config(repo, review)
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "review policy")
+    _git(repo, "checkout", "-q", "feat/x")
+
+
+def test_a_branch_cannot_drop_a_check_the_base_requires(repo: Path) -> None:
+    _commit_base_config(repo, {"checks": {"always-fails": SCRIPT_ALWAYS_FAILS}, "required_checks": ["always-fails"]})
+    _write_config(repo, {"required_checks": []})
+
+    assert required_checks(repo, "main") == ["always-fails"]
+    _write_evidence(repo, build(repo, "main", {"kind": "agent", "id": "t"}, ["validate"]))
+    (failure,) = require(repo, "main")
+    assert "missing: always-fails" in failure
+
+
+def test_a_branch_cannot_redefine_a_check_the_base_defines(repo: Path) -> None:
+    _commit_base_config(repo, {"checks": {"gate": SCRIPT_ALWAYS_FAILS}, "required_checks": ["gate"]})
+    _write_config(repo, {"checks": {"gate": ["python", "-c", "pass"]}, "required_checks": ["gate"]})
+
+    assert command_set_hash(repo, "main") != command_set_hash(repo), "the head's redefinition is not what is hashed"
+    evidence = build(repo, "main", {"kind": "agent", "id": "t"}, ["gate"])
+    assert evidence["verified"][0]["result"] == "fail", "the base's command ran"
+    _write_evidence(repo, evidence)
+    (failure,) = require(repo, "main")
+    assert failure.startswith("required check(s) recorded failing: gate")
+
+
+def test_a_branch_cannot_lower_the_attestation_floor(repo: Path) -> None:
+    from chock.review.policy import attestation_floor, unattestable_paths
+
+    _commit_base_config(repo, {"attestation_floor": 2, "unattestable_paths": ["infra/"]})
+    _write_config(repo, {"attestation_floor": 0, "unattestable_paths": ["docs/"]})
+
+    assert attestation_floor(repo, "main") == 2
+    assert unattestable_paths(repo, "main") == ["docs/", "infra/"]
+
+
+def test_a_branch_may_add_a_check_the_base_does_not_know(repo: Path) -> None:
+    """Tightening applies at once; only loosening waits for the merge."""
+    _commit_base_config(repo, {"required_checks": ["validate"]})
+    _write_config(repo, {"checks": {"extra": ["python", "-c", "pass"]}, "required_checks": ["validate", "extra"]})
+
+    assert required_checks(repo, "main") == ["extra", "validate"]
+    evidence = build(repo, "main", {"kind": "agent", "id": "t"}, ["validate", "extra"])
+    _write_evidence(repo, evidence)
+    assert require(repo, "main") == []
+
+
+def test_a_recorded_failure_is_never_merge_ready_even_without_a_required_set(repo: Path) -> None:
+    _write_config(repo, {"checks": {"always-fails": SCRIPT_ALWAYS_FAILS}})
+    _write_evidence(repo, build(repo, "main", {"kind": "agent", "id": "t"}, ["always-fails"]))
+    (failure,) = require(repo, "main")
+    assert failure.startswith("check(s) recorded failing: always-fails")
+
+
+def test_a_branch_cannot_drop_the_bases_unattestable_path_to_dodge_the_floor(repo: Path) -> None:
+    """Redefining `unattestable_paths` to omit what the base protects must not un-gate a touched path."""
+    _commit_base_config(repo, {"attestation_floor": 1, "unattestable_paths": ["infra/"]})
+    _write_config(repo, {"attestation_floor": 1, "unattestable_paths": ["docs/"]})
+    (repo / "infra").mkdir()
+    (repo / "infra" / "prod.tf").write_text("resource x {}\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "touch infra")
+
+    _write_evidence(repo, build(repo, "main", {"kind": "agent", "id": "t"}, ["validate"]))
+    failures = require(repo, "main")
+    assert any("infra/" in f for f in failures), failures

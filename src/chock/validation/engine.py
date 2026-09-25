@@ -44,6 +44,7 @@ from chock.validation.checks_repo import (
     check_adapter_integrity,
     check_ambient_rule_blocks,
     check_ambient_token_budget,
+    check_dangling_hook_targets,
     check_gate_log_untracked,
     check_release_consistency,
 )
@@ -193,6 +194,7 @@ def main(argv: list[str] | None = None) -> int:
     check_release_consistency(root, report)
     check_ambient_token_budget(root, report)
     check_gate_log_untracked(root, report)
+    check_dangling_hook_targets(root, report)
     check_policy_toggles(root, report)
     check_compiled_drift(root, report, event=args.event)
     check_plugin_drift(root, report, event=args.event)

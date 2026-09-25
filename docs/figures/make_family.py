@@ -22,7 +22,7 @@ ROLES = {
         "native pre-tool hooks",
     ],
     "chock-catalog": [
-        "the policies — 39, each labelled enforced or advisory,",
+        "the policies — 42, each labelled enforced or advisory,",
         "with replayed evals",
     ],
     "context-report": [

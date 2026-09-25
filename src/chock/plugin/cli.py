@@ -21,17 +21,19 @@ from chock.plugin.claude import build_claude_plugin, claude_plugin_differences
 from chock.plugin.codex import build_codex_plugin, codex_plugin_differences
 from chock.plugin.copilot import build_copilot_plugin, copilot_plugin_differences
 from chock.plugin.cursor import build_cursor_plugin, cursor_plugin_differences
+from chock.plugin.devin import build_devin_plugin, devin_plugin_differences
 from chock.scaffold.recompile import discover_policy_dirs
 
-FORMATS = ("agent-plugins", "claude", "copilot", "cursor", "codex")
+FORMATS = ("agent-plugins", "claude", "copilot", "cursor", "codex", "devin")
 
-HOOK_FORMATS = frozenset({"claude", "copilot", "cursor", "codex"})
+HOOK_FORMATS = frozenset({"claude", "copilot", "cursor", "codex", "devin"})
 
 HOOK_EMITTERS = {
     "claude": (claude_plugin_differences, build_claude_plugin),
     "copilot": (copilot_plugin_differences, build_copilot_plugin),
     "cursor": (cursor_plugin_differences, build_cursor_plugin),
     "codex": (codex_plugin_differences, build_codex_plugin),
+    "devin": (devin_plugin_differences, build_devin_plugin),
 }
 
 
@@ -208,13 +210,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  plugin.json + skills/<id>/SKILL.md per policy; enforcement metadata under {NAMESPACE}")
     if "claude" in formats:
         print(
-            "  .claude-plugin/plugin.json + hooks/ + scripts/ per guard policy; fail posture stated in each description"
+            "  .claude-plugin/plugin.json + hooks/ + scripts/ per guard policy and per policy gating tool_use "
+            "(PreToolUse on write tools + Stop); fail posture stated in each description"
         )
     if "copilot" in formats:
-        print("  root plugin.json + com.github.copilot/hooks/ per guard policy; same posture discipline")
+        print(
+            "  root plugin.json + com.github.copilot/hooks/ per guard policy and per gate (Stop); same posture discipline"
+        )
     if "cursor" in formats:
-        print("  .cursor-plugin/plugin.json + hooks/ (beforeShellExecution) per guard policy")
+        print(
+            "  .cursor-plugin/plugin.json + hooks/ (beforeShellExecution per guard policy; preToolUse on the write and stop per gate)"
+        )
     if "codex" in formats:
-        print("  .codex-plugin/plugin.json + hooks/ (PreToolUse) per guard policy")
+        print("  .codex-plugin/plugin.json + hooks/ (PreToolUse per guard policy; Stop per gate)")
+    if "devin" in formats:
+        print("  .devin-plugin/plugin.json + hooks.json (PreToolUse per guard policy; Stop per gate; best-effort)")
     print("  Skills are advisory in any client. Repo-level enforcement still needs `chock sync`.")
     return 0

@@ -15,7 +15,7 @@ from agentseam import adapters
 from agentseam.vendor_config import SCHEMA, VENDOR_CONFIG
 
 from chock import evidence, vendors
-from chock.compile.emitters import in_agent
+from chock.compile.emitters import in_agent, in_agent_hooks
 from chock.hooks.in_agent_install import WIRED_VENDORS, agent_hooks_rel
 
 
@@ -55,7 +55,7 @@ def test_shell_vocabulary_is_derived_per_vendor_not_borrowed() -> None:
         "vscode_copilot's own derived matcher happens to equal claude_code's -- "
         "pick a different vendor to prove derivation, not the borrowed constant"
     )
-    (rendered_entry,) = in_agent.hooks_map_file("vscode_copilot", "CMD")["hooks"][
+    (rendered_entry,) = in_agent_hooks.hooks_map_file("vscode_copilot", "CMD")["hooks"][
         vendors.pre_tool_event("vscode_copilot")
     ]
     assert rendered_entry["matcher"] == vscode_matcher, (
@@ -104,8 +104,8 @@ def test_cursor_fail_closed_stays_unset_pending_the_owner_decision() -> None:
     witnessed run), never a silent flag-flip. chock's cursor wire bytes carry no failClosed;
     the flag's one source, when decided, is agentseam's public fail_closed accessor.
     """
-    assert "failClosed" not in json.dumps(in_agent.cursor_hooks_file("CMD"))
-    assert "failClosed" not in json.dumps(in_agent.cursor_entry("CMD"))
+    assert "failClosed" not in json.dumps(in_agent_hooks.cursor_hooks_file("CMD"))
+    assert "failClosed" not in json.dumps(in_agent_hooks.cursor_entry("CMD"))
     rendered = adapters.get("cursor").hook_config(("pre_tool",), "CMD", fail_closed=True)
     (entry,) = rendered["hooks"]["preToolUse"]
     assert entry.get("failClosed") is True

@@ -42,12 +42,22 @@ def agents_from_config(repo_root: Path) -> list[str]:
     return deduped
 
 
+def _policies(config: dict[str, Any]) -> dict[str, Any]:
+    """The `policies:` block, or empty when it is absent, null, or not a mapping."""
+    policies = config.get("policies") if isinstance(config, dict) else None
+    return policies if isinstance(policies, dict) else {}
+
+
 def _policy_overrides(config: dict[str, Any]) -> dict[str, Any]:
-    return config.get("policies", {}).get("overrides", {})
+    overrides = _policies(config).get("overrides")
+    return {k: v for k, v in overrides.items() if isinstance(v, dict)} if isinstance(overrides, dict) else {}
 
 
 def _disabled_list(config: dict[str, Any]) -> set[str]:
-    return set(config.get("policies", {}).get("disabled", []))
+    disabled = _policies(config).get("disabled")
+    if isinstance(disabled, str):
+        return {disabled}
+    return {str(p) for p in disabled} if isinstance(disabled, list) else set()
 
 
 def policy_status(
@@ -61,10 +71,15 @@ def policy_status(
     override = _policy_overrides(config).get(policy_id, {})
     mandatory = bool(manifest.get("mandatory", False))
 
-    if policy_id in disabled:
+    # POL-1: the config cannot disable a mandatory policy; validate reports the dead entry.
+    if policy_id in disabled and not mandatory:
         return {"state": "disabled", "targets": None, "mandatory": mandatory}
 
     targets = override.get("surfaces")
+    if isinstance(targets, str):
+        targets = [targets]
+    if not isinstance(targets, list) or not all(isinstance(t, str) for t in targets):
+        targets = None
     if not targets and override.get("enforcement") == "advise":
         targets = [Surface.AMBIENT_RULE.value]
     if not targets:

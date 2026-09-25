@@ -17,6 +17,18 @@
         "command": "\"/usr/local/bin/python3\" \"${CLAUDE_PROJECT_DIR}/.chock/bin/cursor.py\" --guard \"${CLAUDE_PROJECT_DIR}/.agents/policies/protect-commit-privacy/implementations/protect-commit-privacy.sh\"",
         "timeout": 30
       }
+    ],
+    "preToolUse": [
+      {
+        "command": "\"/tmp/chock-cursor/bin/python3\" \"${CLAUDE_PROJECT_DIR}/.chock/bin/cursor.py\" --gate \"${CLAUDE_PROJECT_DIR}/.chock/compiled/pin-github-actions/pre-tool-use/gate.json\"",
+        "timeout": 30
+      }
+    ],
+    "stop": [
+      {
+        "command": "\"/tmp/chock-cursor/bin/python3\" \"${CLAUDE_PROJECT_DIR}/.chock/bin/cursor.py\" --gate \"${CLAUDE_PROJECT_DIR}/.chock/compiled/pin-github-actions/stop/gate.json\"",
+        "timeout": 30
+      }
     ]
   },
   "version": 1

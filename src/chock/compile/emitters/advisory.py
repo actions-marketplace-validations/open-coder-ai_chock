@@ -61,7 +61,12 @@ def _render_params(params: dict[str, Any]) -> str:
     rendered: list[str] = []
     used = 0
     for key, value in params.items():
-        item = f"{key}={_clip(_scalar(value))}"
+        # A script param's compiled value is the file's path from the repository root, which
+        # depends on where the policy sits (`.agents/policies/<id>` once adopted, a catalog tree
+        # before). The line an agent reads, and the packaged SKILL.md that carries it, must not
+        # change with the address: the bare name is what the manifest declared.
+        shown = Path(str(value)).name if key == "script" else value
+        item = f"{key}={_clip(_scalar(shown))}"
         if rendered and used + len(item) > _PARAMS_CHARS:
             rendered.append("...")
             break

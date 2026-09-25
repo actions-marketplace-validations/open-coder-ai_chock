@@ -1,6 +1,143 @@
 # Chock changelog
 
-## Unreleased
+## 0.11.2 — The plugins page states each client's own crash answer
+
+- **The plugins page states each client's own answer to a crashed guard.** Every tree's
+  `PLUGINS.md` said a crashed guard "asks -- on Codex CLI, denies", naming Codex on the Cursor,
+  Copilot and Devin pages alike. The sentence is now taken from the tested `honours_ask` claim for
+  the tree's client: an ask where the client prompts (Claude Code, Cursor, VS Code Copilot), a
+  refusal where it cannot (Codex CLI, Devin), and an untested ask where chock holds no tested claim.
+
+## 0.11.1 — The plugins page tells a gate from a guard
+
+- **The generated plugins page tells a gate from a guard.** `chock marketplace build` wrote one
+  fixed paragraph per tree describing every enforcing package as a `PreToolUse` guard script
+  that denies a shell command. Since 0.11.0 a package can carry a policy's gate instead, which
+  judges what a turn writes rather than what it runs, so the published `PLUGINS.md` in every
+  distribution repo misdescribed five of its fourteen enforcing packages -- and named
+  `PreToolUse` even in the Cursor tree, whose guards hook `beforeShellExecution`. The paragraph
+  is now derived from the hooks each package publishes: a `--guard` command makes a guard
+  package, a `--gate` command a gate package, and each kind is described with the events its
+  own hooks file wires, in that client's spelling. Where a client records no write-tool
+  vocabulary the page says the gate runs at the turn's end only and the write itself is not
+  judged. The page renderer moves to its own module, `chock.plugin.catalog_page`.
+- **Documentation matches the code again.** A full audit of `README.md` and `docs/` against
+  the source: the coverage-grade vocabulary (eight levels, and no agent reaches `enforced`),
+  the adapter files `chock init` actually writes, a schema-valid example manifest, and the
+  surface, vendor and format counts. `chock plugin build`'s summary line for the Cursor format
+  now names its `preToolUse` and `stop` gate events beside `beforeShellExecution`.
+
+## 0.11.0 — A policy's gate rides in its plugin, and Cursor gates a write and reports at the turn's end
+
+- **Cursor gates a write and reports at the turn's end.** agentseam 0.3.3 records what a live
+  probe of Cursor 3.21.18 showed: the generic `preToolUse` event fires for `Write` with the
+  file's path and full content and honours a deny, and `stop` honours a `followup_message`
+  that sends the agent back into the turn (a silent stop ends it, so that surface fails open).
+  `chock sync` now compiles a Cursor write fragment and a Cursor stop fragment for a policy
+  whose gate declares `tool_use`, and merges both into `.cursor/hooks.json` beside the shell
+  guard, under their own event keys; Cursor's row gains the `stop` column. A flat Cursor entry
+  carries no matcher, so the runtime answers every tool under `preToolUse` and judges only a
+  write it recognises. A stop that already re-entered once (`loop_count`, Cursor's spelling of
+  Claude Code's `stop_hook_active`) is not judged again. Pin: `agentseam==0.3.3`.
+- **A policy's gate rides in its plugin, in every hook-carrying format.** A plugin installs at
+  the agent, not in a repository, so it carried a command guard or nothing: a gate lived only
+  where `chock sync` compiled it. `chock plugin build` now packages a policy whose gate declares
+  `tool_use` -- the compiled `scripts/gate.json`, the runner beside it as `scripts/gate.py`,
+  and for `kind: script` the policy's whole `implementations/` under `scripts/`, so a program
+  that imports from beside itself still does -- wired to every surface agentseam records for
+  the vendor and no other: Claude Code's package gates the recorded write tools at `PreToolUse`
+  and the turn's end at `Stop`; Codex, Devin and Copilot record no write-tool vocabulary but
+  block at the turn's end, so their packages carry the gate at `Stop` alone and say that the
+  write itself is not judged; Cursor records `Write` at its generic `preToolUse` and a turn-end
+  hook that hands a refusal back as a follow-up message, so its package gates the write and
+  reports at `stop`, in Cursor's own flat entry shape. Each package states its posture (what is
+  judged and when, refuses when it cannot decide, needs python3, the vendor's own caveat) and
+  the skill claims its hooks. The bundled runtime looks for the runner beside the gate before
+  the repository layout, and takes the repository from the event's working directory when the
+  gate is packaged; a packaged script gate says `script_base: gate`, which the runner reads as
+  "beside me" instead of "under the repository root". Runtime goldens regenerate (an emitter
+  change, so a minor release).
+- **A policy's own skill files.** A policy may carry a `skill/` folder: `skill/body.md` is
+  appended to its rendered `SKILL.md` after the constraint block, and every other file there
+  rides in the skill's directory in the Agent Plugins package and every store package -- a
+  guided setup page beside the skill that opens it. `--check` sees a changed or removed file;
+  every store now owns `skills/`, so a rebuild removes what the policy stopped shipping.
+
+## 0.10.0 — A script gate's evals replay, and its ambient line names the script by file
+
+- **A script gate's evals replay.** `chock check --only evals` runs a staged-files case against
+  the compiled gate in a throwaway repository that holds only the case's own files -- whole
+  for a declarative gate, whose JSON is the entire check, and empty-handed for a `kind: script`
+  gate, whose program lives under the policy's `implementations/` and is resolved from the
+  repository root. Every such case observed "not installed" and refused, so a suite could only
+  pass by expecting `block`. The runner now copies the policy's `implementations/` to where the
+  compiled gate names the script, as `chock sync` would have, before running the case.
+- **A script gate's ambient line names the script, not its address.** The `on(...)` line an
+  agent reads rendered the compiled `script` param, which is the file's path from the repository
+  root and so differs between a catalog tree (`base/<id>/...`) and an adopter
+  (`.agents/policies/<id>/...`). The packaged `SKILL.md` carries that line, so `chock plugin build
+  --check` could not be clean in both places at once. The bare file name is rendered now, which is
+  what the manifest declares; the `stability-script` golden moves with it (an emitter change, so
+  this is a minor release under the stability rule).
+
+## 0.9.3 — A `kind: script` gate that runs a policy's own program, and a native Devin plugin format and marketplace tree on agentseam 0.3.2
+
+- **`kind: script` gate**: a `hook.gate` whose check is the policy's own program, for a check no
+  declarative kind can hold -- a parser, a flow model over a method body, a rule table larger
+  than `params`. The runner hands the script the same material every declarative kind reads
+  (`{"event", "repo_root", "writes"}` on stdin: the staged blobs at commit and push, the write
+  itself at tool use and at the turn's end) and carries back its exit code -- `0` allows, `1`
+  refuses in the script's own words. A missing script, a crash or a timeout refuses in the
+  runner's words, never allows. It is a write-path kind, so the existing emitters wire it to the
+  write fragment and to `stop` unchanged: a script-backed policy now reaches every vendor a
+  `content_regex` gate does. Until now a script could only be a shell guard (`--guard`,
+  argv-shaped, never shown the file being written) or a git-event script (commit and push only);
+  the gap a script-backed gate left was named in the catalog's own a11y changelog. `chock check`
+  refuses a script name that is not a bare `.py` file name, and one the policy does not ship.
+- **`devin` plugin format**: `chock plugin build --format devin` packages a policy as a native
+  Devin plugin (`.devin-plugin/plugin.json` + `skills/<id>/SKILL.md` + a root-level `hooks.json`,
+  not the nested `hooks/hooks.json` every other format uses). Same guard, same adapter,
+  byte-identical to every other format -- only the envelope differs, and the hook command reaches
+  its own bundled copies via a shell expansion of `$DEVIN_PLUGIN_ROOT`, the environment variable
+  the vendor documents hook commands receive (agentseam records no `${...}` plugin-root token for
+  Devin, unlike Codex or Cursor -- that expansion is chock's own inference, not a vendor-recorded
+  token). Unlike every other hook format, the package claims no enforcement tier: the vendor's own
+  docs call plugin hooks "currently best effort and fail open ... so don't rely on them for
+  crucial guardrails yet," for local Devin sessions (the CLI and Devin Desktop) only, and the
+  posture text says so instead of claiming a block.
+- **`chock marketplace build --tree devin`**: Devin has no marketplace index file -- `devin
+  plugins install` instead reads a repo's root `.devin-plugin/plugin.json` as a meta-plugin whose
+  `optionalPlugins` point `git-subdir` entries at each built plugin, so `--tree devin` writes that
+  root manifest in place of an index (a new `--url` is required; chock never reads `git remote`
+  for it). `chock-market.lock` and `PLUGINS.md` cover the devin tree the same way they cover every
+  other tree.
+- **Pinned `agentseam==0.3.2`**, which records Devin's native plugin layout; the vendored runtime
+  goldens moved with it (version stamp only, no handler change).
+
+## 0.9.2 — `sync` no longer leaves a vendor's hook config pointing at a runtime it just deleted
+
+- **Fixed: narrowing `supported_agents` on 0.9.1 left dangling hook entries behind (#151).**
+  0.9.1 wired in-agent hooks only for the vendors `supported_agents` names and pruned a
+  vendored runtime once its vendor fell out of that list, but neither step touched the
+  vendor's own hook config file, which 0.9.0 had written for every vendor chock knew. An
+  adopter who synced on 0.9.0 and then narrowed `supported_agents` on 0.9.1 (chock-example,
+  chock-mise) ended up with `.cursor/hooks.json`, `.codex/hooks.json`, `.windsurf/hooks.json`
+  and four more config files still naming a `.chock/bin/<vendor>.py` that `sync` had just
+  deleted -- a hook whose command failed on every tool call, in a client that reported no
+  error, while both `chock sync --check` and `chock check` reported clean. `sync` now
+  uninstalls chock's entries from every vendor it no longer wires before pruning that
+  vendor's runtime, the same removal path the installers already take when a policy stops
+  compiling (deleting a config file that held only chock's entries). A repo already broken
+  by 0.9.1 -- whose runtime is already gone, and only the config entry says a vendor was
+  ever wired -- self-heals on the next `sync` too, as this repo's own `.agents/hooks.json`
+  did (dogfooding turned up a live instance of #151 here: `antigravity` left `supported_agents`
+  under #150 and its runtime was pruned, but the stale entry was never removed until now).
+- **`chock check` catches a dangling hook target.** A new repo check
+  (`check_dangling_hook_targets()`) reads every hook config chock can write and reports an
+  error on any chock-written entry naming a `.chock/bin/` path that does not exist, with
+  `chock sync` as the fix -- the exact shape of drift #151 left silent.
+
+## 0.9.1 — The suite passes on Windows, a policy-less repo keeps its runtime, a pull request may not weaken the policy set, and a pre-release review closes the boundary cases
 
 - **Fixed: Windows.** The `v0.9.0` tag ran the full matrix and every Windows `validate` job
   failed at the test step, on fifteen tests, while Linux was green -- the release shipped on
@@ -50,6 +187,66 @@
   backstop, and listed in `docs/baseline-policies.md` and `docs/agentic-risk-coverage.md`.
   The bound is what keeps it off `docs/installation.md` and `docs/reviewer-evidence.md`, which
   quote an unpinned `uses:` line on purpose.
+
+- **`chock add` refuses what a catalog must not hand it.** `shutil.copytree` dereferenced
+  symlinks, so a pack carrying `leak -> ~/.ssh/id_rsa` installed the adopter's private key as
+  a regular file in their repo; a manifest whose `id` differed from its folder installed as
+  two policies (the lock and compiled tree under one name, the config under the other);
+  `--ref <sha>` failed (`git clone --branch` takes a branch or tag) and `--ref` with a local
+  path was ignored; a path-like id was a traceback. `add` now refuses symlinks and foreign
+  ids before hashing, fetches a commit id by name, honours `--ref` for a local checkout, and
+  reports a bad id as an error (`scaffold/add.py`).
+
+- **`chock check --only verify` attests every pack `sync` compiles.** An empty or missing
+  `chock.lock` over installed packs verified clean -- nothing was compared -- and a pack nested
+  under `.agents/policies/<group>/` was compiled but never locked, since `build_lock()` read one
+  level and `discover_policy_dirs()` every level. Both are drift now (a nested pack records its
+  `path`), and a lock that is not JSON is a named failure rather than a traceback (`lock.py`).
+
+- **`chock review require` judges by the stricter of the base's policy and the head's.** It
+  read `required_checks`, the check registry, `attestation_floor` and `unattestable_paths` from
+  the pull request's own `.chock/config.yaml`, so the change being judged chose what it was
+  judged on. The required set and unattestable paths are now the union of base and head, the
+  floor the higher, and a check both define runs as the base defines it; a recorded failure is
+  never merge-ready, required or not (`review/policy.py`, `docs/reviewer-evidence.md`).
+
+- **The baseline check compares reach, not size.** `{git-hook, ci-gate} -> {git-hook,
+  ambient-rule}` kept the surface count and lost a gate, and a strict-subset test passed it;
+  a base ref that did not resolve read as "no config there", which is every policy enabled;
+  a base config that was not YAML was a traceback. A head that lacks any base surface is a
+  weakening; an unresolvable ref and unreadable YAML are errors (`checks_baseline.py`).
+
+- **A config of the wrong shape neither crashes nor quietly widens.** `policies:` null,
+  `disabled: scan-secrets` (iterated as letters), a null or string override and
+  `surfaces: 5` each crashed the resolver or the baseline check; `validate` now names each
+  (`policy_toggles`), the resolver treats a bare string as one id or surface, and POL-1 holds
+  in `sync` too: a mandatory policy listed in `policies.disabled` is compiled in full.
+
+- **`egress_allowlist` reads a URL the way a fetch library will.** `https:\\evil.io`,
+  `https:/evil.io` and `https:///evil.io` yielded no host and passed; `example.com\@evil.io`
+  is one host to a browser and another to curl; `evil.io%00.example.com` matched the
+  allowlist's suffix. Backslashes and slash runs are normalised, a host outside the DNS and
+  IP character set is refused as undecidable, and an international host is matched by its
+  punycode name (`gateway/gates.py`).
+
+- **A gate pattern that does not compile fails `validate`, not the first commit it guards.**
+  `content_pattern: "("` passed schema validation and `sync`, then every commit died with a
+  `re.error` traceback (`checks_gate_shape.py`).
+
+- **`sync` wires in-agent hooks for `supported_agents` only.** `chock init . --agents claude`
+  followed by `sync` wrote ten vendors' hook files (`.cursor/`, `.codex/`, `.windsurf/`,
+  `.devin/`, ...) and vendored ten runtimes; the SessionStart arm hook was installed whether
+  or not claude was named (`recompile.wired_vendors()`).
+
+- **`agentseam` bumped to 0.3.1.** Its own `dispatch.handle()` now refuses a handler that
+  raises in the vendor's dialect, instead of letting the exception escape; every vendored
+  runtime's `main()` gains the matching `_decide()`/`_report()` wrapping, so a policy handler
+  that raises is answered with a deny instead of an unhandled traceback. `dispatch.py.tmpl`'s
+  own try/except in `gate/runtime_bundle.py` already refused on failure from the outside and
+  is now redundant with agentseam's inner one for the vendored runtimes this repo emits; it
+  stays for this release as defense in depth rather than being pulled the same cycle as the
+  bump. 0.3.1 also writes `dump()` output as LF on every platform, which chock's own code
+  paths never call. Every adopter's next `chock sync` rewrites `.chock/bin/*.py`.
 
 ## 0.9.0 — In-session enforcement for content policies: the write path, the `stop` backstop, and the waiver that could not be self-served
 

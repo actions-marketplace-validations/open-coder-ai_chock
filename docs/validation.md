@@ -83,7 +83,8 @@ same PR — plus one test that attacks the check and one that feeds it ordinary 
 
 ## Running it in CI
 
-The reference `.github/workflows/ci.yml` runs, on Ubuntu **and** Windows across Python 3.11/3.12:
+The reference `.github/workflows/ci.yml` runs on Ubuntu across Python 3.11, 3.12 and 3.13.
+Windows joins the matrix only on a `v*` tag or a manual `full_matrix` dispatch:
 
 ```bash
 ruff check . && ruff format --check .

@@ -9,6 +9,7 @@ types you'll write most.
 ```text
 .agents/policies/block-console-log/
 ├── manifest.yaml            # manifest — always present
+├── skill/                   # optional: body.md, and any file the packaged skill should ship
 └── evals/
     └── suite.yaml         # trigger / negative / behavior / adversarial cases
 ```
@@ -179,8 +180,9 @@ which the vendored runner enforces. See [Gate DSL](../spec/gate-dsl.md) for the 
 ### `rule.text` replaces `rule_text`
 
 A rule's text lives under `rule.text` in `manifest.yaml`. The top-level `rule_text` key is gone;
-`additionalProperties: false` rejects it. The compiled `AGENTS.md` block byte-matches `rule.text`
-between the `<!-- chock:rules:start -->` markers (SEC-7).
+`additionalProperties: false` rejects it. SEC-7 guarantees that the compiled ambient surface is what the
+policies produce and nobody hand-edits it: `chock check --only index` regenerates
+`.agents/policies/INDEX.md` and the `AGENTS.md` pointer block, and exits non-zero on any diff.
 
 ### Skills and workflows carry no `manifest.yaml` (D1)
 

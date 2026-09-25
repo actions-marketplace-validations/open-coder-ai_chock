@@ -1,3 +1,7 @@
 {
-  "owned_subtrees": ["com.github.copilot", "scripts"]
+  "owned_subtrees": [
+    "com.github.copilot",
+    "scripts",
+    "skills"
+  ]
 }

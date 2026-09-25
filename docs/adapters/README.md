@@ -1,29 +1,25 @@
-:= chock-context
-
 # Adapters
 
 Adapters map the agent-agnostic Chock core to agent-specific surfaces.
 
 ## Agent-specific entry points
 
-Each supported agent has a native file that delegates back to `AGENTS.md`:
+Most agents read `AGENTS.md` directly and get **no wrapper file at all** — Cursor, Codex,
+Copilot, VS Code, Gemini CLI, Windsurf and Kimi Code among them. A wrapper is written only for
+an agent that cannot read the shared file. `chock init . --agent-agnostic` writes exactly
+these, and nothing else:
 
-- Claude Code: `.claude/CLAUDE.md`
-- Cursor: `.cursor/rules/*.mdc` (modern), `.cursorrules` (legacy fallback)
-- Devin: `.devin/README.md`
-- Windsurf: `.windsurf/rules/*.md` (modern), `.windsurfrules` (legacy fallback)
-- Codex: `codex.md`
-- GitHub Copilot: `.github/copilot-instructions.md`
-- Gemini CLI: `.gemini/GEMINI.md`
-- Grok Build: `.grok/GROK.md`
-- Kimi Code: `.kimi-code/AGENTS.md`
+- Claude Code: `CLAUDE.md` (repo root)
 - Aider: `CONVENTIONS.md` + `.aider.conf.yml`
-- VS Code: `.github/agents/*.agent.md`
+- Antigravity CLI: `.agents/rules/agentseam.md`
+- Devin: `.devin/README.md`
+- Grok Build: `.grok/GROK.md`
+- Junie: `.junie/guidelines.md`
 - Replit Agent: `replit.md`
 - Tabnine: `guidelines.md`
-- Antigravity CLI: `.agents/rules/*.md`
 
-These files are thin wrappers. The actual rules and skills live in `AGENTS.md`, `.agents/skills/`, and `.agents/policies/`.
+These files are thin wrappers. The actual rules and skills live in `AGENTS.md`,
+`.agents/policies/INDEX.md`, `.agents/skills/` and `.agents/policies/`.
 
 ## Contents
 

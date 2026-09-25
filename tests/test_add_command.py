@@ -113,22 +113,53 @@ def test_a_local_catalog_reports_no_commit(repo: Path, catalog: Path) -> None:
     assert added.commit is None
 
 
-def test_a_cloned_catalog_records_the_commit_it_resolved_to(repo: Path, catalog: Path) -> None:
-    """`--ref main` means "whatever main pointed at then", so the answer must be recorded."""
+def _git_catalog(catalog: Path) -> str:
+    """Commit the catalog on `main`, tag it `v1`, and return the commit id."""
     for args in (
         ["git", "init", "--quiet", "-b", "main", "."],
         ["git", "config", "user.email", "c@example.invalid"],
         ["git", "config", "user.name", "Catalog"],
         ["git", "add", "-A"],
         ["git", "commit", "--quiet", "-m", "catalog"],
+        ["git", "tag", "v1"],
     ):
         subprocess.run(args, cwd=catalog, check=True, capture_output=True)
-    head = subprocess.run(
+    return subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=catalog, check=True, capture_output=True, text=True
     ).stdout.strip()
 
+
+def test_a_cloned_catalog_records_the_commit_it_resolved_to(repo: Path, catalog: Path) -> None:
+    """`--ref main` means "whatever main pointed at then", so the answer must be recorded."""
+    head = _git_catalog(catalog)
+
     added = add(repo, "protect-main-branch", f"file://{catalog}", None, force=False)
     assert added.commit == head
+
+
+def test_a_ref_is_honoured_for_a_local_catalog_too(repo: Path, catalog: Path) -> None:
+    """`--ref` with a local path used to be ignored: the checkout's working tree was copied whatever it said."""
+    head = _git_catalog(catalog)
+    (catalog / "base" / "protect-main-branch" / "UNCOMMITTED.md").write_text("not at v1\n", encoding="utf-8")
+
+    added = add(repo, "protect-main-branch", str(catalog), "v1", force=False)
+
+    assert added.commit == head
+    assert not (added.path / "UNCOMMITTED.md").exists()
+
+
+def test_a_ref_may_be_a_commit_id(repo: Path, catalog: Path) -> None:
+    """`git clone --branch` refuses a commit id; a pinned lock records one, so `add` must take it."""
+    head = _git_catalog(catalog)
+
+    added = add(repo, "protect-main-branch", str(catalog), head, force=False)
+
+    assert added.commit == head
+
+
+def test_a_ref_on_a_plain_directory_is_refused_not_ignored(repo: Path, catalog: Path) -> None:
+    with pytest.raises(RuntimeError, match="could not fetch catalog .* at v1"):
+        add(repo, "protect-main-branch", str(catalog), "v1", force=False)
 
 
 def test_provenance_survives_the_lockfile_rebuild(repo: Path, catalog: Path) -> None:
@@ -138,6 +169,7 @@ def test_provenance_survives_the_lockfile_rebuild(repo: Path, catalog: Path) -> 
     from chock.lock import build_lock, write_lock
     from chock.scaffold.add import record_provenance
 
+    _git_catalog(catalog)
     added = add(repo, "protect-main-branch", str(catalog), "v1", force=False)
     write_lock(build_lock(repo), repo)
     record_provenance(repo, "protect-main-branch", str(catalog), "v1", added)
@@ -145,3 +177,42 @@ def test_provenance_survives_the_lockfile_rebuild(repo: Path, catalog: Path) -> 
     entry = next(p for p in json.loads((repo / "chock.lock").read_text())["packs"] if p["id"] == "protect-main-branch")
     assert entry["source"] == str(catalog)
     assert entry["source_ref"] == "v1"
+
+
+# --- what a catalog may not smuggle in -------------------------------------------------------------
+
+
+def test_a_pack_carrying_a_symlink_is_refused(catalog: Path, repo: Path) -> None:
+    """Copying a symlink dereferences it: a catalog could otherwise lift any file off the adopter's disk."""
+    import os
+
+    from chock.scaffold.add import IntegrityError
+
+    (catalog / "base" / "protect-main-branch" / "leak").symlink_to(catalog / "skills" / "demo-skill" / "SKILL.md")
+    os.symlink(catalog / "skills", catalog / "base" / "protect-main-branch" / "tree", target_is_directory=True)
+
+    with pytest.raises(IntegrityError, match="symlink.*leak.*tree"):
+        add(repo, "protect-main-branch", str(catalog), None, force=False)
+    assert not (repo / ".agents" / "policies" / "protect-main-branch").exists()
+
+
+def test_a_pack_whose_manifest_names_another_id_is_refused(catalog: Path, repo: Path) -> None:
+    """The folder name is the id in the lock, the compiled tree and the config; a manifest that disagrees is two policies."""
+    from chock.scaffold.add import IntegrityError
+
+    manifest = catalog / "base" / "protect-main-branch" / "manifest.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace("id: protect-main-branch", "id: other"), encoding="utf-8"
+    )
+
+    with pytest.raises(IntegrityError, match="`id: other`"):
+        add(repo, "protect-main-branch", str(catalog), None, force=False)
+
+
+def test_a_path_like_id_is_a_clean_error_not_a_traceback(
+    catalog: Path, repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    from chock.scaffold.add import main
+
+    assert main(["../escape", "--repo", str(repo), "--from", str(catalog), "--skip-compile"]) == 1
+    assert "invalid artifact id" in capsys.readouterr().err

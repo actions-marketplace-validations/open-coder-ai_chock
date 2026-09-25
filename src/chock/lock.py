@@ -9,12 +9,17 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from chock.manifest import resolve_manifest_path
+from chock.policies import discover_policy_dirs
 from chock.vendored import vendored_differences
 
 LOCKFILE_NAME = "chock.lock"
 LOCKFILE_VERSION = "1"
 ENGINE_CONSTRAINT = ">=0.1,<0.2"
+POLICIES_REL = Path(".agents") / "policies"
+
+
+class LockError(RuntimeError):
+    """chock.lock exists but cannot be read as a lockfile."""
 
 
 def _hash_file(path: Path) -> str:
@@ -41,7 +46,15 @@ def read_lock(repo_root: Path | None = None) -> dict[str, Any]:
     path = repo_root / LOCKFILE_NAME
     if not path.exists():
         return {"lockfile_version": LOCKFILE_VERSION, "engine": ENGINE_CONSTRAINT, "packs": []}
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        msg = f"{LOCKFILE_NAME} is not valid JSON ({exc}); restore it from git or run `chock sync` to rewrite it"
+        raise LockError(msg) from exc
+    if not isinstance(loaded, dict) or not isinstance(loaded.get("packs", []), list):
+        msg = f"{LOCKFILE_NAME} is not a lockfile (expected an object with a `packs` list)"
+        raise LockError(msg)
+    return loaded
 
 
 def write_lock(data: dict[str, Any], repo_root: Path | None = None) -> None:
@@ -58,32 +71,32 @@ def compute_artifacts_hash(repo_root: Path, policy_id: str) -> str | None:
     return compute_pack_hash(compiled_dir)
 
 
+def _pack_rel(entry: dict[str, Any]) -> Path:
+    """Where a locked pack lives: a nested pack records its path, a top-level one is its id."""
+    return Path(entry["path"]) if entry.get("path") else POLICIES_REL / entry["id"]
+
+
 def build_lock(repo_root: Path) -> dict[str, Any]:
-    """Build a lockfile from the policies installed in a repo."""
+    """Build a lockfile from the policies installed in a repo: every pack `sync` compiles."""
     lock: dict[str, Any] = {
         "lockfile_version": LOCKFILE_VERSION,
         "engine": ENGINE_CONSTRAINT,
         "packs": [],
     }
-    policies_dir = repo_root / ".agents" / "policies"
-    if policies_dir.exists():
-        for pack_dir in sorted(policies_dir.iterdir()):
-            if not pack_dir.is_dir():
-                continue
-            manifest = resolve_manifest_path(pack_dir)
-            if manifest is None:
-                continue
-            entry: dict[str, Any] = {
-                "id": pack_dir.name,
-                "version": "0.0.1",
-                "managed": False,
-                "sha256": compute_pack_hash(pack_dir),
-                "source": "local",
-            }
-            artifacts = compute_artifacts_hash(repo_root, pack_dir.name)
-            if artifacts is not None:
-                entry["artifacts_sha256"] = artifacts
-            lock["packs"].append(entry)
+    for pack_dir in discover_policy_dirs(repo_root):
+        entry: dict[str, Any] = {
+            "id": pack_dir.name,
+            "version": "0.0.1",
+            "managed": False,
+            "sha256": compute_pack_hash(pack_dir),
+            "source": "local",
+        }
+        if pack_dir.parent != repo_root / POLICIES_REL:
+            entry["path"] = pack_dir.relative_to(repo_root).as_posix()
+        artifacts = compute_artifacts_hash(repo_root, pack_dir.name)
+        if artifacts is not None:
+            entry["artifacts_sha256"] = artifacts
+        lock["packs"].append(entry)
 
     return lock
 
@@ -91,15 +104,24 @@ def build_lock(repo_root: Path) -> dict[str, Any]:
 def verify_lock(repo_root: Path | None = None) -> tuple[bool, list[str]]:
     """Recompute pack and compiled-artifact hashes and report drift."""
     repo_root = repo_root or Path.cwd().resolve()
-    lock = read_lock(repo_root)
+    try:
+        lock = read_lock(repo_root)
+    except LockError as exc:
+        return False, [str(exc)]
     failures: list[str] = []
 
     failures += [
         f"vendored runtime modified ({d}) -- this is what executes gates" for d in vendored_differences(repo_root)
     ]
 
+    locked = {_pack_rel(entry).as_posix() for entry in lock.get("packs", [])}
+    for pack_dir in discover_policy_dirs(repo_root):
+        rel = pack_dir.relative_to(repo_root).as_posix()
+        if rel not in locked:
+            failures.append(f"{pack_dir.name}: installed at {rel} but not in {LOCKFILE_NAME} (run `chock sync`)")
+
     for entry in lock.get("packs", []):
-        pack_dir = repo_root / ".agents" / "policies" / entry["id"]
+        pack_dir = repo_root / _pack_rel(entry)
         if not pack_dir.exists():
             failures.append(f"{entry['id']}: pack directory missing")
             continue

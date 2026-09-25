@@ -231,3 +231,25 @@ def test_unreadable_gate_file_fails_closed(tmp_path):
     (d / "gateway-gate.json").write_text("{not json", encoding="utf-8")
     gates = gateway_gates.load_gates(tmp_path)
     assert gateway_gates.evaluate(gates, "any", {}) is not None
+
+
+def test_egress_reads_a_url_the_way_a_browser_or_curl_would():
+    """Spellings a fetch library normalises to a host must not read as no host to the gate."""
+    gates = [_gate("egress_allowlist", {"allowed_hosts": ["example.com"]})]
+    for url in (
+        r"https:\\evil.io\x",
+        "https:/evil.io/x",
+        "https:///evil.io/x",
+        r"https://example.com\@evil.io/",
+        "https://evil.io%00.example.com/",
+        "https://example.com%2eevil.io/",
+    ):
+        assert gateway_gates.evaluate(gates, "fetch", {"url": url}) is not None, url
+    # curl reads `example.com\path` as the host and a browser reads `example.com`: undecidable, so blocked.
+    assert "undecidable host" in gateway_gates.evaluate(gates, "fetch", {"url": r"https://example.com\path"})
+
+
+def test_egress_matches_an_international_host_by_its_dns_name():
+    gates = [_gate("egress_allowlist", {"allowed_hosts": ["xn--r8jz45g.jp"]})]
+    assert gateway_gates.evaluate(gates, "fetch", {"url": "https://例え.jp/"}) is None
+    assert gateway_gates.evaluate(gates, "fetch", {"url": "https://例え.jp.evil.io/"}) is not None

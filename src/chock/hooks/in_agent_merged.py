@@ -116,6 +116,20 @@ MERGED = {
                 flat=True,
                 report_key="command",
             ),
+            # The generic pre-tool event, a different key from the shell one above: a content
+            # gate judges the file a Write would leave, the shell guard judges a command.
+            Wiring(
+                event=vendors.pre_tool_event("cursor"),
+                fragment_glob="*/pre-tool-use/cursor-write-hooks.json",
+                flat=True,
+                report_key="command",
+            ),
+            Wiring(
+                event=vendors.stop_event("cursor"),
+                fragment_glob="*/stop/cursor-hooks.json",
+                flat=True,
+                report_key="command",
+            ),
         ),
         unlink_runtime_when_empty=False,
         write_when_absent=False,
@@ -191,8 +205,16 @@ def _merge_event(hooks: dict, wiring: Wiring, wanted: list[dict], markers: tuple
     return [entry.get(wiring.report_key) or wiring.event for entry in wanted]
 
 
-def install_merged(repo_root: Path, vendor: str) -> list[str]:
-    """Merge compiled fragments into the vendor's config file, keeping entries not ours."""
+def install_merged(repo_root: Path, vendor: str, *, uninstall: bool = False) -> list[str]:
+    """Merge compiled fragments into the vendor's config file, keeping entries not ours.
+
+    `uninstall=True` treats every wiring as wanting nothing, the same as a vendor whose
+    compiled tree carries no fragments for it -- chock's entries come out (or the file goes,
+    if it held only chock's) regardless of what is actually compiled. `sync` uses this for a
+    vendor `supported_agents` no longer names, whose fragments are still compiled (compiling
+    is agent-agnostic; only which vendors get installed is not) and would otherwise be
+    reinstalled by the ordinary compiled-fragment lookup below.
+    """
     vendor_wiring = MERGED[vendor]
     repo_root = Path(repo_root)
     markers = owned_markers(vendor)
@@ -207,7 +229,7 @@ def install_merged(repo_root: Path, vendor: str) -> list[str]:
     reported: list[str] = []
     installed_any = False
     for wiring in vendor_wiring.wirings:
-        wanted = _compiled(repo_root, wiring)
+        wanted = [] if uninstall else _compiled(repo_root, wiring)
         installed_any = installed_any or bool(wanted)
         reported.extend(_merge_event(hooks, wiring, wanted, markers))
 

@@ -147,11 +147,16 @@ def _fragments(repo_root: Path, vendor: str) -> list[tuple[str, dict]]:
     return found
 
 
-def install_generic(repo_root: Path, vendor: str) -> list[str]:
-    """Merge `vendor`'s compiled fragments into its recorded config file, keeping entries not ours."""
+def install_generic(repo_root: Path, vendor: str, *, uninstall: bool = False) -> list[str]:
+    """Merge `vendor`'s compiled fragments into its recorded config file, keeping entries not ours.
+
+    `uninstall=True` treats the vendor as having no fragments at all, the same as one whose
+    compiled tree carries none -- see `install_merged`'s docstring for why `sync` needs this
+    instead of relying on the compiled tree actually being empty.
+    """
     repo_root = Path(repo_root)
     marker = _marker(vendor)
-    fragments = _fragments(repo_root, vendor)
+    fragments = [] if uninstall else _fragments(repo_root, vendor)
     config_path = repo_root / vendors.config_path(vendor)
     settings = load_config(config_path)
     prior: dict[str, dict] = {}

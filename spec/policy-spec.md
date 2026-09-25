@@ -42,7 +42,7 @@ wiring:
 .agents/policies/<id>/
 ├── manifest.yaml          # contains hook.gate
 ├── implementations/       # optional: only if the hook needs scripts
-└── evals/suite.yaml
+└── evals/suite.yaml       # + skill/ (optional): body.md joins SKILL.md, other files ship beside it
 ```
 
 ### rule
@@ -287,7 +287,7 @@ optimize_playbook: MAY NOT raise tier
 
 > Invariant: **POL-1** — A mandatory policy cannot be disabled through `.chock/config.yaml` or the `chock disable` CLI.
 
-- `mandatory: true` in a policy manifest is an enforceable lock: `chock check` and `chock disable` both reject disabling a mandatory policy
+- `mandatory: true` in a policy manifest is an enforceable lock: `chock check` and `chock disable` both reject disabling a mandatory policy, and `sync` compiles it in full whatever `policies.disabled` says
 
 > Invariant: **POL-2** — Unknown policy ids in `policies.disabled` or `policies.overrides` trigger a validation warning.
 

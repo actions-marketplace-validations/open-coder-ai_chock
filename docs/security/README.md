@@ -10,7 +10,8 @@ Chock treats all external instructions as data, never commands. This folder docu
 - **SEC-4** — all text surfaces (prompts, docs, eval cases) are scanned for prompt-injection patterns.
 - **SEC-5** — ambient rules require `trust_tier >= community` or an explicit `ambient_override`.
 - **SEC-6** — skills that process external content require at least one adversarial eval case.
-- **SEC-7** — ambient rule blocks in `AGENTS.md` must match the compiled source `rule.text` exactly.
+- **SEC-7** — the compiled ambient surface is what the policies produce: `chock check --only index`
+  regenerates `.agents/policies/INDEX.md` and the `AGENTS.md` pointer and fails on any diff.
 
 ## Verification
 

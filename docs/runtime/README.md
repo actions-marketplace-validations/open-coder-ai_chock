@@ -18,7 +18,8 @@ The agent itself performs the invocations; the manifest only declares dependenci
 Deterministic logic belongs in a committed script under a `code` or `hybrid` skill:
 
 - Place the script under `<skill>/scripts/`.
-- Declare `scripts.entrypoint` in `manifest.yaml`.
+- Declare `entry` in the `SKILL.md` frontmatter, which *is* a skill's manifest — a skill has no
+  separate `manifest.yaml`, and shipping both is rejected.
 - In `SKILL.md`, instruct the agent to run the script with the required input.
 - Never generate a script at runtime.
 - Never ship a standalone script as a deliverable.

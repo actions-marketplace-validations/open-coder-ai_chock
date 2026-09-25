@@ -19,7 +19,8 @@ Flags:
 | flag | purpose |
 |---|---|
 | `--repo PATH` | repo root to check (default `.`) |
-| `--only <targets>` | comma-separated subset of `validate,verify,evals,matrix,index` |
+| `--only <targets>` | comma-separated subset of `validate,verify,evals,matrix,mechanisms,index,conflicts,baseline` |
+| `--base <ref>` | the base revision the `baseline` target compares against |
 | `--mode frontier-<agent>` | frontier validation profile, passed to `validate` |
 | `--event <event>` | hook event context (e.g. `commit`), passed to `validate` |
 

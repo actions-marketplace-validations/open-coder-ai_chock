@@ -6,7 +6,8 @@ Verified against: https://code.visualstudio.com/docs/agent-customization/custom-
 
 ## Files
 
-- `.github/agents/chock.agent.md` — VS Code custom agent file
+- No wrapper file: VS Code reads `AGENTS.md` natively, so `chock init` writes nothing
+  agent-specific for it.
 
 VS Code custom agents are defined in `.agent.md` files. Workspace-scoped agents live in `.github/agents/` (or `.claude/agents/` in Claude format).
 
@@ -15,4 +16,4 @@ VS Code custom agents are defined in `.agent.md` files. Workspace-scoped agents 
 - Core rules: `AGENTS.md`
 - Skills: `.agents/skills/`
 - Policies: `.agents/policies/`
-- Validator: `the `chock check` CLI (src/chock/validation/)`
+- Validator: the `chock check` CLI (`src/chock/validation/`)

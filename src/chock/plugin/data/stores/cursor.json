@@ -1,3 +1,7 @@
 {
-  "owned_subtrees": ["hooks", "scripts"]
+  "owned_subtrees": [
+    "hooks",
+    "scripts",
+    "skills"
+  ]
 }

@@ -6,7 +6,8 @@ Verified against: https://www.kimi.com/code/docs/en/kimi-code-cli/customization/
 
 ## Files
 
-- `.kimi-code/AGENTS.md` — optional agent-readable wrapper that points to `AGENTS.md`
+- No wrapper file: Kimi Code reads `AGENTS.md` natively, so `chock init` writes nothing
+  agent-specific for it.
 
 Kimi Code CLI reads `AGENTS.md` natively from the project root or `.kimi-code/AGENTS.md`, hierarchically.
 
@@ -15,4 +16,4 @@ Kimi Code CLI reads `AGENTS.md` natively from the project root or `.kimi-code/AG
 - Core rules: `AGENTS.md`
 - Skills: `.agents/skills/`
 - Policies: `.agents/policies/`
-- Validator: `the `chock check` CLI (src/chock/validation/)`
+- Validator: the `chock check` CLI (`src/chock/validation/`)

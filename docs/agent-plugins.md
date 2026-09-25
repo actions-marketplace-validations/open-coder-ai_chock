@@ -37,10 +37,17 @@ moves; `manifest.yaml` stays the single source of truth and `plugin.json` is gen
 base/scan-secrets/
 ├── manifest.yaml              # canonical — hand-authored
 ├── evals/                     # unchanged
+├── skill/                     # optional, hand-authored: body.md + files the skill ships
 ├── plugin.json                # generated
 └── skills/scan-secrets/
-    └── SKILL.md               # generated
+    ├── SKILL.md               # generated; skill/body.md appended after the constraint block
+    └── ...                    # every other file under skill/, copied as it is
 ```
+
+`skill/` is the one hand-authored input beside the manifest. A policy whose skill needs more
+than its rendered constraints -- a guided setup page, a reference document -- puts the words
+in `skill/body.md` and the files beside it; the builder renders the first and copies the rest,
+and `chock plugin build --check` treats a changed or removed file as drift like any other.
 
 `plugin.json` derives every field from the manifest — `name` from `id`, `license`, `repository` and
 `author` from `provenance`, `keywords` from `artifact`, `enforcement` and any `compliance.owasp_asi`
@@ -181,10 +188,10 @@ mere presence of two files.
 ## The hook-carrying vendor formats
 
 The Agent Plugins 1.0 standard carries no hooks, so an `agent-plugins` package is advisory
-by construction. Enforcement travels in four vendor plugin formats built from the same
-policies (`chock plugin build --format claude|copilot|cursor|codex`), each published in its
-own generated distribution repo and each **witnessed denying a destructive command on a
-real install**:
+by construction. Enforcement travels in five vendor plugin formats built from the same
+policies (`chock plugin build --format claude|copilot|cursor|codex|devin`). Four of them are
+published in a generated distribution repo of their own, and each of those is **witnessed
+denying a destructive command on a real install**:
 
 | Vendor repo | Client(s) | Deny dialect |
 | :--- | :--- | :--- |
@@ -194,7 +201,25 @@ real install**:
 | [chock-codex-plugins](https://github.com/open-coder-ai/chock-codex-plugins) | Codex (after its per-hook trust review) | exit 0 + `permissionDecision` JSON |
 
 One guard, one adapter, byte-identical across all four — only the envelope each client
-reads differs. The deny dialects are pinned by `tests/test_pretooluse_protocol.py` (every
+reads differs.
+
+Every hook-carrying format also carries a policy's **gate** when the gate declares
+`tool_use`: the compiled `scripts/gate.json`, the stdlib runner beside it as `scripts/gate.py`,
+and for `kind: script` the policy's whole `implementations/` under `scripts/`. The hooks file
+runs the same adapter with `--gate` on every surface agentseam records for the vendor, and on
+no other:
+
+| Store | Write path | Turn's end | Package posture |
+| :--- | :--- | :--- | :--- |
+| claude | `PreToolUse` on `Write\|Edit\|MultiEdit\|NotebookEdit` | `Stop` | judges the write, re-reads the turn |
+| codex, devin, copilot | none recorded | `Stop` | re-reads the turn; the write itself is not judged |
+| cursor | `preToolUse` on `Write` (flat entry, no matcher) | `stop`, as a `followup_message` | judges the write, sends the agent back to the turn's leftovers |
+
+A file written through a shell heredoc is judged at the turn's end wherever `Stop` reaches. In Cursor the turn is not held: the refusal returns to the agent as a follow-up message, once, and a hook that fails to answer lets the turn end.
+The runtime finds the runner beside the gate and takes the repository from the event's working
+directory, which is where `.chock/` config such as a policy's selection file is read from. A
+gate that declares only `commit` stays advisory in every package: a hook that could only
+refuse is not installed. The deny dialects are pinned by `tests/test_pretooluse_protocol.py` (every
 case there reproduces a witnessed failure), and the probe evidence is recorded in the
 0.4.0 CHANGELOG entry. Codex additionally installs every hook **untrusted** until a human approves
 it, and that trust is bound to a hash of the hook command, so a plugin update silently

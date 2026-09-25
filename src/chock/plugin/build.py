@@ -112,6 +112,31 @@ _ADVISORY_NOTE_RULE = (
 )
 
 
+#: A policy's own words for its skill, and the files it wants beside them: `skill/body.md`
+#: is appended to the rendered `SKILL.md`; every other file under `skill/` is copied into
+#: the skill's directory as it is. Optional, and most policies carry neither.
+SKILL_DIR = "skill"
+SKILL_BODY = "body.md"
+
+
+def skill_body(policy_dir: Path) -> str:
+    """The policy's own skill section, or empty when it wrote none."""
+    body = Path(policy_dir) / SKILL_DIR / SKILL_BODY
+    return body.read_text(encoding="utf-8").strip() if body.is_file() else ""
+
+
+def skill_assets(policy_dir: Path) -> dict[Path, str]:
+    """Files the policy ships beside its `SKILL.md`, keyed by their path inside the skill."""
+    root = Path(policy_dir) / SKILL_DIR
+    if not root.is_dir():
+        return {}
+    return {
+        path.relative_to(root): path.read_text(encoding="utf-8")
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and path.name != SKILL_BODY and "__pycache__" not in path.parts
+    }
+
+
 def build_skill(policy_dir: Path, manifest: dict[str, Any], repo_root: Path, hooks: str | None = None) -> str:
     """Render `SKILL.md` for a policy."""
     policy_id = manifest.get("id") or Path(policy_dir).name
@@ -122,6 +147,8 @@ def build_skill(policy_dir: Path, manifest: dict[str, Any], repo_root: Path, hoo
 
     coverage_line = f"  chock.hooks: {hooks}\n" if hooks else "  chock.coverage_without_chock: advisory\n"
     advisory_note = _ADVISORY_NOTE_HOOK if (manifest.get("artifact") == "hook") else _ADVISORY_NOTE_RULE
+    own = skill_body(policy_dir)
+    own_section = f"{own}\n\n" if own else ""
     return (
         "---\n"
         f"name: {policy_id}\n"
@@ -140,6 +167,7 @@ def build_skill(policy_dir: Path, manifest: dict[str, Any], repo_root: Path, hoo
         f"{body}\n"
         "```\n"
         "\n"
+        f"{own_section}"
         f"{advisory_note}\n"
     )
 
@@ -154,6 +182,8 @@ def plugin_files(
         Path("plugin.json"): json.dumps(build_manifest(manifest, policy_dir), indent=2) + "\n",
         Path("skills") / name / "SKILL.md": build_skill(policy_dir, manifest, repo_root),
     }
+    for rel, content in skill_assets(policy_dir).items():
+        files[Path("skills") / name / rel] = content
     licence = license_text(manifest) if packaged else None
     if licence:
         files[LICENSE_REL] = licence
