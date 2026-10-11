@@ -9,7 +9,9 @@ from agentseam import contract as _contract
 from agentseam import matrix as _matrix
 from agentseam.vendor_config import VENDOR_CONFIG
 
-CHOCK_AGENT: dict[str, str] = {
+#: chock's short agent names where they differ from agentseam's vendor id, plus agents agentseam has
+#: no adapter for (aider, replit: instruction files only).
+_ALIASES: dict[str, str] = {
     "claude": "claude_code",
     "cursor": "cursor",
     "windsurf": "windsurf",
@@ -27,6 +29,21 @@ CHOCK_AGENT: dict[str, str] = {
     "antigravity": "antigravity",
 }
 
+#: Every agent name `supported_agents` accepts: the aliases, then each agentseam adapter not yet
+#: named, under its own id with `-` for `_`. A new upstream adapter needs no change here.
+CHOCK_AGENT: dict[str, str] = {
+    **_ALIASES,
+    **{v.replace("_", "-"): v for v in sorted(VENDOR_CONFIG) if v not in _ALIASES.values()},
+}
+
+#: Config formats `chock sync` merges into: a JSON document, or an owned block in a TOML file.
+#: `hook_dir` (Cline: one executable per event) is not one: it runs one command per event, and
+#: chock's per-policy entries would need a single multi-policy dispatcher there.
+SYNC_FORMATS = ("json", "toml")
+#: agentseam names its own plugin directory in a path whose owner is the installer (goose).
+_UPSTREAM_OWNER_SLOT = "/agentseam/"
+_OWNER_SLOT = "/chock/"
+
 
 def entry(vendor: str) -> dict[str, Any]:
     """agentseam's vendor-config entry for `vendor`; chock reads it, never re-records it."""
@@ -34,14 +51,19 @@ def entry(vendor: str) -> dict[str, Any]:
 
 
 def repo_wirable(vendor: str) -> bool:
-    """Whether `chock sync --repo` can reach the vendor's hook config: a repo-relative JSON file.
+    """Whether `chock sync --repo` can reach the vendor's hook config: a repo-relative JSON or TOML file.
 
-    A home-anchored config path (junie, kimi_code) or a non-JSON format is outside the
+    A home-anchored config path (junie, kimi_code) or a hooks directory (cline) is outside the
     repo-scoped install model, not outside the vendor's capability; the matrix row still
     says what the vendor could do, this says what chock's installer may touch.
     """
     facts = entry(vendor)
-    return facts["config_format"] == "json" and not str(facts["config_path"]).startswith("~")
+    return facts["config_format"] in SYNC_FORMATS and not str(facts["config_path"]).startswith("~")
+
+
+def config_format(vendor: str) -> str:
+    """The vendor's hook-config format as agentseam records it (`json`, `toml`, `hook_dir`)."""
+    return str(entry(vendor)["config_format"])
 
 
 #: Vendors chock wires through its OWN hooks file (.github/hooks/chock.json) instead of the
@@ -76,8 +98,8 @@ def stop_vendors() -> tuple[str, ...]:
 
 
 def config_path(vendor: str) -> str:
-    """Repo-relative path of the file the vendor reads hook wiring from."""
-    return str(entry(vendor)["config_path"])
+    """Repo-relative path of the file the vendor reads hook wiring from; chock's own plugin slot for goose."""
+    return str(entry(vendor)["config_path"]).replace(_UPSTREAM_OWNER_SLOT, _OWNER_SLOT, 1)
 
 
 def repo_root_token(vendor: str) -> str | None:
@@ -155,7 +177,7 @@ def tool_call_vendors() -> tuple[str, ...]:
     )
 
 
-def post_tool_hook_config(vendor: str, command: str) -> dict[str, Any]:
+def post_tool_hook_config(vendor: str, command: str) -> Any:
     """The vendor's hook-config document running `command` after a tool call, with no matcher."""
     return _adapters.get(vendor).hook_config((_contract.POST_TOOL,), command, None)
 
@@ -193,12 +215,12 @@ def hook_entry_flat(vendor: str) -> bool:
     return (entry or {}).get("wrapper") == "cursor"
 
 
-def pre_tool_hook_config(vendor: str, command: str, matcher: str | None = None) -> dict[str, Any]:
+def pre_tool_hook_config(vendor: str, command: str, matcher: str | None = None) -> Any:
     """The vendor's complete hook-config document gating pre-tool with `command`."""
     return _adapters.get(vendor).hook_config((_contract.PRE_TOOL,), command, matcher)
 
 
-def stop_hook_config(vendor: str, command: str) -> dict[str, Any]:
+def stop_hook_config(vendor: str, command: str) -> Any:
     """The vendor's complete hook-config document running `command` when a turn ends.
 
     No matcher: the turn-end event carries no tool to match on, which is why this surface

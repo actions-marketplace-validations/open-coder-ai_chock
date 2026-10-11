@@ -111,7 +111,13 @@ def _generic(vendor: str, output_dir: Path, policy_id: str, spec: dict[str, Any]
     pre, record = _commands(vendor, policy_id, PRE_SURFACE)
     doc = generic_pre_tool_config(vendor, pre, _matcher(spec))
     if records_session(spec):
-        doc["hooks"] = {**doc["hooks"], **generic_post_tool_config(vendor, record)["hooks"]}
+        post = generic_post_tool_config(vendor, record)
+        if isinstance(doc, list):  # mistral_vibe: a flat list of rules
+            doc = [*doc, *post]
+        elif vendors.hook_entry_bare(vendor):  # factory_droid: the document is the event map itself
+            doc = {**doc, **post}
+        else:
+            doc["hooks"] = {**doc["hooks"], **post["hooks"]}
     _write(output_dir, f"{vendor}{GENERIC_SUFFIX}", doc, written)
 
 

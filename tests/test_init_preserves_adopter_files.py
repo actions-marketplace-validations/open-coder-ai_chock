@@ -54,29 +54,29 @@ def test_content_outside_the_marker_survives_a_second_init(onboarded: Path) -> N
 def test_a_deselected_wrapper_with_edits_is_not_deleted(tmp_path: Path) -> None:
     """Deleting a file the adopter added content to destroys it as surely as overwriting it."""
     repo = init_repo(tmp_path)
-    assert _init(repo, "--agents", "grok") == 0
-    grok_md = repo / ".grok" / "GROK.md"
-    _append(grok_md)
+    assert _init(repo, "--agents", "junie") == 0
+    wrapper = repo / ".junie" / "guidelines.md"
+    _append(wrapper)
 
     assert _init(repo, "--agents", "claude") == 0
 
-    assert grok_md.exists(), "init deleted an adopter-edited wrapper"
-    after = grok_md.read_text(encoding="utf-8")
+    assert wrapper.exists(), "init deleted an adopter-edited wrapper"
+    after = wrapper.read_text(encoding="utf-8")
     assert "never_deploy(on: friday)" in after, "the adopter's own content was deleted along with chock's block"
-    assert "Authoritative rules and conventions" not in after, "chock's block should be gone once grok is deselected"
+    assert "Authoritative rules and conventions" not in after, "chock's block should be gone once junie is deselected"
 
 
 def test_a_wrapper_with_no_adopter_content_is_deleted_on_deselect(tmp_path: Path) -> None:
     """The mirror case: nothing but chock's own block is an orphan, not adopter content."""
     repo = init_repo(tmp_path)
-    assert _init(repo, "--agents", "grok") == 0
-    grok_md = repo / ".grok" / "GROK.md"
-    assert grok_md.exists()
+    assert _init(repo, "--agents", "junie") == 0
+    wrapper = repo / ".junie" / "guidelines.md"
+    assert wrapper.exists()
 
     assert _init(repo, "--agents", "claude") == 0
 
-    assert not grok_md.exists(), "an orphaned wrapper with no adopter content was left behind"
-    assert not grok_md.parent.exists(), "its now-empty parent directory was left behind"
+    assert not wrapper.exists(), "an orphaned wrapper with no adopter content was left behind"
+    assert not wrapper.parent.exists(), "its now-empty parent directory was left behind"
 
 
 def test_the_marker_region_is_refreshed_with_no_force_needed(onboarded: Path) -> None:
