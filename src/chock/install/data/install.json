@@ -39,7 +39,7 @@
       "binary": "copilot",
       "index": [{"path": ".claude-plugin/marketplace.json", "style": "claude"}],
       "label_prefix": "",
-      "gate_turn_end_only": true,
+      "gate_turn_end_only": false,
       "steps": [
         {"command": ["copilot", "plugin", "marketplace", "add", "__DEST__"]},
         {"command": ["copilot", "plugin", "install", "__PLUGIN__@__MARKETPLACE__"]},
