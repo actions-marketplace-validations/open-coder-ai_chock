@@ -2208,6 +2208,19 @@ def _chock_unreadable():
     decision = Decision.escalate(reason) if action == "ask" else Decision.deny(reason)
     text, code = respond(degrade(decision, event), event)
     return (text, code) if _chock_refuses(text, code) else ("", 2)
+#: Per wire event mapped to pre_tool: whether the client shows a guard's ask as a prompt.
+_CHOCK_CAN_ASK = {'PreToolUse': False}
+_CHOCK_EVENT_KEYS = ('hook_event_name', 'hookEventName', 'agent_action_name')
+
+
+def _chock_wire_name(raw):
+    names = (raw.get(key) for key in _CHOCK_EVENT_KEYS) if isinstance(raw, dict) else ()
+    return next((name for name in names if isinstance(name, str)), None)
+
+
+def _chock_can_ask(raw):
+    # An event this bundle cannot name, or one the vendor data does not list, cannot prompt.
+    return _CHOCK_CAN_ASK.get(_chock_wire_name(raw), False)
 
 
 def _spoken(verdict):
@@ -2219,7 +2232,7 @@ def _spoken(verdict):
 
 def _judge(event):
     if event.event == "pre_tool" and event.command:
-        verdict = evaluate(sys.argv[1:], event.command, event.tool or "", can_ask=False)
+        verdict = evaluate(sys.argv[1:], event.command, event.tool or "", can_ask=_chock_can_ask(event.raw))
         if verdict is not None:
             outcome, reason = verdict
             return Decision.escalate(reason) if outcome == ESCALATE else Decision.deny(reason)
