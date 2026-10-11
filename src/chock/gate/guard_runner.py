@@ -26,6 +26,7 @@ _CRASH_MARKERS = ("traceback (most recent call last)", "syntax error", "syntaxer
 TOOL_UNKNOWN = "unknown"
 #: Set to 1 in the guard's environment when argv is a plain whitespace split, not a shell parse.
 ARGV_FALLBACK_ENV = "CHOCK_ARGV_FALLBACK"
+CAN_ASK_ENV = "CHOCK_CAN_ASK"  # "1"/"0": the client prompts on a guard's ask; unset when the caller cannot say
 
 _POSIX_BASH = ("bash", "/bin/bash", "/usr/bin/bash")
 #: Where Git for Windows installs when `git` is not on PATH to say where it is.
@@ -87,6 +88,7 @@ def bash_candidates() -> list[str]:
 def interpreter_env(interpreter: str) -> dict[str, str]:
     """The environment a guard runs in: on Windows, Git's usr/bin ahead on PATH for sed and grep."""
     env = dict(os.environ)
+    env.pop(CAN_ASK_ENV, None)  # only a caller that knows the client may say; never inherited
     if os.name != _WINDOWS:
         return env
     home = Path(interpreter).parent
@@ -163,7 +165,7 @@ def _no_interpreter(guard: Path, deadline: float) -> tuple[str, str]:
     return GUARD_ERRORED, reason
 
 
-def run_guard_detailed(guard: Path, command: str, tool: str = "") -> tuple[str, str]:
+def run_guard_detailed(guard: Path, command: str, tool: str = "", *, can_ask: bool | None = None) -> tuple[str, str]:
     """`run_guard`'s verdict plus the guard's own first line, which an ask carries to the user."""
     args, fallback = split_command(command)
     if not args:
@@ -178,6 +180,7 @@ def run_guard_detailed(guard: Path, command: str, tool: str = "") -> tuple[str, 
         env = {**interpreter_env(interpreter), "CHOCK_RAW_COMMAND": command, "CHOCK_TOOL": normalize_tool(tool)}
         if fallback:
             env[ARGV_FALLBACK_ENV] = "1"
+        env.update({} if can_ask is None else {CAN_ASK_ENV: "1" if can_ask else "0"})
         proc = subprocess.run(  # noqa: S603 -- running the guard script against the command is the feature
             [interpreter, str(guard), *args],
             capture_output=True,
@@ -260,7 +263,7 @@ def log_outcome(guard: Path, tool: str, *, verdict: str) -> None:
         return
 
 
-def evaluate(argv: list[str], command: str, tool: str = "") -> tuple[str, str] | None:
+def evaluate(argv: list[str], command: str, tool: str = "", *, can_ask: bool | None = None) -> tuple[str, str] | None:
     """Run the guard named on `argv` (`--guard <path>`) against `command`."""
     guard = guard_path_from_argv(argv)
     if guard is None:
@@ -272,7 +275,7 @@ def evaluate(argv: list[str], command: str, tool: str = "") -> tuple[str, str] |
             f"chock guard {guard} is missing, so this command cannot be checked. "
             "Run `chock sync --repo .` to reinstall the policy's guards.",
         )
-    verdict, message = run_guard_detailed(guard, command, tool)
+    verdict, message = run_guard_detailed(guard, command, tool, can_ask=can_ask)
     logged = {GUARD_BLOCKED: "block", GUARD_ASKED: "ask", GUARD_CLEAN: "allow"}
     if verdict in logged:
         log_outcome(guard, tool, verdict=logged[verdict])

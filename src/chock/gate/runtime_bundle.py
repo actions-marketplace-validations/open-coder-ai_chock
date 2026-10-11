@@ -90,6 +90,7 @@ def _extract(module) -> str:
 
 _DISPATCH = _DATA_DIR.joinpath("dispatch.py.tmpl").read_text(encoding="utf-8")
 _DISPATCH_BRANCH_TOKEN = "# __SESSION_START_BRANCH__\n"  # noqa: S105 -- a template marker, not a credential
+_WIRE_NAME_OF = {"cursor": "cursor_wire(raw)"}  # a family that infers the wire name from shape: the same way here
 
 _UNREADABLE = _DATA_DIR.joinpath("unreadable_payload.py.tmpl").read_text(encoding="utf-8")
 _WIRE_RAW_TOKENS = {"__PRE_TOOL_RAW__": contract.PRE_TOOL, "__STOP_RAW__": contract.STOP}
@@ -167,6 +168,24 @@ _STOP_WARN_RESPOND_AGENTS = _STOP_WARN_AGENTS - _COPILOT_RESPOND_AGENTS - _WARN_
 _STOP_WARN_RESPOND_CALL = "return _chock_stop_warn_respond(degrade(decision, event), event)"
 
 
+def pre_tool_can_ask(agent: str) -> dict[str, bool]:
+    """Per wire event `agent` maps to pre_tool: whether that gate shows an escalate as a prompt."""
+    vendor = entry(agent)
+    gates = vendor.get("verdicts", {}).get("gates", {})
+    pre_tool = [name for name, canonical in vendor.get("events", {}).items() if canonical == contract.PRE_TOOL]
+    return {name: bool((gates.get(name) or {}).get("honours_escalate")) for name in pre_tool}
+
+
+def _can_ask_tokens(agent: str) -> dict[str, str]:
+    """The dispatcher's can-ask map, the keys naming a payload's event, and how this bundle reads the name."""
+    vendor = entry(agent)
+    return {
+        "__CAN_ASK__": repr(pre_tool_can_ask(agent)),
+        "__EVENT_KEYS__": repr(tuple(dict.fromkeys((*vendor["claims"].get("event_key", ()), *_EVENT_KEYS)))),
+        "__WIRE_NAME__": _WIRE_NAME_OF.get(vendor.get("family"), "_chock_wire_name(raw)"),
+    }
+
+
 def _handler_source(agent: str) -> str:
     """The full handler-block body for `agent`: extracted guard logic, optionally extracted"""
     parts = [
@@ -202,7 +221,10 @@ def _handler_source(agent: str) -> str:
         parts.append(_SESSION_START_ORCHESTRATION)
     branch = _SESSION_START_BRANCH if agent in _SESSION_START_AGENTS else ""
     parts.append(_unreadable_source(agent))
-    parts.append(_DISPATCH.replace(_DISPATCH_BRANCH_TOKEN, branch))
+    dispatch = _DISPATCH.replace(_DISPATCH_BRANCH_TOKEN, branch)
+    for token, value in _can_ask_tokens(agent).items():
+        dispatch = dispatch.replace(token, value)
+    parts.append(dispatch)
     if agent in _COPILOT_RESPOND_AGENTS:
         parts.append(_COPILOT_RESPOND)
     if agent in _WARN_RESPOND_AGENTS:

@@ -693,6 +693,8 @@ TOOL_UNKNOWN = 'unknown'
 
 ARGV_FALLBACK_ENV = 'CHOCK_ARGV_FALLBACK'
 
+CAN_ASK_ENV = 'CHOCK_CAN_ASK'
+
 _POSIX_BASH = ('bash', '/bin/bash', '/usr/bin/bash')
 
 _GIT_FOR_WINDOWS = ('C:\\Program Files\\Git', 'C:\\Program Files (x86)\\Git')
@@ -756,6 +758,7 @@ def bash_candidates() -> list[str]:
 def interpreter_env(interpreter: str) -> dict[str, str]:
     """The environment a guard runs in: on Windows, Git's usr/bin ahead on PATH for sed and grep."""
     env = dict(_chock_os.environ)
+    env.pop(CAN_ASK_ENV, None)
     if _chock_os.name != _WINDOWS:
         return env
     home = _chock_Path(interpreter).parent
@@ -824,7 +827,7 @@ def _no_interpreter(guard: _chock_Path, deadline: float) -> tuple[str, str]:
     print(f'chock: {reason}', file=sys.stderr)
     return (GUARD_ERRORED, reason)
 
-def run_guard_detailed(guard: _chock_Path, command: str, tool: str='') -> tuple[str, str]:
+def run_guard_detailed(guard: _chock_Path, command: str, tool: str='', *, can_ask: bool | None=None) -> tuple[str, str]:
     """`run_guard`'s verdict plus the guard's own first line, which an ask carries to the user."""
     args, fallback = split_command(command)
     if not args:
@@ -837,6 +840,7 @@ def run_guard_detailed(guard: _chock_Path, command: str, tool: str='') -> tuple[
         env = {**interpreter_env(interpreter), 'CHOCK_RAW_COMMAND': command, 'CHOCK_TOOL': normalize_tool(tool)}
         if fallback:
             env[ARGV_FALLBACK_ENV] = '1'
+        env.update({} if can_ask is None else {CAN_ASK_ENV: '1' if can_ask else '0'})
         proc = _chock_subprocess.run([interpreter, str(guard), *args], capture_output=True, text=True, encoding='utf-8', errors='replace', env=env, timeout=time_left(deadline, [interpreter, str(guard)]), check=False)
     except _chock_subprocess.TimeoutExpired:
         print(f'chock: guard timed out after {ENGINE_BUDGET_SECONDS}s, not checked', file=sys.stderr)
@@ -893,14 +897,14 @@ def log_outcome(guard: _chock_Path, tool: str, *, verdict: str) -> None:
     except Exception:
         return
 
-def evaluate(argv: list[str], command: str, tool: str='') -> tuple[str, str] | None:
+def evaluate(argv: list[str], command: str, tool: str='', *, can_ask: bool | None=None) -> tuple[str, str] | None:
     """Run the guard named on `argv` (`--guard <path>`) against `command`."""
     guard = guard_path_from_argv(argv)
     if guard is None:
         return None
     if not guard.exists():
         return (VERDICT_DENY, f"chock guard {guard} is missing, so this command cannot be checked. Run `chock sync --repo .` to reinstall the policy's guards.")
-    verdict, message = run_guard_detailed(guard, command, tool)
+    verdict, message = run_guard_detailed(guard, command, tool, can_ask=can_ask)
     logged = {GUARD_BLOCKED: 'block', GUARD_ASKED: 'ask', GUARD_CLEAN: 'allow'}
     if verdict in logged:
         log_outcome(guard, tool, verdict=logged[verdict])
@@ -2159,6 +2163,19 @@ def _chock_unreadable():
     decision = Decision.escalate(reason) if action == "ask" else Decision.deny(reason)
     text, code = respond(degrade(decision, event), event)
     return (text, code) if _chock_refuses(text, code) else ("", 2)
+#: Per wire event mapped to pre_tool: whether the client shows a guard's ask as a prompt.
+_CHOCK_CAN_ASK = {'BeforeTool': False}
+_CHOCK_EVENT_KEYS = ('hook_event_name', 'hookEventName', 'agent_action_name')
+
+
+def _chock_wire_name(raw):
+    names = (raw.get(key) for key in _CHOCK_EVENT_KEYS) if isinstance(raw, dict) else ()
+    return next((name for name in names if isinstance(name, str)), None)
+
+
+def _chock_can_ask(raw):
+    # An event this bundle cannot name, or one the vendor data does not list, cannot prompt.
+    return _CHOCK_CAN_ASK.get(_chock_wire_name(raw), False)
 
 
 def _spoken(verdict):
@@ -2170,7 +2187,7 @@ def _spoken(verdict):
 
 def _judge(event):
     if event.event == "pre_tool" and event.command:
-        verdict = evaluate(sys.argv[1:], event.command, event.tool or "")
+        verdict = evaluate(sys.argv[1:], event.command, event.tool or "", can_ask=_chock_can_ask(event.raw))
         if verdict is not None:
             outcome, reason = verdict
             return Decision.escalate(reason) if outcome == ESCALATE else Decision.deny(reason)

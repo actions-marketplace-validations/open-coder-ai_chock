@@ -137,6 +137,13 @@ eval runner, always, whether or not the command parses.
 - **`CHOCK_TOOL`.** The tool that ran the command, from the hook payload's tool name:
   `bash` (Bash), `powershell` (PowerShell, pwsh), `shell` (sh, shell, run_shell_command,
   Cursor's beforeShellExecution, any other name containing "shell"), else `unknown`.
+- **`CHOCK_CAN_ASK`.** Set by the vendored hook runtime: `1` when the event that fired shows an
+  ask (exit 3) as a prompt, `0` when the client turns it into a block. Taken from the vendor data's
+  `honours_escalate` for that wire event: `1` at Claude Code `PreToolUse`, Copilot `PreToolUse`,
+  Gemini CLI `BeforeTool`, Cursor `beforeShellExecution`/`beforeMCPExecution`; `0` at every other
+  pre-tool event (Cursor `preToolUse`, Codex, Devin, Grok, Tabnine, Windsurf) and at an event the
+  runtime cannot name. Unset everywhere else (eval replay, a direct call) and never inherited from
+  the caller's environment. A guard must treat unset as "can ask".
 - **Exit codes.** `0` allows. `3` asks; the first output line is the prompt. (`4` warns only for a
   `script` gate and a script-backed git hook, above; a command guard exiting 4 is not checked.) `1` blocks only
   when the guard gave a reason: non-empty stderr (stdout also read) that is not a crash
