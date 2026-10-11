@@ -9,7 +9,7 @@ def _spoken(verdict):
 
 def _judge(event):
     if event.event == "pre_tool" and event.command:
-        verdict = evaluate(sys.argv[1:], event.command, event.tool or "")
+        verdict = evaluate(sys.argv[1:], event.command, event.tool or "", can_ask=__CAN_ASK__)
         if verdict is not None:
             outcome, reason = verdict
             return Decision.escalate(reason) if outcome == ESCALATE else Decision.deny(reason)

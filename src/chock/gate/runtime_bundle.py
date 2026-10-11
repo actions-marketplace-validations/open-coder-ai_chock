@@ -90,6 +90,7 @@ def _extract(module) -> str:
 
 _DISPATCH = _DATA_DIR.joinpath("dispatch.py.tmpl").read_text(encoding="utf-8")
 _DISPATCH_BRANCH_TOKEN = "# __SESSION_START_BRANCH__\n"  # noqa: S105 -- a template marker, not a credential
+_CAN_ASK_TOKEN = "__CAN_ASK__"  # noqa: S105 -- a template marker, not a credential
 
 _UNREADABLE = _DATA_DIR.joinpath("unreadable_payload.py.tmpl").read_text(encoding="utf-8")
 _WIRE_RAW_TOKENS = {"__PRE_TOOL_RAW__": contract.PRE_TOOL, "__STOP_RAW__": contract.STOP}
@@ -167,6 +168,15 @@ _STOP_WARN_RESPOND_AGENTS = _STOP_WARN_AGENTS - _COPILOT_RESPOND_AGENTS - _WARN_
 _STOP_WARN_RESPOND_CALL = "return _chock_stop_warn_respond(degrade(decision, event), event)"
 
 
+def pre_tool_can_ask(agent: str) -> bool:
+    """Whether `agent`'s native pre_tool gate shows an escalate as a prompt; several gates: its `wire_events` one."""
+    vendor = entry(agent)
+    names = [name for name, canonical in vendor.get("events", {}).items() if canonical == contract.PRE_TOOL]
+    name = vendor.get("wire_events", {}).get(contract.PRE_TOOL) if len(names) > 1 else next(iter(names), None)
+    gate = vendor.get("verdicts", {}).get("gates", {}).get(name) or {}
+    return bool(gate.get("honours_escalate", False))
+
+
 def _handler_source(agent: str) -> str:
     """The full handler-block body for `agent`: extracted guard logic, optionally extracted"""
     parts = [
@@ -202,7 +212,9 @@ def _handler_source(agent: str) -> str:
         parts.append(_SESSION_START_ORCHESTRATION)
     branch = _SESSION_START_BRANCH if agent in _SESSION_START_AGENTS else ""
     parts.append(_unreadable_source(agent))
-    parts.append(_DISPATCH.replace(_DISPATCH_BRANCH_TOKEN, branch))
+    parts.append(
+        _DISPATCH.replace(_DISPATCH_BRANCH_TOKEN, branch).replace(_CAN_ASK_TOKEN, repr(pre_tool_can_ask(agent)))
+    )
     if agent in _COPILOT_RESPOND_AGENTS:
         parts.append(_COPILOT_RESPOND)
     if agent in _WARN_RESPOND_AGENTS:
