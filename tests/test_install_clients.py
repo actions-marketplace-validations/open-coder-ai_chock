@@ -24,8 +24,8 @@ TREE = {
     "cursor": ("chock-guardrails", ".cursor-plugin/plugin.json", []),
     "devin": ("chock-guardrails", ".devin-plugin/plugin.json", []),
 }
-# Clients chock has not witnessed an install in; Claude Code, Codex, Copilot and Devin are witnessed.
-UNWITNESSED = ("cursor",)
+# Clients chock has not witnessed an install in; every client is witnessed (Cursor: W-CUR, 2026-10-11).
+UNWITNESSED: tuple[str, ...] = ()
 BINARY = {"claude-code": "claude", "copilot": "copilot", "codex": "codex", "devin": "devin"}
 
 
