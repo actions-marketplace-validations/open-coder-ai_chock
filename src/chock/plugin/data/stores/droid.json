@@ -40,5 +40,5 @@
     }
   ],
   "silent_on": "How a local path's registered marketplace name is derived: chock's default marketplace folder is named `chock-local`, the name its marketplace.json carries, so either derivation gives the same name. A plugin manifest field Droid reads: it reads none, so chock writes name, version and description as source metadata.",
-  "disagrees": "The hooks page says `ask` forces a confirmation prompt; agentseam's vendor data (verdicts.degrade_notes.escalate) says Droid's ask does not force one and degrades it to a block. chock labels from agentseam's data and reports the disagreement."
+  "disagrees": "Docs (read 2026-10-12) say ask forces a prompt; droid 0.238.0's bundle only logs it, so chock blocks (agentseam D2a, vendor-source)."
 }
