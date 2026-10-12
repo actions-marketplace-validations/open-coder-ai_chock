@@ -39,3 +39,14 @@ jobs:
         run: |
           cd docs/figures && for g in make_*.py; do python "$g"; done
           cd ../.. && git diff --exit-code -- docs/figures
+      # A PNG rasterizes differently off this runner (fonts), so it cannot be regenerated locally
+      # byte for byte. On drift, print each differing PNG so the exact runner bytes can be committed.
+      - name: Print drifted PNGs as base64
+        if: failure()
+        run: |
+          git diff --name-only -- 'docs/figures/*.png' | while read -r png; do
+            echo "::group::$png"
+            base64 -w0 "$png"
+            echo
+            echo "::endgroup::"
+          done
