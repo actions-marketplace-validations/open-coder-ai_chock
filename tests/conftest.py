@@ -21,8 +21,9 @@ REPO_POLICIES = FRAMEWORK_ROOT / ".agents" / "policies"
 
 @pytest.fixture(autouse=True)
 def no_gate_log(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep the suite out of this repo's own gate outcome log."""
+    """Keep the suite out of this repo's own gate outcome log; a test that logs names its own level."""
     monkeypatch.setenv("CHOCK_GATE_LOG", "0")
+    monkeypatch.delenv("CHOCK_LOG_LEVEL", raising=False)
 
 
 @pytest.fixture(autouse=True)

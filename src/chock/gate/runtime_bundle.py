@@ -5,9 +5,10 @@ from __future__ import annotations
 import ast
 import functools
 import inspect
+import json
 import re
 
-from agentseam import bundler, contract
+from agentseam import bundler, contract, packaging
 
 from chock.gate.wire_shapes import EVENT_KEYS as _EVENT_KEYS
 from chock.gate.wire_shapes import wire_raw as _wire_raw
@@ -16,6 +17,7 @@ from chock.vendors import entry, in_agent_vendors
 
 from . import (
     budget,
+    decision_log,
     edit_image,
     gate_outcome,
     guard_runner,
@@ -30,6 +32,7 @@ from . import (
     workspace_root,
     write_gate,
 )
+from .runner import journal
 
 BEGIN = "# >>> agentseam handler >>>"
 END = "# <<< agentseam handler <<<"
@@ -168,6 +171,17 @@ def pre_tool_can_ask(agent: str) -> dict[str, bool]:
     return {name: bool((gates.get(name) or {}).get("honours_escalate")) for name in pre_tool}
 
 
+@functools.cache
+def plugin_manifests() -> tuple[str, ...]:
+    """Every manifest path a chock-built package may carry: agentseam's layouts, then chock's own store formats."""
+    layouts = (packaging.layout(agent) for agent in sorted(RUNTIME_AGENTS))
+    found = [layout["manifest"] for layout in layouts if layout and layout.get("manifest")]
+    stores = sorted(package_data_dir("chock.plugin", "data", "stores").glob("*.json"))
+    layouts = (json.loads(path.read_text(encoding="utf-8")).get("layout") or {} for path in stores)
+    found += [layout["manifest"] for layout in layouts if layout.get("manifest")]
+    return tuple(dict.fromkeys(found))
+
+
 def _can_ask_tokens(agent: str) -> dict[str, str]:
     """The dispatcher's can-ask map, the keys naming a payload's event, and how this bundle reads the name."""
     vendor = entry(agent)
@@ -175,6 +189,7 @@ def _can_ask_tokens(agent: str) -> dict[str, str]:
         "__CAN_ASK__": repr(pre_tool_can_ask(agent)),
         "__EVENT_KEYS__": repr(tuple(dict.fromkeys((*vendor["claims"].get("event_key", ()), *_EVENT_KEYS)))),
         "__WIRE_NAME__": _WIRE_NAME_OF.get(vendor.get("family"), "_chock_wire_name(raw)"),
+        "__PLUGIN_MANIFESTS__": repr(plugin_manifests()),
     }
 
 
@@ -183,7 +198,11 @@ def _handler_source(agent: str) -> str:
     parts = [
         _extract(budget),
         "\n",
+        _extract(journal),
+        "\n",
         _extract(guard_runner),
+        "\n",
+        _extract(decision_log),
         "\n",
         _extract(edit_image),
         "\n",

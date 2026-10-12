@@ -1,6 +1,8 @@
 #: Per wire event mapped to pre_tool: whether the client shows a guard's ask as a prompt.
 _CHOCK_CAN_ASK = __CAN_ASK__
 _CHOCK_EVENT_KEYS = __EVENT_KEYS__
+#: Where a plugin package's manifest may sit, relative to its root: the decision log reads its version.
+_CHOCK_PLUGIN_MANIFESTS = __PLUGIN_MANIFESTS__
 
 
 def _chock_wire_name(raw):
@@ -8,9 +10,13 @@ def _chock_wire_name(raw):
     return next((name for name in names if isinstance(name, str)), None)
 
 
+def _chock_wire(raw):
+    return __WIRE_NAME__
+
+
 def _chock_can_ask(raw):
     # An event this bundle cannot name, or one the vendor data does not list, cannot prompt.
-    return _CHOCK_CAN_ASK.get(__WIRE_NAME__, False)
+    return _CHOCK_CAN_ASK.get(_chock_wire(raw), False)
 
 
 def _spoken(verdict):
@@ -20,17 +26,30 @@ def _spoken(verdict):
     return Decision.escalate(reason) if outcome == ESCALATE else Decision.deny(reason)
 
 
-def _judge(event):
+def _chock_timed(judged, stage, ask):
+    started = _chock_time.monotonic()
+    try:
+        return ask()
+    finally:
+        judged[3][stage] = round((_chock_time.monotonic() - started) * 1000)
+
+
+def _judge(event, judged):
     if event.event == "pre_tool" and event.command:
-        verdict = evaluate(sys.argv[1:], event.command, event.tool or "", can_ask=_chock_can_ask(event.raw))
+        verdict = _chock_timed(judged, "guard", lambda: evaluate(
+            sys.argv[1:], event.command, event.tool or "", can_ask=_chock_can_ask(event.raw)
+        ))
         if verdict is not None:
+            judged[0:2] = ["guard", _chock_Path(guard_path_from_argv(sys.argv[1:])).stem]
             outcome, reason = verdict
             return Decision.escalate(reason) if outcome == ESCALATE else Decision.deny(reason)
-    gated = evaluate_gate(sys.argv[1:], event)
+    gated = _chock_timed(judged, "gate", lambda: evaluate_gate(sys.argv[1:], event))
     if gated is not None:
+        judged[0:2] = ["gate", gate_path_from_argv(sys.argv[1:]).parent.parent.name]
         return _spoken(gated)
-    called = evaluate_tool_call(sys.argv[1:], event)
+    called = _chock_timed(judged, "tool_call", lambda: evaluate_tool_call(sys.argv[1:], event))
     if called is not None:
+        judged[0:2] = ["tool_call", str(event.tool or "")]
         return _spoken(called)
 # __SESSION_START_BRANCH__
     return None
@@ -40,10 +59,19 @@ def handle(event):
     # A door that cannot decide refuses. An exception escaping here would exit the hook
     # with a traceback, which every client reads as a non-blocking error: fail-open, with
     # the reason on a stderr nobody watches. The refusal carries the reason instead.
+    judged = [None, None, _chock_time.monotonic(), {}]
     try:
-        return _judge(event)
+        decision = _judge(event, judged)
     except Exception as exc:  # noqa: BLE001 -- any failure here must refuse, never fall through
-        return Decision.deny(
+        judged[0:2] = ["fault", type(exc).__name__]
+        decision = Decision.deny(
             "chock could not check this call (%s: %s). Refusing rather than reporting an "
             "allow it never established." % (type(exc).__name__, exc)
         )
+    context = {"manifests": _CHOCK_PLUGIN_MANIFESTS}
+    try:
+        context.update(wire=_chock_wire(event.raw), can_ask=_chock_can_ask(event.raw))
+    except Exception:  # noqa: BLE001 -- the log's context must never change the decision
+        pass
+    log_decision(sys.argv[1:], event, decision, judged, context)
+    return decision

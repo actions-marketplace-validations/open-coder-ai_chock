@@ -13,7 +13,7 @@ from .context import _GIT
 from .verdict import run, script_verdict
 
 
-# >>> gate.py 20
+# >>> gate.py 21
 def _repo_root() -> Path:
     try:
         out = subprocess.check_output(  # noqa: S603 -- finding the repo root via git is this fallback's job

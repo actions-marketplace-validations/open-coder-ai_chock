@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .gate_outcome import VERDICT_WARN
-from .guard_runner import GATE_LOG_ENV, VERDICT_DENY, append_gate_log
+from .guard_runner import VERDICT_DENY, append_gate_log
 from .session_log import (
     SESSION_ID_MAX,
     SESSION_MAX_ENTRIES,
@@ -205,8 +205,6 @@ def _stop_gate_log(root, policy, verdict, reentry, findings):
         if not stop_ledger_safe(Path(root).joinpath(*GATE_LOG_PARTS)):
             return
         held = verdict == STOP_LOG_WARN
-        if os.environ.get(GATE_LOG_ENV) == "0" and not held:
-            return
         index, reentry_verdict, changed = reentry
         record = {
             "policy_id": policy,

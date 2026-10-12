@@ -69,5 +69,7 @@ def _chock_unreadable():
             return __WARN_RESPOND__(degrade(Decision.warn(reason), event), event)
     _report(reason + "\n")
     decision = Decision.escalate(reason) if action == "ask" else Decision.deny(reason)
+    judged = ["unreadable", None, _chock_time.monotonic(), {}]
+    log_decision(sys.argv[1:], event, decision, judged, {"manifests": _CHOCK_PLUGIN_MANIFESTS})
     text, code = __RESPOND__(degrade(decision, event), event)
     return (text, code) if _chock_refuses(text, code) else ("", 2)

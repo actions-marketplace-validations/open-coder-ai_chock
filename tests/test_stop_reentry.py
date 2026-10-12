@@ -219,6 +219,7 @@ def test_every_re_entry_verdict_reaches_the_gate_log_in_status_words(
     repo: Path, signal, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("CHOCK_GATE_LOG")
+    monkeypatch.setenv("CHOCK_LOG_LEVEL", "debug")  # the clean re-entry is an allow: written at debug only
     _leak(repo, "a.py")
     _stop(repo, signal(0))
     _stop(repo, signal(1))
@@ -229,6 +230,7 @@ def test_every_re_entry_verdict_reaches_the_gate_log_in_status_words(
     _stop(repo, signal(3))
     got = [(r["reentry"], r["verdict"], r["reentry_verdict"], r.get("findings_changed")) for r in _reentry_log(repo)]
     assert got == [(1, "block", "refused", False), (2, "block", "refused", True), (3, "allow", "clean", None)]
+    assert [r["level"] for r in _reentry_log(repo)] == ["info", "info", "debug"]
 
 
 def test_a_first_stop_writes_no_re_entry_record(repo: Path, signal, monkeypatch: pytest.MonkeyPatch) -> None:

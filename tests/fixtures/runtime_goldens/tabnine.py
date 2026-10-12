@@ -722,6 +722,112 @@ def allowed_seconds(expired):
     """The time a timed-out call was actually given, as text (what the deadline left it, not the full budget)."""
     return f'{max(float(expired.timeout or 0), 0.0):.1f}s'
 
+LOG_LEVEL_ENV = 'CHOCK_LOG_LEVEL'
+
+LOG_LEGACY_ENV = 'CHOCK_GATE_LOG'
+
+LOG_OFF, LOG_INFO, LOG_DEBUG = ('off', 'info', 'debug')
+
+LOG_LEVELS = (LOG_OFF, LOG_INFO, LOG_DEBUG)
+
+LOG_SETTINGS_PARTS = ('.chock', 'chock-log.json')
+
+LOG_SETTINGS_KEYS = ('level', 'max_bytes')
+
+LOG_DEFAULT_MAX_BYTES = 1048576
+
+LOG_MIN_MAX_BYTES = 65536
+
+LOG_MAX_MAX_BYTES = 1073741824
+
+LOG_ALLOW = 'allow'
+
+LOG_LET_THROUGH = ('override', 'would_action')
+
+LOG_TRACE_CAP = 200
+
+LOG_REDACTED = '[redacted]'
+
+_LOG_SECRET_RE = _chock_re.compile('(?i)((AKIA|ASIA)[0-9A-Z]{16}|gh[oprsu]_[0-9A-Za-z]{36}|github_pat_[0-9A-Za-z_]{22,}|xox[bpas]-[0-9A-Za-z-]{10,}|(sk|rk)_live_[0-9A-Za-z]{16,}|sk-proj-[0-9A-Za-z_-]{20,}|sk-ant-[0-9A-Za-z_-]{20,}|sk-[0-9A-Za-z]{20,}|AIza[0-9A-Za-z_-]{35}|npm_[0-9A-Za-z]{36}|SG\\.[0-9A-Za-z_-]{16,}\\.[0-9A-Za-z_-]{16,}|eyJ[A-Za-z0-9_-]*\\.[A-Za-z0-9_-]*\\.[A-Za-z0-9_-]*|-----BEGIN (RSA |OPENSSH |EC |DSA )?PRIVATE KEY-----|api[_-]?key\\s*=\\s*["\'][A-Za-z0-9_\\-]{20,}["\']|secret[_-]?key\\s*=\\s*["\'][A-Za-z0-9_\\-]{20,}["\']|auth[_-]?token\\s*=\\s*["\'][A-Za-z0-9_\\-]{20,}["\']|password\\s*=\\s*["\'][^"\'\\s]{12,}["\']|(api|secret|auth)[_-]?(key|token)\\s*[=:]\\s*[A-Za-z0-9_\\-]{20,}|password\\s*[=:]\\s*[^\\s"\'${}]{12,})')
+
+_LOG_BYTES_RANGE = 'a whole number from 65536 (64 KiB) to 1073741824 (1 GiB)'
+
+def log_settings_read(path):
+    """(the valid settings in one scope's file, what is wrong with it); a missing file is ({}, [])."""
+    try:
+        doc = json.loads(_chock_Path(path).read_text(encoding='utf-8'))
+    except FileNotFoundError:
+        return ({}, [])
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        return ({}, [f'{path}: unreadable or not JSON ({exc})'])
+    if not isinstance(doc, dict):
+        return ({}, [f'{path}: must be a JSON object with level and/or max_bytes'])
+    found, problems = ({}, [])
+    level, size = (doc.get('level'), doc.get('max_bytes'))
+    if level in LOG_LEVELS:
+        found['level'] = level
+    elif level is not None:
+        problems.append(f'{path}: level must be off, info or debug, not {level!r}')
+    if type(size) is int and LOG_MIN_MAX_BYTES <= size <= LOG_MAX_MAX_BYTES:
+        found['max_bytes'] = size
+    elif size is not None:
+        problems.append(f'{path}: max_bytes must be {_LOG_BYTES_RANGE}, not {size!r}; using the next scope or 1048576')
+    unknown = sorted(set(doc) - set(LOG_SETTINGS_KEYS))
+    if unknown:
+        problems.append(f"{path}: unknown key(s) {', '.join(map(str, unknown))}; only level and max_bytes are read")
+    return (found, problems)
+
+def log_settings_paths(repo_root):
+    """The settings files in precedence order: the repository's (when known), then the user's."""
+    repo = [_chock_Path(repo_root).joinpath(*LOG_SETTINGS_PARTS)] if repo_root is not None else []
+    return [*repo, _chock_Path(_chock_os.path.expanduser('~')).joinpath(*LOG_SETTINGS_PARTS)]
+
+def log_env_level():
+    """The level the hook's own environment sets, or None: the legacy switch, then `CHOCK_LOG_LEVEL`."""
+    if _chock_os.environ.get(LOG_LEGACY_ENV) == '0':
+        return LOG_OFF
+    named = _chock_os.environ.get(LOG_LEVEL_ENV, '').strip().lower()
+    return named if named in LOG_LEVELS else None
+
+def log_settings(repo_root):
+    """(level, max_bytes) in force: the environment, then the repository's file, the user's, then info and 1 MiB."""
+    scopes = [log_settings_read(path)[0] for path in log_settings_paths(repo_root)]
+    level = log_env_level() or next((s['level'] for s in scopes if 'level' in s), LOG_INFO)
+    size = next((s['max_bytes'] for s in scopes if 'max_bytes' in s), LOG_DEFAULT_MAX_BYTES)
+    return (level, size)
+
+def log_record_level(record):
+    """`debug` for a plain allow, `info` for every decision a policy made or something let through."""
+    plain = record.get('verdict') == LOG_ALLOW and (not any((key in record for key in LOG_LET_THROUGH)))
+    return LOG_DEBUG if plain else LOG_INFO
+
+def log_admits(level, record_level):
+    """Whether a record of `record_level` is written at `level`."""
+    return level == LOG_DEBUG or (level == LOG_INFO and record_level == LOG_INFO)
+
+def log_trace_text(text):
+    """`text` with every value scan-secrets would block replaced, then cut to `LOG_TRACE_CAP` characters."""
+    redacted = _LOG_SECRET_RE.sub(LOG_REDACTED, str(text))
+    return redacted if len(redacted) <= LOG_TRACE_CAP else redacted[:LOG_TRACE_CAP] + '...'
+
+def log_append(path, record, max_bytes=LOG_DEFAULT_MAX_BYTES):
+    """Append one stamped line to `path`, first moving a file past `max_bytes` to `<stem>.1<suffix>` (one kept)."""
+    path = _chock_Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and path.stat().st_size > max_bytes:
+        path.replace(path.with_name(path.stem + '.1' + path.suffix))
+    stamped = {'ts': _chock_datetime.now(_chock_timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), **record}
+    with path.open('a', encoding='utf-8') as fh:
+        fh.write(json.dumps(stamped, ensure_ascii=False) + '\n')
+
+def log_write(path, record, repo_root):
+    """Write `record` to `path` when the level in force for `repo_root` admits it, stamped with its level. Raises on I/O."""
+    level, size = log_settings(repo_root)
+    record_level = log_record_level(record)
+    kept = 'would_action' in record and _chock_os.environ.get(LOG_LEGACY_ENV) == '0'
+    if kept or log_admits(level, record_level):
+        log_append(path, {**record, 'level': record_level}, size)
+
 GUARD_VIOLATION = 1
 
 GUARD_ASK_EXIT = 3
@@ -752,9 +858,9 @@ _WINDOWS = 'nt'
 
 _FOUND_BASH = {}
 
-GATE_LOG_ENV = 'CHOCK_GATE_LOG'
+GUARD_LAST = {}
 
-_LOG_MAX_BYTES = 1048576
+GUARD_MISSING = 'missing'
 
 _BASH_PROBE_SECONDS = 10
 
@@ -889,6 +995,7 @@ def run_guard_detailed(guard: _chock_Path, command: str, tool: str='', *, can_as
     except (OSError, UnicodeError) as exc:
         print(f'chock: guard could not run, not checked: {exc}', file=sys.stderr)
         return (GUARD_ERRORED, '')
+    GUARD_LAST['code'] = proc.returncode
     output = ((proc.stderr or '') + (proc.stdout or '')).strip()
     first_line = output.splitlines()[0].strip() if output else ''
     if proc.returncode == GUARD_VIOLATION:
@@ -908,35 +1015,8 @@ def run_guard_detailed(guard: _chock_Path, command: str, tool: str='', *, can_as
     return (GUARD_CLEAN, '')
 
 def append_gate_log(chock_root: _chock_Path, record: dict) -> None:
-    """Append one record, stamped, to `<chock_root>/log/gate-events.jsonl`, rotating past the size cap."""
-    log_dir = chock_root / 'log'
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / 'gate-events.jsonl'
-    if log_path.exists() and log_path.stat().st_size > _LOG_MAX_BYTES:
-        log_path.replace(log_dir / 'gate-events.1.jsonl')
-    stamped = {'ts': _chock_datetime.now(_chock_timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), **record}
-    with log_path.open('a', encoding='utf-8') as fh:
-        fh.write(json.dumps(stamped, ensure_ascii=False) + '\n')
-
-def log_outcome(guard: _chock_Path, tool: str, *, verdict: str) -> None:
-    """Append one outcome record. Best effort: never raises, never changes the verdict."""
-    try:
-        if _chock_os.environ.get(GATE_LOG_ENV) == '0':
-            return
-        guard = guard.resolve()
-        if guard.parent.name != 'implementations':
-            return
-        artifact_root = None
-        for parent in guard.parents:
-            if (parent / '.chock').is_dir():
-                artifact_root = parent / '.chock'
-                break
-        if artifact_root is None:
-            return
-        record = {'policy_id': guard.parent.parent.name, 'surface': 'pre-tool-use', 'event': 'tool_use', 'kind': guard.stem, 'tool': tool, 'verdict': verdict}
-        append_gate_log(artifact_root, record)
-    except Exception:
-        return
+    """Append one sync-route record to `<chock_root>/log/gate-events.jsonl` at the level in force; raises on I/O."""
+    log_write(_chock_Path(chock_root) / 'log' / 'gate-events.jsonl', {'route': 'sync', **record}, _chock_Path(chock_root).parent)
 
 def evaluate(argv: list[str], command: str, tool: str='', *, can_ask: bool | None=None) -> tuple[str, str] | None:
     """Run the guard named on `argv` (`--guard <path>`) against `command`."""
@@ -944,11 +1024,10 @@ def evaluate(argv: list[str], command: str, tool: str='', *, can_ask: bool | Non
     if guard is None:
         return None
     if not guard.exists():
+        GUARD_LAST['outcome'] = GUARD_MISSING
         return (VERDICT_DENY, f"chock guard {guard} is missing, so this command cannot be checked. Run `chock sync --repo .` to reinstall the policy's guards.")
     verdict, message = run_guard_detailed(guard, command, tool, can_ask=can_ask)
-    logged = {GUARD_BLOCKED: 'block', GUARD_ASKED: 'ask', GUARD_CLEAN: 'allow'}
-    if verdict in logged:
-        log_outcome(guard, tool, verdict=logged[verdict])
+    GUARD_LAST['outcome'] = verdict
     if verdict == GUARD_BLOCKED:
         return (VERDICT_DENY, f'Blocked by chock policy: {guard.stem}')
     if verdict == GUARD_ASKED:
@@ -957,6 +1036,150 @@ def evaluate(argv: list[str], command: str, tool: str='', *, can_ask: bool | Non
         why = message or f"the {guard.stem} guard did not complete (see this hook's stderr)"
         return (VERDICT_ESCALATE, f'chock could not check this command against {guard.stem}: {why}. Approving runs it unchecked.')
     return None
+
+DLOG_ROUTE_SYNC, DLOG_ROUTE_PLUGIN = ('sync', 'plugin')
+
+_DLOG_SYNC_BIN = ('.chock', 'bin')
+
+_DLOG_SYNC_LOG = ('log', 'gate-events.jsonl')
+
+_DLOG_PLUGIN_LOG = ('log', 'events.jsonl')
+
+_DLOG_TARGET_FLAGS = ('--guard', '--gate', '--tool-call', '--record')
+
+_DLOG_GATE_FLAG = '--gate'
+
+_DLOG_COMPILED = 'compiled'
+
+_DLOG_MANIFEST_DEPTH = 3
+
+_DLOG_SPOKEN = {'deny': 'block', 'escalate': 'ask', 'warn': 'warn'}
+
+_DLOG_EVENT_LOGGED = {'pre_tool': 'tool_use'}
+
+_DLOG_SURFACE = {'pre_tool': 'pre-tool-use', 'stop': 'stop'}
+
+_DLOG_NO_RULE = 'no rule matched'
+
+_DLOG_DIST_INFO = _chock_re.compile('^chock-([^-]+)\\.dist-info$')
+
+def _dlog_flag_value(argv, flag):
+    if flag in argv:
+        at = argv.index(flag)
+        if at + 1 < len(argv):
+            return argv[at + 1]
+    return None
+
+def runtime_route(runtime):
+    """`sync` for a runtime under `<repo>/.chock/bin/`, `plugin` for one a package carries."""
+    folder = _chock_Path(runtime).resolve().parent
+    return DLOG_ROUTE_SYNC if (folder.parent.name, folder.name) == _DLOG_SYNC_BIN else DLOG_ROUTE_PLUGIN
+
+def _dlog_plugin_manifest(runtime, manifests):
+    """(name, version) from the nearest plugin manifest above the runtime; empty strings when there is none."""
+    folder = _chock_Path(runtime).resolve().parent
+    for root in [folder, *folder.parents][:_DLOG_MANIFEST_DEPTH]:
+        for rel in manifests:
+            try:
+                doc = json.loads(root.joinpath(rel).read_text(encoding='utf-8'))
+            except (OSError, ValueError):
+                continue
+            if isinstance(doc, dict):
+                return (str(doc.get('name') or ''), str(doc.get('version') or ''))
+    return ('', '')
+
+def _dlog_chock_version():
+    """The chock installed beside this Python, from its dist-info folder name; empty when it is not installed."""
+    for entry in sys.path:
+        try:
+            names = _chock_os.listdir(entry or '.')
+        except OSError:
+            continue
+        found = next((m.group(1) for m in map(_DLOG_DIST_INFO.match, names) if m), None)
+        if found:
+            return found
+    return ''
+
+def _dlog_policy_id(target, route, plugin_name):
+    """The policy a hook serves: from `.chock/compiled/<id>/` on the sync route, else the package's own name."""
+    if target is None:
+        return plugin_name or 'unknown'
+    parts = _chock_Path(target).parts
+    if route == DLOG_ROUTE_SYNC and _DLOG_COMPILED in parts and (parts.index(_DLOG_COMPILED) + 1 < len(parts)):
+        return parts[parts.index(_DLOG_COMPILED) + 1]
+    if route == DLOG_ROUTE_SYNC and _chock_Path(target).parent.name == 'implementations':
+        return _chock_Path(target).parent.parent.name
+    return plugin_name or _chock_Path(target).stem
+
+def _dlog_repo_root(start):
+    """The repository holding `start`: the nearest folder with `.git`, or None."""
+    try:
+        here = _chock_Path(start).resolve()
+    except (OSError, ValueError):
+        return None
+    return next((folder for folder in (here, *here.parents) if (folder / '.git').exists()), None)
+
+def _dlog_client(raw):
+    named = raw.get('client_type') if isinstance(raw, dict) else None
+    return named if isinstance(named, str) else None
+
+def _dlog_trace(event, wire, rule, stages):
+    """The debug-only fields: what was detected and matched, and how long each stage took. Never file contents."""
+    trace = {'wire_event': wire, 'tool': event.tool, 'rule': rule or _DLOG_NO_RULE, 'stages_ms': stages}
+    if event.command:
+        trace['command'] = log_trace_text(event.command)
+    if event.path:
+        trace['path'] = log_trace_text(event.path)
+    if 'code' in GUARD_LAST:
+        trace['exit_code'] = GUARD_LAST['code']
+    return trace
+
+def _dlog_reason(source, outcome):
+    """A short code for why: `guard-blocked`, `guard-errored`, `gate-block`, `fault`, or `no-rule` for an allow."""
+    if source is None:
+        return 'no-rule'
+    if source == 'guard' and 'outcome' in GUARD_LAST:
+        return f"guard-{GUARD_LAST['outcome']}"
+    return source if source == 'fault' else f"{source}-{_DLOG_SPOKEN.get(outcome, 'allow')}"
+
+def _dlog_paths(route, runtime, agent, event):
+    """(log file, repository whose settings apply) for this call."""
+    if route == DLOG_ROUTE_SYNC:
+        chock_root = _chock_Path(runtime).resolve().parent.parent
+        return (chock_root.joinpath(*_DLOG_SYNC_LOG), chock_root.parent)
+    home = _chock_Path(_chock_os.path.expanduser('~')).joinpath(LOG_SETTINGS_PARTS[0])
+    return (home.joinpath(_DLOG_PLUGIN_LOG[0], agent, _DLOG_PLUGIN_LOG[1]), _dlog_repo_root(event.cwd or '.'))
+
+def log_decision(argv, event, decision, judged, context):
+    """Write this call's one line, if the level in force admits it.
+
+    `judged` is (source, rule, started, stages); `context` may carry `wire`, `can_ask` and the plugin `manifests`.
+    """
+    try:
+        runtime = globals().get('__file__') or sys.argv[0]
+        route = runtime_route(runtime)
+        source, rule, started, stages = judged
+        if route == DLOG_ROUTE_SYNC and _DLOG_GATE_FLAG in argv and (source in (None, 'gate')):
+            return
+        agent = str(getattr(event, 'agent', None) or 'unknown')
+        log_path, repo = _dlog_paths(route, runtime, agent, event)
+        outcome = getattr(decision, 'outcome', None) if decision is not None else None
+        level = log_settings(repo)[0]
+        if not log_admits(level, log_record_level({'verdict': _DLOG_SPOKEN.get(outcome, 'allow')})):
+            return
+        plugin_name, plugin_version = _dlog_plugin_manifest(runtime, context.get('manifests', ())) if route == DLOG_ROUTE_PLUGIN else ('', '')
+        target = next((v for v in (_dlog_flag_value(argv, f) for f in _DLOG_TARGET_FLAGS) if v), None)
+        record = {'route': route, 'agent': agent, 'event': _DLOG_EVENT_LOGGED.get(event.event, event.event), 'policy_id': _dlog_policy_id(target, route, plugin_name), 'surface': _DLOG_SURFACE.get(event.event, str(event.event)), 'verdict': _DLOG_SPOKEN.get(outcome, 'allow'), 'reason': _dlog_reason(source, outcome), 'duration_ms': round((_chock_time.monotonic() - started) * 1000), 'can_ask': context.get('can_ask'), 'chock_version': _dlog_chock_version()}
+        client = _dlog_client(event.raw)
+        if client:
+            record['client'] = client
+        if route == DLOG_ROUTE_PLUGIN:
+            record['plugin_version'] = plugin_version
+        if level == LOG_DEBUG:
+            record['trace'] = _dlog_trace(event, context.get('wire'), rule, stages)
+        log_write(log_path, record, repo)
+    except Exception:
+        return
 
 _EDIT_KEYS = (('old_string', 'new_string'), ('oldString', 'newString'), ('old_str', 'new_str'))
 
@@ -1598,8 +1821,6 @@ def _stop_gate_log(root, policy, verdict, reentry, findings):
         if not stop_ledger_safe(_chock_Path(root).joinpath(*GATE_LOG_PARTS)):
             return
         held = verdict == STOP_LOG_WARN
-        if _chock_os.environ.get(GATE_LOG_ENV) == '0' and (not held):
-            return
         index, reentry_verdict, changed = reentry
         record = {'policy_id': policy, 'surface': 'stop-reentry', 'event': 'stop', 'kind': 'reentry', 'reentry': index, 'verdict': verdict, 'reentry_verdict': reentry_verdict, 'match_count': len(findings), 'matches': []}
         if held:
@@ -2202,11 +2423,15 @@ def _chock_unreadable():
             return respond(degrade(Decision.warn(reason), event), event)
     _report(reason + "\n")
     decision = Decision.escalate(reason) if action == "ask" else Decision.deny(reason)
+    judged = ["unreadable", None, _chock_time.monotonic(), {}]
+    log_decision(sys.argv[1:], event, decision, judged, {"manifests": _CHOCK_PLUGIN_MANIFESTS})
     text, code = respond(degrade(decision, event), event)
     return (text, code) if _chock_refuses(text, code) else ("", 2)
 #: Per wire event mapped to pre_tool: whether the client shows a guard's ask as a prompt.
 _CHOCK_CAN_ASK = {'BeforeTool': False}
 _CHOCK_EVENT_KEYS = ('hook_event_name', 'hookEventName', 'agent_action_name')
+#: Where a plugin package's manifest may sit, relative to its root: the decision log reads its version.
+_CHOCK_PLUGIN_MANIFESTS = ('.claude-plugin/plugin.json', '.codex-plugin/plugin.json', '.cursor-plugin/plugin.json', '.devin-plugin/plugin.json', 'gemini-extension.json', 'plugin.json', '.factory-plugin/plugin.json', 'kimi.plugin.json', '.plugin/plugin.json')
 
 
 def _chock_wire_name(raw):
@@ -2214,9 +2439,13 @@ def _chock_wire_name(raw):
     return next((name for name in names if isinstance(name, str)), None)
 
 
+def _chock_wire(raw):
+    return _chock_wire_name(raw)
+
+
 def _chock_can_ask(raw):
     # An event this bundle cannot name, or one the vendor data does not list, cannot prompt.
-    return _CHOCK_CAN_ASK.get(_chock_wire_name(raw), False)
+    return _CHOCK_CAN_ASK.get(_chock_wire(raw), False)
 
 
 def _spoken(verdict):
@@ -2226,17 +2455,30 @@ def _spoken(verdict):
     return Decision.escalate(reason) if outcome == ESCALATE else Decision.deny(reason)
 
 
-def _judge(event):
+def _chock_timed(judged, stage, ask):
+    started = _chock_time.monotonic()
+    try:
+        return ask()
+    finally:
+        judged[3][stage] = round((_chock_time.monotonic() - started) * 1000)
+
+
+def _judge(event, judged):
     if event.event == "pre_tool" and event.command:
-        verdict = evaluate(sys.argv[1:], event.command, event.tool or "", can_ask=_chock_can_ask(event.raw))
+        verdict = _chock_timed(judged, "guard", lambda: evaluate(
+            sys.argv[1:], event.command, event.tool or "", can_ask=_chock_can_ask(event.raw)
+        ))
         if verdict is not None:
+            judged[0:2] = ["guard", _chock_Path(guard_path_from_argv(sys.argv[1:])).stem]
             outcome, reason = verdict
             return Decision.escalate(reason) if outcome == ESCALATE else Decision.deny(reason)
-    gated = evaluate_gate(sys.argv[1:], event)
+    gated = _chock_timed(judged, "gate", lambda: evaluate_gate(sys.argv[1:], event))
     if gated is not None:
+        judged[0:2] = ["gate", gate_path_from_argv(sys.argv[1:]).parent.parent.name]
         return _spoken(gated)
-    called = evaluate_tool_call(sys.argv[1:], event)
+    called = _chock_timed(judged, "tool_call", lambda: evaluate_tool_call(sys.argv[1:], event))
     if called is not None:
+        judged[0:2] = ["tool_call", str(event.tool or "")]
         return _spoken(called)
     return None
 
@@ -2245,13 +2487,22 @@ def handle(event):
     # A door that cannot decide refuses. An exception escaping here would exit the hook
     # with a traceback, which every client reads as a non-blocking error: fail-open, with
     # the reason on a stderr nobody watches. The refusal carries the reason instead.
+    judged = [None, None, _chock_time.monotonic(), {}]
     try:
-        return _judge(event)
+        decision = _judge(event, judged)
     except Exception as exc:  # noqa: BLE001 -- any failure here must refuse, never fall through
-        return Decision.deny(
+        judged[0:2] = ["fault", type(exc).__name__]
+        decision = Decision.deny(
             "chock could not check this call (%s: %s). Refusing rather than reporting an "
             "allow it never established." % (type(exc).__name__, exc)
         )
+    context = {"manifests": _CHOCK_PLUGIN_MANIFESTS}
+    try:
+        context.update(wire=_chock_wire(event.raw), can_ask=_chock_can_ask(event.raw))
+    except Exception:  # noqa: BLE001 -- the log's context must never change the decision
+        pass
+    log_decision(sys.argv[1:], event, decision, judged, context)
+    return decision
 # <<< agentseam handler <<<
 
 

@@ -12,7 +12,7 @@ RUNNER_PACKAGE = "chock.gate.runner"
 
 #: Every module gate.py is built from. Each must exist and contribute a fragment, so a module lost
 #: from an install fails the build rather than vendoring a runner without it.
-MODULES = ("actor", "cli", "constants", "context", "kinds", "log", "material", "report", "script", "verdict")
+MODULES = ("actor", "cli", "constants", "context", "journal", "kinds", "log", "material", "report", "script", "verdict")
 
 #: A module's text after its header is fragments, each opened by this line; fragment numbers set
 #: their order in gate.py and run 1..N across the package with no gap and no repeat.
