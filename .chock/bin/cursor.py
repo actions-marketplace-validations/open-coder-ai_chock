@@ -29,6 +29,7 @@ from pathlib import Path as _chock_Path
 from pathlib import PurePosixPath as _chock_PurePosixPath, PureWindowsPath as _chock_PureWindowsPath
 import traceback
 import warnings as _warnings
+import zlib as _zlib
 
 # ------------------------------------------------------------------------------
 # contract (agentseam 0.3.5)
@@ -253,12 +254,25 @@ def _segment(node, part):
         return items[i] if isinstance(items, (list, tuple)) and len(items) > i else None
     return node.get(part) if isinstance(node, dict) else None
 
+def _list_at(node, path):
+    """The list under `path`, decoding the JSON text Cline sends in a list's place."""
+    items = _walk(node, path)
+    if isinstance(items, str) and items.lstrip()[:1] == "[":
+        try:
+            items = _json.loads(items)
+        except (ValueError, RecursionError):
+            return None
+    return items if isinstance(items, (list, tuple)) else None
+
 def _walk(node, path):
-    """A dotted path off `node`; `a[].b` joins `b` over `a`'s dict items, `a[0]` indexes."""
+    """A dotted path off `node`; `a[].b` joins `b` over `a`'s dict items, `a[]` its strings, `a[0]` indexes."""
+    if path.endswith("[]"):
+        joined = "\n".join(item for item in _list_at(node, path[:-2]) or () if isinstance(item, str))
+        return joined or None
     if "[]." in path:
         head, sub = path.split("[].", 1)
-        items = _walk(node, head)
-        if not isinstance(items, (list, tuple)):
+        items = _list_at(node, head)
+        if items is None:
             return None
         joined = "\n".join(str(item.get(sub, "")) for item in items if isinstance(item, dict))
         return joined or None
@@ -288,7 +302,7 @@ def _tool_input_raw(cfg, raw):
     if not isinstance(raw, dict):
         return None
     for key in cfg["fields"].get("tool_input", ("tool_input",)):
-        value = raw.get(key)
+        value = _walk(raw, key)
         if value is not None:
             return value
     return None
@@ -369,16 +383,25 @@ def _hook_dict(cfg, command):
             entry[key] = value
     return entry
 
+def _flat_list_rule(hook_entry, ev, name, command, matcher):
+    """One `[[hooks]]` rule, under the vendor's own key names where `rule_keys` renames them."""
+    rule = {"event": name, "command": command}
+    if hook_entry["matcher"] and ev in _MATCHER_EVENTS:
+        matcher = matcher or hook_entry.get("default_match")
+        if matcher:
+            rule["matcher"] = matcher
+    if "rule_name_prefix" in hook_entry:
+        # Vibe dedupes [[hooks]] by name across files; the command's checksum keeps two owners' rules apart.
+        rule["name"] = "%s%s-%08x" % (hook_entry["rule_name_prefix"], name, _zlib.crc32(command.encode("utf-8")))
+    keys = hook_entry.get("rule_keys", {})
+    return {keys.get(key, key): value for key, value in rule.items()}
+
 def _flat_list_wrapper(hook_entry, reverse, canonical_events, command, matcher):
     rules = []
     for ev in canonical_events:
         name = reverse.get(ev)
-        if not name:
-            continue
-        rule = {"event": name, "command": command}
-        if matcher and hook_entry["matcher"] and ev in _MATCHER_EVENTS:
-            rule["matcher"] = matcher
-        rules.append(rule)
+        if name:
+            rules.append(_flat_list_rule(hook_entry, ev, name, command, matcher))
     return rules
 
 def _cursor_wrapper(cfg, reverse, canonical_events, command, *, fail_closed):
@@ -406,6 +429,10 @@ def _flat_entries_wrapper(hook_entry, reverse, canonical_events, command):
         if extra:
             hooks.setdefault(extra, []).append({"command": command})
     return {"hooks": hooks}
+
+def _hook_dir_wrapper(reverse, canonical_events, command):
+    """File name -> command: one executable per event, named exactly as the wire event (cline)."""
+    return {reverse[ev]: command for ev in canonical_events if reverse.get(ev)}
 
 def _default_wrapper(cfg, reverse, canonical_events, command, matcher):
     hook_entry = cfg["hook_entry"]
@@ -437,6 +464,8 @@ def hook_entry_config(cfg, canonical_events, command, matcher=None, *, fail_clos
         return _cursor_wrapper(cfg, reverse, canonical_events, command, fail_closed=fail_closed)
     if wrapper == "flat_entries":
         return _flat_entries_wrapper(hook_entry, reverse, canonical_events, command)
+    if wrapper == "hook_dir":
+        return _hook_dir_wrapper(reverse, canonical_events, command)
     return _default_wrapper(cfg, reverse, canonical_events, command, matcher)
 
 _AMBIGUOUS_NAMES = (
