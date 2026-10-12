@@ -1,6 +1,6 @@
 <div align="center">
 
-<p><img src="https://raw.githubusercontent.com/open-coder-ai/chock/main/docs/assets/readme/cover-chock.png" alt="chock wordmark and mark on a dusk-blue background." width="100%"></p>
+<p><img src="https://raw.githubusercontent.com/open-coder-ai/chock/main/docs/assets/readme/cover-chock.png" alt="chock: open-source guardrails for AI coding agents. Rules the agent reads, checks that run as it writes, and gates at commit and in CI." width="100%"></p>
 
 </div>
 
@@ -13,6 +13,24 @@ Open-source guardrails for AI coding agents: rules the agent reads, checks that 
 [![CI](https://github.com/open-coder-ai/chock/actions/workflows/ci.yml/badge.svg)](https://github.com/open-coder-ai/chock/actions/workflows/ci.yml) [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org) [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/open-coder-ai/chock/badge)](https://scorecard.dev/viewer/?uri=github.com/open-coder-ai/chock) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/14155/badge)](https://www.bestpractices.dev/projects/14155) [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 Chock is a policy compiler. You write a policy once, and Chock compiles it into the strongest control each coding agent supports: a git hook that exits non-zero, a CI gate, or the agent's own pre-tool hook. Every check is a deterministic script, with no model and no upload. Free and open source (Apache-2.0).
+
+New guardrails are content, not code: a policy is a manifest plus the evals that prove it fires, with no engine change and no plugin API to learn.
+
+Agent folders at this repo's root (`.claude/`, `.cursor/`, …) are chock's compiled output.
+
+## Install
+
+chock is on PyPI, but the release there (0.15.2, 30 Sep 2026) is older than the engine this page describes. Install the frozen engine from its commit (Python 3.11 or newer):
+
+```bash
+pip install "chock @ git+https://github.com/open-coder-ai/chock@992711af4cf8d4fd9c4c861f10ef6e53374d75d7"
+```
+
+### Two ways to adopt it
+
+1. **In your repository, for teams.** Run `chock init .`, then `chock add <id> --ref <catalog commit> --verify-sha <sha256> --skip-compile` for each policy, then `chock sync --repo . --ci`. Commit the result. Every clone runs `chock sync --repo .` once, because git never clones hooks. The commit gates are enforced at commit and in CI.
+2. **In your coding agent, as plugins.** Best-effort, and they fail open. One repo per client: [Claude Code](https://github.com/open-coder-ai/chock-claude-plugins), [Cursor](https://github.com/open-coder-ai/chock-cursor-plugins), [Copilot](https://github.com/open-coder-ai/chock-copilot-plugins), [Codex](https://github.com/open-coder-ai/chock-codex-plugins), [Devin](https://github.com/open-coder-ai/chock-devin-plugins). Each README has the install line for its client.
+3. **One plugin for your agent from a selection.** The chock.sh builder (launching soon) gives a `chock install --selection '…' --apply` command for Claude Code, Cursor, Codex, Copilot or Devin, and, untested by chock, for goose, Grok, Antigravity, Gemini CLI, OpenHands, Kimi Code or Factory Droid. A selection can add [your own policies](docs/custom-policies.md): install shows their code and asks first.
 
 ## Application security for the code your agents write
 
@@ -29,21 +47,7 @@ Coding agents already ask before they run a shell command. What they do not chec
 | Test integrity | deleted tests, lost assertions, new skips | `protect-test-integrity` | commit |
 | Also included | secrets, destructive commands, agent self-protection | `scan-secrets`, `block-destructive-commands`, `protect-agent-config` | commit, in-agent |
 
-Tiers are defined under [Guardrails, not guarantees](#guardrails-not-guarantees).
-
-## Install
-
-chock is on PyPI, but the release there (0.15.2, 30 Sep 2026) is older than the engine this page describes. Install the frozen engine from its commit (Python 3.11 or newer):
-
-```bash
-pip install "chock @ git+https://github.com/open-coder-ai/chock@992711af4cf8d4fd9c4c861f10ef6e53374d75d7"
-```
-
-### Two ways to adopt it
-
-1. **In your repository, for teams.** Run `chock init .`, then `chock add <id> --ref <catalog commit> --verify-sha <sha256> --skip-compile` for each policy, then `chock sync --repo . --ci`. Commit the result. Every clone runs `chock sync --repo .` once, because git never clones hooks. The commit gates are enforced at commit and in CI.
-2. **In your coding agent, as plugins.** Best-effort, and they fail open. One repo per client: [Claude Code](https://github.com/open-coder-ai/chock-claude-plugins), [Cursor](https://github.com/open-coder-ai/chock-cursor-plugins), [Copilot](https://github.com/open-coder-ai/chock-copilot-plugins), [Codex](https://github.com/open-coder-ai/chock-codex-plugins), [Devin](https://github.com/open-coder-ai/chock-devin-plugins). Each README has the install line for its client.
-3. **One plugin for your agent from a selection.** The chock.sh builder (launching soon) gives a `chock install --selection '…' --apply` command for Claude Code, Cursor, Codex, Copilot or Devin, and, untested by chock, for goose, Grok, Antigravity, Gemini CLI, OpenHands, Kimi Code or Factory Droid. A selection can add [your own policies](docs/custom-policies.md): install shows their code and asks first.
+Tiers: see [Guardrails, not guarantees](#guardrails-not-guarantees).
 
 ## How it works
 
@@ -208,19 +212,33 @@ OWASP mappings are partial and the engine is frozen at the commit above. Chock d
 
 ## FAQ for people and agents
 
-**Does Chock use an LLM?** No. Each check is a deterministic script (a parser plus rules) with no model call and no network access at enforcement time.
+### Does Chock use an LLM?
 
-**Does my code leave my machine?** Chock adds no new place your code goes. Your agent still sends context to its own model provider.
+No. Each check is a deterministic script (a parser plus rules) with no model call and no network access at enforcement time.
 
-**Which agents does it work with?** The 15 in the table above get a git hook, a CI gate and an `AGENTS.md` rule; most also get a native pre-tool hook.
+### Does my code leave my machine?
 
-**How do I install it, through the repo or through plugins?** Both are covered in [Install](#install).
+Chock adds no new place your code goes. Your agent still sends context to its own model provider.
 
-**What does it cost?** Free and open source (Apache-2.0). A check costs no tokens.
+### Which agents does it work with?
 
-**Does it replace SAST or code review?** No. It refuses known classes while the agent writes, so they are fixed before review.
+The 15 in the table above get a git hook, a CI gate and an `AGENTS.md` rule; most also get a native pre-tool hook.
 
-**Which OWASP and CWE items does it cover?** Partially. The OWASP Agentic mapping is above; Java rules name their CWE in each refusal.
+### How do I install it?
+
+See [Install](#install): in your repo, or as plugins.
+
+### What does it cost?
+
+Nothing: Apache-2.0, and a check costs no tokens.
+
+### Does it replace SAST or code review?
+
+No. It refuses known classes while the agent writes, so they are fixed before review.
+
+### Which OWASP and CWE items does it cover?
+
+Partially. The OWASP Agentic mapping is above; Java rules name their CWE in each refusal.
 
 ## For tools and agents
 
@@ -253,13 +271,11 @@ The 13 public repositories:
 
 ## Contributing
 
-New guardrails are content, not code: a policy is a manifest plus the evals that prove it fires, with no engine change and no plugin API to learn.
-
 <p><img src="https://raw.githubusercontent.com/open-coder-ai/chock/main/docs/assets/readme/v2/contribute.png" alt="Three numbered contribution cards, each with a one-line how-to." width="100%"></p>
 
 A policy manifest for the guardrail your stack needs is the contribution we want most; send it to the [catalog](https://github.com/open-coder-ai/chock-catalog). An evidence report on what your agent does, or a `policy wanted` entry in the [threat ledger](https://github.com/open-coder-ai/chock-threat-intel/blob/main/reference/agentic-threat-ledger.md), also counts; see [docs/ecosystem.md](docs/ecosystem.md). Run `pytest -q && ruff check . && ruff format --check . && chock check` before a pull request; [`good first issue`](https://github.com/open-coder-ai/chock/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) is where to start. Questions: [Discussions](https://github.com/open-coder-ai/chock/discussions).
 
-Contribution volume now scales with compute while review capacity scales with maintainer hours. Chock policies are committed content, so your rules travel with every clone and fork, and the CI gate (`chock sync --ci`) depends on nothing the contributor does. [The full case.](docs/why.md)
+Chock policies are committed content, so your rules travel with every clone and fork, and the CI gate (`chock sync --ci`) depends on nothing the contributor does. [The full case.](docs/why.md)
 
 ## Security
 
