@@ -45,7 +45,18 @@ MERGED_CLIENTS = sorted(CLIENTS)
 
 
 def test_every_client_merges_including_claude(tmp_path: Path) -> None:
-    assert MERGED_CLIENTS == ["antigravity", "claude", "codex", "copilot", "cursor", "devin", "goose", "grok"]
+    assert MERGED_CLIENTS == [
+        "antigravity",
+        "claude",
+        "codex",
+        "copilot",
+        "cursor",
+        "devin",
+        "gemini",
+        "goose",
+        "grok",
+        "openhands",
+    ]
     members = make_members(tmp_path)
     out = tmp_path / "dist"
     build_claude_tree(tmp_path, members, out)
@@ -148,7 +159,8 @@ def test_the_merged_manifest_is_the_bundles_own_and_states_each_member(tmp_path:
     if CLIENTS[client].layout()[0] is None:
         assert not list(out.rglob("plugin.json")), "a manifest-less format ships no manifest"
         return
-    manifest_path = next(p for p in out.rglob("plugin.json") if "skills" not in p.parts)
+    manifest_name = Path(CLIENTS[client].layout()[0]).name
+    manifest_path = next(p for p in out.rglob(manifest_name) if "skills" not in p.parts)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["name"] == BUNDLE_ID
     assert f"{GUARD_ID}: " in manifest["description"] and f"{GATE_ID}: " in manifest["description"]

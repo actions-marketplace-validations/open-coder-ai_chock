@@ -1,0 +1,41 @@
+{
+  "owned_subtrees": [
+    "scripts",
+    "hooks",
+    "skills"
+  ],
+  "layout": {
+    "manifest": ".plugin/plugin.json",
+    "hooks": "hooks/hooks.json",
+    "skill": "skills/{name}/SKILL.md",
+    "plugin_root": null
+  },
+  "sources": [
+    {
+      "url": "https://docs.openhands.dev/overview/plugins",
+      "read": "2026-10-12",
+      "says": [
+        "Only one file is required: `plugin-name/.plugin/plugin.json` or `plugin-name/.claude-plugin/plugin.json`",
+        "openhands --plugin /path/to/plugin",
+        "Hook commands have access to these environment variables: `$OPENHANDS_PROJECT_DIR` ... `$OPENHANDS_TOOL_NAME`"
+      ],
+      "silent_on": "a plugin-root variable for hook commands"
+    },
+    {
+      "url": "https://docs.openhands.dev/sdk/guides/plugins",
+      "read": "2026-10-12",
+      "says": [
+        "Note that the plugin metadata, i.e., `plugin-name/.plugin/plugin.json`, is required.",
+        "Hooks are defined in `hooks/hooks.json`"
+      ]
+    },
+    {
+      "url": "https://raw.githubusercontent.com/OpenHands/software-agent-sdk/main/openhands-sdk/openhands/sdk/hooks/executor.py",
+      "read": "2026-10-12",
+      "says": [
+        "hook commands run with shell=True and cwd=self.working_dir; the environment adds OPENHANDS_PROJECT_DIR, OPENHANDS_SESSION_ID, OPENHANDS_EVENT_TYPE and OPENHANDS_TOOL_NAME, no plugin root",
+        "exit code ``1`` does **not** block -- only ``2`` does"
+      ]
+    }
+  ]
+}

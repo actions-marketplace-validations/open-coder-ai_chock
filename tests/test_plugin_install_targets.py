@@ -1,9 +1,10 @@
-"""goose, grok and antigravity plugins: the documented layout, each runtime's own grammar, and a local install."""
+"""goose, grok, antigravity, gemini and openhands plugins: the documented layout, each runtime's grammar, a local install."""
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -19,22 +20,27 @@ from runtime_payloads import DENY_ON_THE_WIRE, PAYLOADS
 from chock.guardrails import toggle
 from chock.install import cli, package, place
 from chock.install.selection import DEFAULT_BUNDLE
-from chock.plugin import antigravity, hook_dir
+from chock.plugin import antigravity, gemini, hook_dir, openhands
 from chock.plugin import cli as plugin_cli
 from chock.plugin.build import PluginNameError
 from chock.plugin.bundle_build import CLIENTS, merged_files
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git required")
 
-TARGETS = ("goose", "grok", "antigravity")
+TARGETS = ("goose", "grok", "antigravity", "gemini", "openhands")
+#: The install client id of each format, where they differ.
+CLIENT_ID = {"gemini": "gemini-cli"}
+INSTALL_CLIENTS = tuple(CLIENT_ID.get(fmt, fmt) for fmt in TARGETS)
 GOLDEN = Path(__file__).parent / "fixtures" / "plugin_targets"
 #: (manifest, hooks file) each vendor page documents (src/chock/plugin/data/stores/<format>.json cites them).
 LAYOUT = {
     "goose": (None, "hooks/hooks.json"),
     "grok": (None, "hooks/hooks.json"),
     "antigravity": ("plugin.json", "hooks.json"),
+    "gemini": ("gemini-extension.json", "hooks/hooks.json"),
+    "openhands": (".plugin/plugin.json", "hooks/hooks.json"),
 }
-BINARY = {"grok": "grok", "antigravity": "agy"}
+BINARY = {"grok": "grok", "antigravity": "agy", "gemini-cli": "gemini"}
 
 
 def snapshot(fmt: str, root: Path) -> dict:
@@ -197,7 +203,11 @@ def _tree(root: Path) -> set[str]:
     return {p.relative_to(root).as_posix() for p in root.rglob("*")}
 
 
-@pytest.mark.parametrize("client", TARGETS)
+def _format(client: str) -> str:
+    return package.client(client)["format"]
+
+
+@pytest.mark.parametrize("client", INSTALL_CLIENTS)
 def test_install_stages_the_folder_prints_the_steps_and_touches_nothing_else(
     catalog, tmp_path: Path, home: Path, client: str, capsys, monkeypatch
 ) -> None:
@@ -211,7 +221,7 @@ def test_install_stages_the_folder_prints_the_steps_and_touches_nothing_else(
     out = capsys.readouterr()
     folder = place.plugin_dir(client, place.default_dest(client), DEFAULT_BUNDLE)
     assert code == (1 if absent else 0)
-    assert (folder / LAYOUT[client][1]).is_file() and (folder / package.MARKER).is_file()
+    assert (folder / LAYOUT[_format(client)][1]).is_file() and (folder / package.MARKER).is_file()
     added = _tree(home) - before
     rel = folder.relative_to(home).as_posix()
     assert all(p == rel or p.startswith(f"{rel}/") or rel.startswith(f"{p}/") for p in added), added
@@ -222,7 +232,7 @@ def test_install_stages_the_folder_prints_the_steps_and_touches_nothing_else(
         assert f"--apply needs the `{absent}` command on PATH" in out.err
 
 
-@pytest.mark.parametrize("client", TARGETS)
+@pytest.mark.parametrize("client", INSTALL_CLIENTS)
 def test_a_second_install_changes_nothing(catalog, tmp_path: Path, home: Path, client: str) -> None:
     root, ref = catalog
     assert _install(tmp_path, root, ref, client) == 0
@@ -252,6 +262,8 @@ def test_antigravity_install_names_its_final_folder_not_the_staging_one(catalog,
         ("goose", "best-effort, fail mode configurable (agentseam vendor-docs): ", "agentseam/issues/177"),
         ("grok", "best-effort, fail mode open (agentseam vendor-docs): ", "agentseam/issues/188"),
         ("antigravity", "best-effort, fail mode open (agentseam vendor-docs): ", "agentseam/issues/129"),
+        ("gemini-cli", "best-effort, fail mode open (agentseam vendor-source): ", "agentseam/issues/132"),
+        ("openhands", "best-effort, fail mode open (agentseam vendor-docs): ", "agentseam/issues/181"),
     ],
 )
 def test_labels_come_from_the_tier_table_and_warnings_link_the_evidence_issue(
@@ -292,3 +304,82 @@ def test_the_toggle_lookup_reads_goose_and_antigravity_folders(tmp_path: Path) -
     antigravity = json.dumps({"toolCall": {}, "workspacePaths": [str(tmp_path / "a")]}).encode()
     assert toggle._wheres(goose) == [tmp_path / "g"]
     assert toggle._wheres(antigravity) == [tmp_path / "a"]
+
+
+@pytest.mark.parametrize(
+    ("fmt", "keys"),
+    [
+        ("antigravity", set(antigravity.MANIFEST_KEYS)),
+        ("gemini", set(gemini.MANIFEST_KEYS)),
+        ("openhands", set(openhands.MANIFEST_KEYS)),
+    ],
+)
+def test_an_installed_manifest_holds_only_the_documented_fields(tmp_path: Path, fmt: str, keys: set) -> None:
+    """The per-member manifest `chock install` writes adds no key (Antigravity's schema refuses unknown ones)."""
+    members = make_members(tmp_path, with_advisory=True)
+    files = merged_files(fmt, bundle(members), members, tmp_path, aggregate=False)
+    assert set(json.loads(files[Path(LAYOUT[fmt][0])])) <= keys
+
+
+def test_gemini_hooks_name_the_folder_by_its_documented_variable(tmp_path: Path) -> None:
+    hooks = snapshot("gemini", tmp_path)["hooks"]["hooks"]
+    assert set(hooks) == {"BeforeTool", "AfterAgent"}
+    assert all('"${extensionPath}/scripts/' in c for c in hook_commands(hooks))
+
+
+def test_gemini_names_its_extension_as_the_reference_page_asks(tmp_path: Path) -> None:
+    manifest = snapshot("gemini", tmp_path)["manifest"]
+    assert manifest["name"] == "demo-bundle" and set(manifest) <= set(gemini.MANIFEST_KEYS)
+    with pytest.raises(PluginNameError, match="Gemini CLI"):
+        gemini.build_gemini_manifest({"id": "a.b"}, tmp_path, enforced=False)
+    assert "Antigravity CLI" in gemini.manifest_posture(enforced=True, guard=True)
+
+
+def test_a_hydrated_gemini_command_reaches_the_launcher_as_exact_single_arguments(tmp_path: Path) -> None:
+    """Executed: Gemini replaces ${extensionPath} by text (variables.ts); a spaced folder still arrives whole."""
+    root = tmp_path / "First Last" / ".gemini" / "extensions" / "demo"
+    stub = "import json, sys\nprint(json.dumps(sys.argv[1:]))\n"
+    (root / "scripts").mkdir(parents=True)
+    (root / "scripts" / "argv.py").write_text(stub, encoding="utf-8")
+    launcher = f'exec "{sys.executable}" "$(dirname "$0")/argv.py" "$@"\n'
+    (root / "scripts" / "launch.sh").write_text(launcher, encoding="utf-8")
+    command = hook_dir.hook_command(gemini.SPEC, "--guard", "g.py").replace("${extensionPath}", root.as_posix())
+    done = subprocess.run(["sh", "-c", command], cwd=project(tmp_path), capture_output=True, text=True, check=False)
+    scripts = root.as_posix() + "/scripts"
+    assert done.returncode == 0, done.stderr
+    assert json.loads(done.stdout) == [f"{scripts}/gemini_cli.py", "--guard", f"{scripts}/g.py"]
+
+
+def test_openhands_hooks_name_the_folder_by_absolute_path(tmp_path: Path) -> None:
+    found = snapshot("openhands", tmp_path)
+    assert set(found["hooks"]["hooks"]) == {"PreToolUse", "Stop"}
+    assert all(hook_dir.ROOT_TOKEN in c for c in hook_commands(found["hooks"]))
+    assert found["manifest"]["name"] == "demo-bundle"
+
+
+def test_the_claude_package_does_not_serve_openhands(tmp_path: Path) -> None:
+    """Measured: OpenHands reads `.claude-plugin/`, but chock's Claude package neither matches nor answers its calls."""
+    members = make_members(tmp_path)
+    out = tmp_path / "claude"
+    for rel, content in merged_files("claude", bundle(members), members, tmp_path).items():
+        (out / rel).parent.mkdir(parents=True, exist_ok=True)
+        (out / rel).write_text(content, encoding="utf-8")
+    doc = json.loads((out / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+    matchers = {rule.get("matcher") for rules in doc["hooks"].values() for rule in rules} - {None}
+    assert matchers and not any(re.fullmatch(m, "terminal") or re.fullmatch(m, "file_editor") for m in matchers)
+    repo = project(tmp_path)
+    payload = json.loads(json.dumps(PAYLOADS["openhands"]("rm -rf /")).replace('"/x"', json.dumps(repo.as_posix())))
+    answers = [run_command(c, out, repo, payload) for c in hook_commands(doc)]
+    assert not any(p.returncode == 2 or '"deny"' in p.stdout for p in answers), answers
+
+
+def test_an_openhands_package_resolves_a_spaced_windows_folder_and_refuses_a_dollar(tmp_path: Path) -> None:
+    members = make_members(tmp_path)
+    files = merged_files("openhands", bundle(members), members, tmp_path)
+    folder = PureWindowsPath(r"C:\Users\Jo Smith\.chock\marketplace\openhands\chock-guardrails")
+    hooks = json.loads(hook_dir.resolve_root(files, folder)[Path("hooks/hooks.json")])
+    assert all(
+        '"C:/Users/Jo Smith/.chock/marketplace/openhands/chock-guardrails/scripts/' in c for c in hook_commands(hooks)
+    )
+    with pytest.raises(ValueError, match="choose another --dest"):
+        hook_dir.resolve_root(files, Path("/home/a$b/p"))

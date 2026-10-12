@@ -81,7 +81,7 @@
       "additionalProperties": false,
       "properties": {
         "schema": {"const": 2},
-        "client": {"enum": ["claude-code", "cursor", "codex", "copilot", "devin", "goose", "grok", "antigravity"], "description": "The agent this selection is built for; `chock install --client` overrides it."},
+        "client": {"enum": ["claude-code", "cursor", "codex", "copilot", "devin", "goose", "grok", "antigravity", "gemini-cli", "openhands"], "description": "The agent this selection is built for; `chock install --client` overrides it."},
         "bundle": {
           "type": "object",
           "required": ["version"],

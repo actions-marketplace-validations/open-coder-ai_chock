@@ -128,7 +128,9 @@ def _bundle_manifest(
 def _per_member(manifest: dict[str, Any], client: Client, bundle: dict[str, Any], packages: list) -> dict[str, Any]:
     """`manifest` labelling each member only: no weakest-member posture suffix or enforcement keyword."""
     text, grade = _describe(client, bundle, packages, "")
-    keywords = [k for k in manifest.get("keywords", []) if k != bundle_grade.enforcement_keyword(grade)]
+    if "keywords" not in manifest:  # a closed manifest schema (antigravity) refuses a key it does not name
+        return {**manifest, "description": text}
+    keywords = [k for k in manifest["keywords"] if k != bundle_grade.enforcement_keyword(grade)]
     return {**manifest, "description": text, "keywords": keywords}
 
 

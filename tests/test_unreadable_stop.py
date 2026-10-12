@@ -53,6 +53,9 @@ STOP_REFUSALS = {
     "goose": _top_block,
     # Antigravity's Stop words: `continue` keeps the turn going, as agentseam records (`words_at.Stop`).
     "antigravity": lambda p: p.returncode == 0 and _body(p).get("decision") == "continue",
+    # Gemini CLI's AfterAgent and OpenHands' Stop read `deny` as "do not end the turn" (agentseam words.block).
+    "gemini": lambda p: p.returncode == 0 and _body(p).get("decision") == "deny",
+    "openhands": lambda p: p.returncode == 0 and _body(p).get("decision") == "deny",
 }
 
 

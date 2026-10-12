@@ -1,9 +1,10 @@
-"""Plugins whose layout agentseam does not record yet (goose, grok, antigravity): one builder, layout from store data.
+"""Hook-folder plugins (goose, grok, antigravity, gemini, openhands): one builder, the layout from data.
 
 The hook documents are agentseam's own rendering for the vendor (`vendors.*_hook_config`), so the
 event spelling, matcher, wrapper, hook group and entry extras (goose's `on_failure`) are never
-typed here. Only the folder layout and the plugin-root token come from chock's store data, each
-with the vendor page it was read from (data/stores/<store>.json).
+typed here. The folder layout and the plugin-root token are agentseam's packaging record where it
+has one (gemini_cli), else chock's store data, each with the vendor page it was read from
+(data/stores/<store>.json).
 """
 
 from __future__ import annotations
@@ -13,6 +14,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path, PurePath
 from typing import Any, Callable
+
+from agentseam import packaging
 
 from chock import vendors
 from chock.compile.emitters.in_agent_hooks import generic_pre_tool_config, generic_stop_config
@@ -34,6 +37,11 @@ from chock.plugin.store import SCRIPTS_TEMPLATE
 #: replaced by the folder's absolute path when the package is written, never shipped as is.
 ROOT_TOKEN = "__CHOCK_PLUGIN_ROOT__"  # noqa: S105 -- a path placeholder, not a credential
 
+#: How every hook-folder posture ends: what the hook needs, and what it does not cover.
+POSTURE_TAIL = (
+    "The hook needs git and a Python 3.11+ on PATH. Repo-wide git-hook and CI coverage still needs `chock sync`."
+)
+
 ManifestFn = Callable[..., dict[str, Any]]
 
 
@@ -47,24 +55,35 @@ class Spec:
     manifest: ManifestFn | None = None
 
 
-def layout(store_name: str) -> dict[str, Any]:
-    """The store's recorded layout: manifest (or None), hooks, skill template, plugin-root token (or None)."""
+def layout(store_name: str, agent: str | None = None) -> dict[str, Any]:
+    """The recorded layout: manifest (or None), hooks, skill template, plugin-root token (or None).
+
+    chock's store data wins; otherwise agentseam's packaging record for `agent`.
+    """
     found = store.layout(store_name)
+    if found is None and agent is not None and agent in packaging.agents():
+        roots = packaging.layout(agent)["plugin_root"]
+        found = {
+            "manifest": packaging.layout(agent)["manifest"],
+            "hooks": packaging.supports(agent, packaging.HOOKS),
+            "skill": packaging.supports(agent, packaging.SKILL),
+            "plugin_root": roots[0] if roots else None,
+        }
     if found is None:
         msg = f"no layout recorded for {store_name!r} in chock's store data"
         raise KeyError(msg)
     return found
 
 
-def _ref(store_name: str, rel: str) -> str:
-    return f"{layout(store_name)['plugin_root'] or ROOT_TOKEN}/{rel}"
+def _ref(spec: Spec, rel: str) -> str:
+    return f"{layout(spec.store, spec.agent)['plugin_root'] or ROOT_TOKEN}/{rel}"
 
 
 def hook_command(spec: Spec, flag: str, target: str) -> str:
     """One interpreter invocation of the agent's runtime, handed `--guard <script>` or `--gate <gate.json>`."""
-    adapter = _ref(spec.store, SCRIPTS_TEMPLATE.format(name=f"{spec.agent}.py"))
-    launcher = launch.plugin_interpreter(_ref(spec.store, SCRIPTS_TEMPLATE.format(name=launch.PLUGIN_LAUNCHER)))
-    return f'{launcher} "{adapter}" {flag} "{_ref(spec.store, SCRIPTS_TEMPLATE.format(name=target))}"'
+    adapter = _ref(spec, SCRIPTS_TEMPLATE.format(name=f"{spec.agent}.py"))
+    launcher = launch.plugin_interpreter(_ref(spec, SCRIPTS_TEMPLATE.format(name=launch.PLUGIN_LAUNCHER)))
+    return f'{launcher} "{adapter}" {flag} "{_ref(spec, SCRIPTS_TEMPLATE.format(name=target))}"'
 
 
 def guard_doc(agent: str, command: str) -> Any:
@@ -86,7 +105,7 @@ def plugin_files(spec: Spec, policy_dir: Path, manifest: dict[str, Any], repo_ro
     policy_dir = Path(policy_dir)
     policy_id = str(manifest.get("id") or policy_dir.name)
     name = plugin_name(policy_id)
-    shape = layout(spec.store)
+    shape = layout(spec.store, spec.agent)
     parts = guard_gate.halves(spec.agent, policy_dir, policy_id, Path(repo_root))
     script, gate = parts.script, parts.gate
 
