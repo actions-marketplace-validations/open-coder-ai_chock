@@ -52,9 +52,11 @@ def test_every_client_merges_including_claude(tmp_path: Path) -> None:
         "copilot",
         "cursor",
         "devin",
+        "droid",
         "gemini",
         "goose",
         "grok",
+        "kimi",
         "openhands",
     ]
     members = make_members(tmp_path)

@@ -106,7 +106,11 @@ def others(client_id: str, dest: Path, name: str) -> list[tuple[str, Path, list[
 def _index(spec: dict[str, Any], dest: Path, fmt: str, marketplace: str) -> dict[str, Any]:
     """One index document over every plugin in the marketplace, in the style the client reads."""
     if spec["style"] != "codex":
-        return marketplace_core.build_index(dest, marketplace, fmt)
+        index = marketplace_core.build_index(dest, marketplace, fmt)
+        keep = spec.get("entry_keys")  # a client that documents fewer entry fields (droid)
+        if keep:
+            index["plugins"] = [{k: e[k] for k in keep if k in e} for e in index["plugins"]]
+        return index
     plugins = [
         {"name": e["name"], "source": {"source": "local", "path": e["source"]}, **spec["entry"]}
         for e in marketplace_core.collect_entries(dest, fmt)

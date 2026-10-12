@@ -56,6 +56,11 @@ STOP_REFUSALS = {
     # Gemini CLI's AfterAgent and OpenHands' Stop read `deny` as "do not end the turn" (agentseam words.block).
     "gemini": lambda p: p.returncode == 0 and _body(p).get("decision") == "deny",
     "openhands": lambda p: p.returncode == 0 and _body(p).get("decision") == "deny",
+    # Kimi answers every blockable event in G2: a deny under hookSpecificOutput (agentseam gates.Stop.grammar).
+    "kimi": lambda p: (
+        p.returncode == 0 and (_body(p).get("hookSpecificOutput") or {}).get("permissionDecision") == "deny"
+    ),
+    "droid": _top_block,
 }
 
 

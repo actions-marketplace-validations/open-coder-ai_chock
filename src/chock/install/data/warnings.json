@@ -161,11 +161,48 @@
     {
       "kind": "client",
       "clients": [
+        "kimi-code"
+      ],
+      "says": "Kimi Code lets a call through when a hook errors, times out or exits with any code other than 2, cannot prompt (an ask is not enforced there), and applies a plugin to every project you open; it installs from its TUI only, and runs a copy, so reinstall after a rebuild."
+    },
+    {
+      "kind": "client",
+      "clients": [
+        "kimi-code"
+      ],
+      "says": "On Windows, the shell Kimi Code runs hook commands with is unmeasured, and the hooks read ${KIMI_PLUGIN_ROOT}; this path is not tested there."
+    },
+    {
+      "kind": "client",
+      "clients": [
+        "factory-droid"
+      ],
+      "says": "Factory Droid treats a hook exit other than 0 or 2 as a non-blocking error and lets the call through, ignores this plugin's hooks under an org's allowManagedHooksOnly, and (agentseam's vendor data) degrades an ask to a block."
+    },
+    {
+      "kind": "client",
+      "clients": [
+        "kimi-code"
+      ],
+      "says": "Evidence wanted: what you see Kimi Code do with this plugin, at https://github.com/open-coder-ai/agentseam/issues/135"
+    },
+    {
+      "kind": "client",
+      "clients": [
+        "factory-droid"
+      ],
+      "says": "Evidence wanted: what you see Factory Droid do with this plugin, at https://github.com/open-coder-ai/agentseam/issues/184"
+    },
+    {
+      "kind": "client",
+      "clients": [
         "goose",
         "grok",
         "antigravity",
         "gemini-cli",
-        "openhands"
+        "openhands",
+        "kimi-code",
+        "factory-droid"
       ],
       "says": "Untested: chock has not witnessed an install in this client. Its steps, its hooks and the plugin version string (<bundle.version>+<digest12>) are unmeasured there."
     }

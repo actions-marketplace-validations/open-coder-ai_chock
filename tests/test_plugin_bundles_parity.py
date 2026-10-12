@@ -21,7 +21,7 @@ def _payload(client: str, repo: Path, tool: str, **tool_input: str) -> str:
     """The pre-tool payload each client sends: its own envelope, event spelling and markers."""
     if tool == "Write":
         tool_input = {**tool_input, "file_path": str(repo / tool_input["file_path"])}
-    if client in ("gemini", "openhands"):
+    if client in ("gemini", "openhands", "kimi", "droid"):
         return json.dumps(client_payloads.pre_tool(client, repo, tool, tool_input))
     body: dict = {"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": tool_input, "cwd": str(repo)}
     if client == "cursor":

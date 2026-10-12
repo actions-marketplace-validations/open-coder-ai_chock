@@ -38,6 +38,9 @@ def _hook_commands(node: Any) -> list[str]:
 
 def events_for(doc: Any, flag: str) -> list[str]:
     """The events whose entries run a command carrying `flag`, in the order the document wires them."""
+    if isinstance(doc, list):  # a flat list of rules, each naming its `event` (kimi)
+        rules = [r for r in doc if isinstance(r, dict) and any(flag in c for c in _hook_commands(r))]
+        return list(dict.fromkeys(str(r.get("event")) for r in rules))
     events = doc.get("hooks", doc) if isinstance(doc, dict) else {}
     if not isinstance(events, dict):
         return []

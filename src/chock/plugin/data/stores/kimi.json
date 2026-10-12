@@ -1,0 +1,46 @@
+{
+  "owned_subtrees": [
+    "scripts",
+    "hooks",
+    "skills"
+  ],
+  "layout": {
+    "manifest": "kimi.plugin.json",
+    "hooks": "hooks/hooks.json",
+    "hooks_key": "hooks",
+    "skill": "skills/{name}/SKILL.md",
+    "plugin_root": "${KIMI_PLUGIN_ROOT}"
+  },
+  "hooks_key_means": "Kimi reads plugin hooks from the manifest's `hooks` array, not a file: chock builds them at `hooks` (the layout every bundle merge reads) and folds that document into the manifest when the package is written.",
+  "hook_timeout_field": "timeout",
+  "hook_timeout_means": "Kimi is not a `chock sync` vendor (no row in src/chock/data/hook_timeouts.json) and agentseam's rendering writes no timeout, so the documented `timeout` (seconds, 1-600, default 30) gets chock's 45 s here: a 30 s default would end the hook before the engine's own 30 s budget and fail open.",
+  "sources": [
+    {
+      "url": "https://www.kimi.com/code/docs/en/kimi-code-cli/customization/plugins.html",
+      "read": "2026-10-12",
+      "says": [
+        "`<plugin_root>/kimi.plugin.json` / `<plugin_root>/.kimi-plugin/plugin.json`. When both files exist, `kimi.plugin.json` takes precedence.",
+        "`name` | Required; serves as the plugin id. Must match `[a-z0-9][a-z0-9_-]{0,63}`",
+        "`skills` | One or more `./` paths within the plugin root; if omitted, root `SKILL.md` is the single Skill root",
+        "Each entry uses the same fields as a `[[hooks]]` rule in `config.toml` (`event`, `matcher`, `command`, `timeout`)",
+        "The hook process receives two extra environment variables: `KIMI_CODE_HOME` and `KIMI_PLUGIN_ROOT` (the plugin root directory).",
+        "Each hook runs with its working directory set to the plugin root",
+        "`/plugins install <path-or-url>` | Install from a local directory, zip URL, or GitHub repository URL",
+        "Local installations are copied to `$KIMI_CODE_HOME/plugins/managed/<id>/`, and the CLI always runs from this managed copy. Editing the original source directory after installation has no effect; you must reinstall.",
+        "Plugins are currently installed per-user and apply to all projects; project-level installation scope is not yet supported.",
+        "Plugin changes apply after `/reload` or in new sessions."
+      ]
+    },
+    {
+      "url": "https://www.kimi.com/code/docs/en/kimi-code-cli/customization/hooks.html",
+      "read": "2026-10-12",
+      "says": [
+        "`0` means allow, `2` means block, other non-zero values default to allow",
+        "Even if the script errors or times out, the CLI **will not interrupt your work** as a result.",
+        "should not be used as the sole security barrier",
+        "`timeout` | `integer` | No | Timeout in seconds, range 1–600; defaults to 30 seconds"
+      ]
+    }
+  ],
+  "silent_on": "A non-interactive install: the docs name only the `/plugins` slash commands in the TUI. The shell Kimi runs hook commands with on Windows is unmeasured."
+}

@@ -162,6 +162,35 @@
       "steps": [
         {"note": "OpenHands loads a local plugin when it starts: run `openhands --plugin __PLUGIN_DIR__`, or add \"__PLUGIN_DIR__\" to sources under [plugins] in ~/.openhands/config.toml (chock does not edit it). Its hooks name __PLUGIN_DIR__ by absolute path (OpenHands documents no plugin-root variable), so keep that folder where it is; a rebuild applies from the next start."}
       ]
+    },
+    "kimi-code": {
+      "name": "Kimi Code",
+      "format": "kimi",
+      "layout": "plugin-dir",
+      "dest": "~/.chock/marketplace/kimi-code",
+      "binary": null,
+      "index": [],
+      "tier_label": true,
+      "gate_turn_end_only": false,
+      "steps": [
+        {"note": "Kimi Code installs plugins from its TUI only, and chock does not drive it: in Kimi Code run `/plugins install __PLUGIN_DIR__`, then `/reload` (or `/new`). Kimi copies the plugin to $KIMI_CODE_HOME/plugins/managed/__PLUGIN__/ and runs that copy, so after a rebuild install it again. The plugin applies to every project you open (Kimi has no project-level plugin scope); `/plugins disable __PLUGIN__` turns it off."}
+      ]
+    },
+    "factory-droid": {
+      "name": "Factory Droid",
+      "format": "droid",
+      "layout": "marketplace",
+      "dest": "~/.chock/marketplace/factory-droid/chock-local",
+      "binary": "droid",
+      "index": [{"path": ".factory-plugin/marketplace.json", "style": "claude", "entry_keys": ["name", "source", "description"]}],
+      "tier_label": true,
+      "gate_turn_end_only": false,
+      "steps": [
+        {"note": "Run these from the root of the project the plugin is for: `--scope project` records it in that project's Droid settings. The marketplace is local to this machine; chock publishes nothing."},
+        {"command": ["droid", "plugin", "marketplace", "add", "__DEST__"]},
+        {"command": ["droid", "plugin", "install", "__PLUGIN__@__MARKETPLACE__", "--scope", "project"]},
+        {"note": "Droid names a local marketplace from its source; if `droid plugin marketplace list` shows a name other than __MARKETPLACE__ (a --dest folder named otherwise), install __PLUGIN__@<that name>. Droid copies the plugin into its cache: after a rebuild run `droid plugin marketplace update` and `droid plugin update __PLUGIN__@__MARKETPLACE__ --scope project`, then start a new session."}
+      ]
     }
   }
 }

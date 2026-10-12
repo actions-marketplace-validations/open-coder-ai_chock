@@ -233,17 +233,17 @@ A guard that fails refuses or asks; it never reports an allow it never establish
 | :--- | :--- | :--- |
 | In-agent (`chock sync`: `.claude/`, `.cursor/`, `.codex/`, `.github/hooks/`, ...) | Claude Code, Codex, Copilot, Cursor, Devin, Antigravity, Gemini CLI, Grok, Tabnine | yes, every hook entry |
 | In-agent | Windsurf | **no key**: its documented hook entry takes `command`, `powershell`, `show_output` and `working_directory` only, so its own default (not documented) applies |
-| Plugin package (`hooks.json`) | Claude Code, Codex, Copilot, Cursor, Devin, goose, Grok, Antigravity, Gemini CLI, OpenHands | yes, every hook entry |
+| Plugin package (`hooks.json`) | Claude Code, Codex, Copilot, Cursor, Devin, goose, Grok, Antigravity, Gemini CLI, OpenHands, Kimi Code, Factory Droid | yes, every hook entry |
 
 | Client | Field | Unit | Written | Client default when the key is absent |
 | :--- | :--- | :--- | :--- | :--- |
-| Claude Code, Codex, Devin, Antigravity, Grok | `timeout` | seconds | 45 | Codex 600 s; Devin 600 s (command hooks); Antigravity 30 s; Grok 5 s |
+| Claude Code, Codex, Devin, Antigravity, Grok, Kimi Code (in `kimi.plugin.json`), Factory Droid | `timeout` | seconds | 45 | Codex 600 s; Devin 600 s (command hooks); Antigravity 30 s; Grok 5 s; Kimi Code 30 s; Factory Droid 60 s |
 | Gemini CLI, Tabnine | `timeout` | milliseconds | 45000 | 60000 (60 s) both |
 | Copilot | `timeout` and `timeoutSec` | seconds | 45 | not checked |
 | Cursor | `timeout` (with `failClosed`) | seconds | 45 | not checked |
 | Windsurf | none | n/a | n/a | undocumented |
 
-A default below 45 s is exactly the hole this closes: Grok's 5 s and Antigravity's 30 s would end the hook before the engine's own 30 s limit and the command would run unchecked. `tests/test_hook_timeout_budget.py` walks every emitted hooks document and fails on a hook entry that lacks a timeout above the budget, unless its client is in the no-key allow-list (`NO_TIMEOUT_KEY_VENDORS`). Sources are in `src/chock/data/hook_timeouts.json`.
+A default below 45 s is exactly the hole this closes: Grok's 5 s and Antigravity's and Kimi Code's 30 s would end the hook before the engine's own 30 s limit and the command would run unchecked. `tests/test_hook_timeout_budget.py` walks every emitted hooks document and fails on a hook entry that lacks a timeout above the budget, unless its client is in the no-key allow-list (`NO_TIMEOUT_KEY_VENDORS`). Sources are in `src/chock/data/hook_timeouts.json`.
 
 **What an `ask` becomes depends on the client, and no client turns it into a silent allow.**
 
