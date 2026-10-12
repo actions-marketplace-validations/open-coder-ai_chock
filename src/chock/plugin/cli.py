@@ -23,13 +23,27 @@ from chock.plugin.codex import build_codex_plugin, codex_plugin_differences
 from chock.plugin.copilot import build_copilot_plugin, copilot_plugin_differences
 from chock.plugin.cursor import build_cursor_plugin, cursor_plugin_differences
 from chock.plugin.devin import build_devin_plugin, devin_plugin_differences
+from chock.plugin.gemini import build_gemini_plugin, gemini_plugin_differences
 from chock.plugin.goose import build_goose_plugin, goose_plugin_differences
 from chock.plugin.grok import build_grok_plugin, grok_plugin_differences
+from chock.plugin.openhands import build_openhands_plugin, openhands_plugin_differences
 from chock.scaffold.recompile import discover_policy_dirs
 
-FORMATS = ("agent-plugins", "claude", "copilot", "cursor", "codex", "devin", "goose", "grok", "antigravity")
+FORMATS = (
+    "agent-plugins",
+    "claude",
+    "copilot",
+    "cursor",
+    "codex",
+    "devin",
+    "goose",
+    "grok",
+    "antigravity",
+    "gemini",
+    "openhands",
+)
 
-HOOK_FORMATS = frozenset({"claude", "copilot", "cursor", "codex", "devin", "goose", "grok", "antigravity"})
+HOOK_FORMATS = frozenset(FORMATS) - {"agent-plugins"}
 
 HOOK_EMITTERS = {
     "claude": (claude_plugin_differences, build_claude_plugin),
@@ -40,6 +54,8 @@ HOOK_EMITTERS = {
     "goose": (goose_plugin_differences, build_goose_plugin),
     "grok": (grok_plugin_differences, build_grok_plugin),
     "antigravity": (antigravity_plugin_differences, build_antigravity_plugin),
+    "gemini": (gemini_plugin_differences, build_gemini_plugin),
+    "openhands": (openhands_plugin_differences, build_openhands_plugin),
 }
 
 
@@ -240,6 +256,13 @@ def main(argv: list[str] | None = None) -> int:
     if "antigravity" in formats:
         print(
             "  plugin.json + hooks.json (PreToolUse per guard policy; Stop per gate; hooks name the folder by absolute path)"
+        )
+    if "gemini" in formats:
+        print("  gemini-extension.json + hooks/hooks.json (BeforeTool per guard policy; write and AfterAgent per gate)")
+    if "openhands" in formats:
+        print(
+            "  .plugin/plugin.json + hooks/hooks.json (PreToolUse per guard policy; write and Stop per gate; "
+            "hooks name the folder by absolute path)"
         )
     if HOOK_FORMATS.intersection(formats):
         print("  A policy with both a guard and a tool_use gate ships both, where the client runs the gate.")

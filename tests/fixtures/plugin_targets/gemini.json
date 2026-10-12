@@ -1,0 +1,97 @@
+{
+  "files": [
+    "gemini-extension.json",
+    "hooks/hooks.json",
+    "scripts/chock-guardrails-protect/chock-guardrails-protect-gate.py",
+    "scripts/chock-guardrails-protect/chock-guardrails-protect.py",
+    "scripts/chock-guardrails-protect/chock_guardrails_protect/__init__.py",
+    "scripts/chock-guardrails-protect/gate.json",
+    "scripts/chock-guardrails-protect/gate.py",
+    "scripts/chock-guardrails-protect/implementations/chock-guardrails-protect-gate.py",
+    "scripts/chock-guardrails-protect/implementations/chock-guardrails-protect.py",
+    "scripts/chock-guardrails-protect/implementations/chock_guardrails_protect/__init__.py",
+    "scripts/chock_bundle.json",
+    "scripts/chock_bundle.py",
+    "scripts/demo-shell-guard/demo-shell-guard.py",
+    "scripts/demo-shell-guard/tinyparse/__init__.py",
+    "scripts/demo-write-gate/gate.json",
+    "scripts/demo-write-gate/gate.py",
+    "scripts/gemini_cli.py",
+    "scripts/launch.sh",
+    "skills/customize-guardrails/SKILL.md",
+    "skills/demo-advice/SKILL.md",
+    "skills/demo-shell-guard/SKILL.md",
+    "skills/demo-write-gate/SKILL.md"
+  ],
+  "manifest": {
+    "name": "demo-bundle",
+    "version": "0.1.0",
+    "description": "Two demo policies. Members: demo-write-gate: blocks on an agent's file writes and at turn end; demo-shell-guard: refuses a matched shell command before it runs; demo-advice: advisory only: skill text, nothing stops a violation. [Advisory skill only; enforcement needs chock installed in the repo.]"
+  },
+  "hooks": {
+    "hooks": {
+      "BeforeTool": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${extensionPath}/scripts/launch.sh\" \"${extensionPath}/scripts/chock_bundle.py\" --bundle demo-bundle --member demo-write-gate \"${extensionPath}/scripts/gemini_cli.py\" --gate \"${extensionPath}/scripts/demo-write-gate/gate.json\"",
+              "timeout": 45000
+            }
+          ],
+          "matcher": "write_file|replace"
+        },
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${extensionPath}/scripts/launch.sh\" \"${extensionPath}/scripts/chock_bundle.py\" --bundle demo-bundle --member demo-shell-guard \"${extensionPath}/scripts/gemini_cli.py\" --guard \"${extensionPath}/scripts/demo-shell-guard/demo-shell-guard.py\"",
+              "timeout": 45000
+            }
+          ],
+          "matcher": "run_shell_command"
+        },
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${extensionPath}/scripts/launch.sh\" \"${extensionPath}/scripts/gemini_cli.py\" --guard \"${extensionPath}/scripts/chock-guardrails-protect/chock-guardrails-protect.py\"",
+              "timeout": 45000
+            }
+          ],
+          "matcher": "run_shell_command"
+        },
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${extensionPath}/scripts/launch.sh\" \"${extensionPath}/scripts/gemini_cli.py\" --gate \"${extensionPath}/scripts/chock-guardrails-protect/gate.json\"",
+              "timeout": 45000
+            }
+          ],
+          "matcher": "write_file|replace"
+        }
+      ],
+      "AfterAgent": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${extensionPath}/scripts/launch.sh\" \"${extensionPath}/scripts/chock_bundle.py\" --bundle demo-bundle --member demo-write-gate \"${extensionPath}/scripts/gemini_cli.py\" --gate \"${extensionPath}/scripts/demo-write-gate/gate.json\" --stop",
+              "timeout": 45000
+            }
+          ]
+        },
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${extensionPath}/scripts/launch.sh\" \"${extensionPath}/scripts/chock_bundle.py\" --verify \"${extensionPath}/scripts/gemini_cli.py\" --gate \"${extensionPath}/scripts/chock-guardrails-protect/gate.json\" --stop",
+              "timeout": 45000
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

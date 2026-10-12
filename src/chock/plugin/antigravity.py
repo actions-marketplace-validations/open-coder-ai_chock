@@ -21,8 +21,7 @@ _CAVEAT = (
 )
 POSTURE_BESTEFFORT = (
     "Best-effort in Antigravity by a PreToolUse hook in the plugin's hooks.json (documented by the vendor; "
-    f"not witnessed by chock). {_CAVEAT} The hook needs git and a Python 3.11+ on PATH. Repo-wide "
-    "git-hook and CI coverage still needs `chock sync`."
+    f"not witnessed by chock). {_CAVEAT} {hook_dir.POSTURE_TAIL}"
 )
 POSTURE_GATE = gate_package.gate_posture("antigravity", _CAVEAT)
 

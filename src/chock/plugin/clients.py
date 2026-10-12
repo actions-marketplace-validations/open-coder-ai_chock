@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 from agentseam import packaging
 
-from chock.plugin import antigravity, claude, codex, copilot, cursor, devin, goose, grok, store
+from chock.plugin import antigravity, claude, codex, copilot, cursor, devin, gemini, goose, grok, openhands, store
 
 FilesFn = Callable[[Path, dict[str, Any], Path], dict[Path, str]]
 
@@ -22,7 +22,8 @@ class Client:
     posture: Callable[..., str] | None
     agent: str
     package_agent: str
-    #: The store whose layout chock records itself, where agentseam's packaging records none (goose, grok, antigravity).
+    #: The store whose layout chock records itself, where agentseam's packaging records none (goose, grok,
+    #: antigravity, openhands).
     own_layout: str | None = None
 
     def layout(self) -> tuple[str | None, str, str]:
@@ -69,5 +70,20 @@ CLIENTS: dict[str, Client] = {
         "antigravity",
         "antigravity",
         own_layout="antigravity",
+    ),
+    "gemini": Client(
+        gemini.gemini_plugin_files,
+        gemini.build_gemini_manifest,
+        gemini.manifest_posture,
+        "gemini_cli",
+        "gemini_cli",
+    ),
+    "openhands": Client(
+        openhands.openhands_plugin_files,
+        openhands.build_openhands_manifest,
+        openhands.manifest_posture,
+        "openhands",
+        "openhands",
+        own_layout="openhands",
     ),
 }

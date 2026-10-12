@@ -1,0 +1,47 @@
+{
+  "owned_subtrees": [
+    "scripts",
+    "hooks",
+    "skills"
+  ],
+  "layout_from": "agentseam packaging.layout(\"gemini_cli\"): gemini-extension.json, hooks/hooks.json, skills/{name}/SKILL.md, ${extensionPath}",
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/extensions/reference.md",
+      "read": "2026-10-12",
+      "says": [
+        "Each extension must have a `gemini-extension.json` file in its root directory.",
+        "Define hooks in a `hooks/hooks.json` file within your extension directory.",
+        "Gemini CLI supports variable substitution in `gemini-extension.json` and `hooks/hooks.json`.",
+        "`${extensionPath}` | The absolute path to the extension's directory.",
+        "Gemini CLI creates a copy of the extension during installation.",
+        "Note that we expect this name to match the extension directory name."
+      ]
+    },
+    {
+      "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/packages/cli/src/config/extension-manager.ts",
+      "read": "2026-10-12",
+      "says": [
+        "`\"hooks\" property must be an object`: the file has the settings.json hooks shape",
+        "loadExtensionHooks runs only while hooksConfig.enabled is true (settingsSchema.ts: default true)",
+        "an install whose source has hooks/hooks.json asks for consent (maybeRequestConsentOrFail)"
+      ]
+    },
+    {
+      "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/packages/cli/src/config/extensions/variables.ts",
+      "read": "2026-10-12",
+      "says": [
+        "hydrateString replaces /\\${(.*?)}/ by its value and leaves an unknown key as written: the installed path lands inside the quoted hook command as text"
+      ]
+    },
+    {
+      "url": "https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/",
+      "read": "2026-10-12",
+      "says": [
+        "the sunsetting of Gemini CLI in favor of Antigravity CLI",
+        "On June 18, 2026, Gemini CLI and Gemini Code Assist IDE extensions will stop serving requests for Google AI Pro and Ultra"
+      ]
+    }
+  ],
+  "silent_on": "Windows: the shell Gemini CLI runs hooks with is unmeasured, and `${extensionPath}` carries backslashes there; this path is not tested on Windows."
+}

@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 
+import client_payloads
 import pytest
 from bundle_fixtures import ALL_ROOTS, BUNDLE_ID, MARKER, bundle, hook_commands, make_members, project, write
 from conftest import run_hook_command
@@ -20,6 +21,8 @@ def _payload(client: str, repo: Path, tool: str, **tool_input: str) -> str:
     """The pre-tool payload each client sends: its own envelope, event spelling and markers."""
     if tool == "Write":
         tool_input = {**tool_input, "file_path": str(repo / tool_input["file_path"])}
+    if client in ("gemini", "openhands"):
+        return json.dumps(client_payloads.pre_tool(client, repo, tool, tool_input))
     body: dict = {"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": tool_input, "cwd": str(repo)}
     if client == "cursor":
         envelope = {"conversation_id": "c", "generation_id": "g", "cursor_version": "3.21.18"}

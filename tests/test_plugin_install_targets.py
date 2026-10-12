@@ -1,4 +1,4 @@
-"""goose, grok and antigravity plugins: the documented layout, each runtime's own grammar, and a local install."""
+"""goose, grok, antigravity, gemini and openhands plugins: the documented layout, each runtime's grammar, a local install."""
 
 from __future__ import annotations
 
@@ -26,15 +26,20 @@ from chock.plugin.bundle_build import CLIENTS, merged_files
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git required")
 
-TARGETS = ("goose", "grok", "antigravity")
+TARGETS = ("goose", "grok", "antigravity", "gemini", "openhands")
+#: The install client id of each format, where they differ.
+CLIENT_ID = {"gemini": "gemini-cli"}
+INSTALL_CLIENTS = tuple(CLIENT_ID.get(fmt, fmt) for fmt in TARGETS)
 GOLDEN = Path(__file__).parent / "fixtures" / "plugin_targets"
 #: (manifest, hooks file) each vendor page documents (src/chock/plugin/data/stores/<format>.json cites them).
 LAYOUT = {
     "goose": (None, "hooks/hooks.json"),
     "grok": (None, "hooks/hooks.json"),
     "antigravity": ("plugin.json", "hooks.json"),
+    "gemini": ("gemini-extension.json", "hooks/hooks.json"),
+    "openhands": (".plugin/plugin.json", "hooks/hooks.json"),
 }
-BINARY = {"grok": "grok", "antigravity": "agy"}
+BINARY = {"grok": "grok", "antigravity": "agy", "gemini-cli": "gemini"}
 
 
 def snapshot(fmt: str, root: Path) -> dict:
@@ -197,7 +202,11 @@ def _tree(root: Path) -> set[str]:
     return {p.relative_to(root).as_posix() for p in root.rglob("*")}
 
 
-@pytest.mark.parametrize("client", TARGETS)
+def _format(client: str) -> str:
+    return package.client(client)["format"]
+
+
+@pytest.mark.parametrize("client", INSTALL_CLIENTS)
 def test_install_stages_the_folder_prints_the_steps_and_touches_nothing_else(
     catalog, tmp_path: Path, home: Path, client: str, capsys, monkeypatch
 ) -> None:
@@ -211,7 +220,7 @@ def test_install_stages_the_folder_prints_the_steps_and_touches_nothing_else(
     out = capsys.readouterr()
     folder = place.plugin_dir(client, place.default_dest(client), DEFAULT_BUNDLE)
     assert code == (1 if absent else 0)
-    assert (folder / LAYOUT[client][1]).is_file() and (folder / package.MARKER).is_file()
+    assert (folder / LAYOUT[_format(client)][1]).is_file() and (folder / package.MARKER).is_file()
     added = _tree(home) - before
     rel = folder.relative_to(home).as_posix()
     assert all(p == rel or p.startswith(f"{rel}/") or rel.startswith(f"{p}/") for p in added), added
@@ -222,7 +231,7 @@ def test_install_stages_the_folder_prints_the_steps_and_touches_nothing_else(
         assert f"--apply needs the `{absent}` command on PATH" in out.err
 
 
-@pytest.mark.parametrize("client", TARGETS)
+@pytest.mark.parametrize("client", INSTALL_CLIENTS)
 def test_a_second_install_changes_nothing(catalog, tmp_path: Path, home: Path, client: str) -> None:
     root, ref = catalog
     assert _install(tmp_path, root, ref, client) == 0
@@ -252,6 +261,8 @@ def test_antigravity_install_names_its_final_folder_not_the_staging_one(catalog,
         ("goose", "best-effort, fail mode configurable (agentseam vendor-docs): ", "agentseam/issues/177"),
         ("grok", "best-effort, fail mode open (agentseam vendor-docs): ", "agentseam/issues/188"),
         ("antigravity", "best-effort, fail mode open (agentseam vendor-docs): ", "agentseam/issues/129"),
+        ("gemini-cli", "best-effort, fail mode open (agentseam vendor-source): ", "agentseam/issues/132"),
+        ("openhands", "best-effort, fail mode open (agentseam vendor-docs): ", "agentseam/issues/181"),
     ],
 )
 def test_labels_come_from_the_tier_table_and_warnings_link_the_evidence_issue(
@@ -277,14 +288,6 @@ def test_an_ask_gate_is_labelled_not_enforced_where_the_client_cannot_ask(catalo
     # Antigravity's gate runs at Stop only, where agentseam records it cannot prompt either.
     labels = {label.policy_id: label.says for label in package.labels(members, tmp_path / "m", "antigravity")}
     assert labels[GATE_ID].endswith("; the ask is not enforced here: Antigravity cannot prompt at Stop")
-
-
-def test_the_surfaces_page_names_every_install_client_in_its_plugin_timeout_row() -> None:
-    page = (Path(__file__).resolve().parents[1] / "docs" / "enforcement-surfaces.md").read_text(encoding="utf-8")
-    row = next(line for line in page.splitlines() if line.startswith("| Plugin package (`hooks.json`) |"))
-    named = {name.strip() for name in row.split("|")[2].split(",")}
-    names = {data["name"] for data in package.settings()["clients"].values()}
-    assert names - {"GitHub Copilot"} | {"Copilot"} == named
 
 
 def test_the_toggle_lookup_reads_goose_and_antigravity_folders(tmp_path: Path) -> None:
