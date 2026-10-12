@@ -142,6 +142,13 @@
       "clients": [
         "gemini-cli"
       ],
+      "says": "On Windows, the shell Gemini CLI runs hooks with is unmeasured, and `${extensionPath}` carries backslashes; this path is not tested there."
+    },
+    {
+      "kind": "client",
+      "clients": [
+        "gemini-cli"
+      ],
       "says": "Evidence wanted: what you see Gemini CLI do with this extension, at https://github.com/open-coder-ai/agentseam/issues/132"
     },
     {

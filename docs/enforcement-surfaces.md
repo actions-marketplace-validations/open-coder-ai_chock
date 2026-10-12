@@ -184,7 +184,7 @@ made the agent carry on with the turn. It is registered under `Stop` alone, sinc
 and would run the gate twice; which of the top-level or nested block answers Copilot reads is not isolated, so
 chock writes both. Junie and Kimi Code block only via home configs, outside what `chock sync --repo` may write;
 Cline's per-event hooks directory is not wired yet; Aider and Replit cannot block. A checkmark is a wiring
-claim: new-vendor cells stay `witnessed: false` until a real client run is recorded; sync calls them "Untested".
+claim: new-vendor cells stay `witnessed: false` until a real client run is recorded; sync calls them "Untested". chock's Claude Code plugin does not protect OpenHands, even though OpenHands reads `.claude-plugin/`: its matchers never match OpenHands' `terminal` or `file_editor`. Use `chock install --client openhands`.
 
 ## Coverage levels
 

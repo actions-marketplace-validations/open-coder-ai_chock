@@ -107,3 +107,4 @@ def test_the_surfaces_page_names_every_install_client_in_its_plugin_timeout_row(
     named = {name.strip() for name in row.split("|")[2].split(",")}
     names = {data["name"] for data in package.settings()["clients"].values()}
     assert names - {"GitHub Copilot"} | {"Copilot"} == named
+    assert "Claude Code plugin does not protect OpenHands" in page and "--client openhands" in page

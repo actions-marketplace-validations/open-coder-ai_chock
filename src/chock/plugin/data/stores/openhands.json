@@ -37,5 +37,6 @@
         "exit code ``1`` does **not** block -- only ``2`` does"
       ]
     }
-  ]
+  ],
+  "unmeasured": "The default timeout OpenHands applies to a plugin's hooks/hooks.json entry: the plugin pages name none (src/chock/data/hook_timeouts.json cites 60 s for the project .openhands/hooks.json only). chock writes 45 s on every entry."
 }

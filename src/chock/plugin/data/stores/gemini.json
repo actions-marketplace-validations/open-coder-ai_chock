@@ -42,5 +42,6 @@
         "On June 18, 2026, Gemini CLI and Gemini Code Assist IDE extensions will stop serving requests for Google AI Pro and Ultra"
       ]
     }
-  ]
+  ],
+  "silent_on": "Windows: the shell Gemini CLI runs hooks with is unmeasured, and `${extensionPath}` carries backslashes there; this path is not tested on Windows."
 }
