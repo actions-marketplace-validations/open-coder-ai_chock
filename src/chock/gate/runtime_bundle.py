@@ -7,8 +7,10 @@ import functools
 import inspect
 import re
 
-from agentseam import adapters, bundler, contract
+from agentseam import bundler, contract
 
+from chock.gate.wire_shapes import EVENT_KEYS as _EVENT_KEYS
+from chock.gate.wire_shapes import wire_raw as _wire_raw
 from chock.resources import package_data_dir
 from chock.vendors import entry, in_agent_vendors
 
@@ -94,16 +96,6 @@ _WIRE_NAME_OF = {"cursor": "cursor_wire(raw)"}  # a family that infers the wire 
 
 _UNREADABLE = _DATA_DIR.joinpath("unreadable_payload.py.tmpl").read_text(encoding="utf-8")
 _WIRE_RAW_TOKENS = {"__PRE_TOOL_RAW__": contract.PRE_TOOL, "__STOP_RAW__": contract.STOP}
-#: Where a vendor's payload names its event, after the vendor's own recorded `event_key`.
-_EVENT_KEYS = ("hook_event_name", "hookEventName", "agent_action_name")
-
-
-def _wire_raw(agent: str, canonical: str) -> dict[str, str]:
-    """The smallest payload `agent` parses back to `canonical`; {} where none does."""
-    adapter = adapters.get(agent)
-    wire = adapter.REVERSE_EVENT_MAP.get(canonical)
-    keys = (*entry(agent)["claims"].get("event_key", ()), *_EVENT_KEYS)
-    return next(({key: wire} for key in keys if wire and adapter.parse({key: wire}).event == canonical), {})
 
 
 def _warn_answer(agent: str) -> str:

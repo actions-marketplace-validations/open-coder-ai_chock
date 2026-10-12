@@ -33,7 +33,7 @@ GUARD_SCRIPT = textwrap.dedent(
     """
 )
 SIBLING_SOURCE = "def is_destructive(argv):\n    return argv[:1] == ['rm'] and '-rf' in argv\n"
-ALL_ROOTS = ("CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT", "CURSOR_PLUGIN_ROOT", "DEVIN_PLUGIN_ROOT")
+ALL_ROOTS = ("CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT", "CURSOR_PLUGIN_ROOT", "DEVIN_PLUGIN_ROOT", "GROK_PLUGIN_ROOT")
 
 
 def _manifest(policy_id: str, hook: dict | None) -> dict[str, Any]:

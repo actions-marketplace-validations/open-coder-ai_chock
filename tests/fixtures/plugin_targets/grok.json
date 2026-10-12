@@ -1,0 +1,43 @@
+{
+  "files": [
+    "hooks/hooks.json",
+    "scripts/chock-guardrails-protect/chock-guardrails-protect-gate.py",
+    "scripts/chock-guardrails-protect/chock-guardrails-protect.py",
+    "scripts/chock-guardrails-protect/chock_guardrails_protect/__init__.py",
+    "scripts/chock_bundle.json",
+    "scripts/chock_bundle.py",
+    "scripts/demo-shell-guard/demo-shell-guard.py",
+    "scripts/demo-shell-guard/tinyparse/__init__.py",
+    "scripts/grok.py",
+    "scripts/launch.sh",
+    "skills/customize-guardrails/SKILL.md",
+    "skills/demo-advice/SKILL.md",
+    "skills/demo-shell-guard/SKILL.md",
+    "skills/demo-write-gate/SKILL.md"
+  ],
+  "manifest": null,
+  "hooks": {
+    "hooks": {
+      "PreToolUse": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${GROK_PLUGIN_ROOT}/scripts/launch.sh\" \"${GROK_PLUGIN_ROOT}/scripts/chock_bundle.py\" --bundle demo-bundle --member demo-shell-guard \"${GROK_PLUGIN_ROOT}/scripts/grok.py\" --guard \"${GROK_PLUGIN_ROOT}/scripts/demo-shell-guard/demo-shell-guard.py\"",
+              "timeout": 45
+            }
+          ]
+        },
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${GROK_PLUGIN_ROOT}/scripts/launch.sh\" \"${GROK_PLUGIN_ROOT}/scripts/grok.py\" --guard \"${GROK_PLUGIN_ROOT}/scripts/chock-guardrails-protect/chock-guardrails-protect.py\"",
+              "timeout": 45
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

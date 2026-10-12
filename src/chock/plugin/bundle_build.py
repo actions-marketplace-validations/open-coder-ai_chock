@@ -15,10 +15,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from agentseam import packaging
-
 from chock.guardrails import plugin as guardrails
-from chock.plugin import bundle_grade, bundles, claude, codex, copilot, cursor, devin
+from chock.plugin import bundle_grade, bundles, claude
+from chock.plugin.clients import CLIENTS, Client
 from chock.plugin.listing import LICENSE_REL, license_text
 from chock.plugin.store import SCRIPTS_TEMPLATE
 
@@ -29,42 +28,6 @@ FilesFn = Callable[[Path, dict[str, Any], Path], dict[Path, str]]
 
 class MergeCollisionError(bundles.BundleError):
     """Two members would write different bytes to one path of a merged bundle."""
-
-
-@dataclass(frozen=True)
-class Client:
-    """One format's packager and the agent its runtime is built for."""
-
-    files: FilesFn
-    manifest: Callable[..., dict[str, Any]]
-    posture: Callable[..., str]
-    agent: str
-    package_agent: str
-
-
-CLIENTS: dict[str, Client] = {
-    "claude": Client(
-        claude.claude_plugin_files,
-        claude.build_claude_manifest,
-        claude.manifest_posture,
-        "claude_code",
-        "claude_code",
-    ),
-    "codex": Client(
-        codex.codex_plugin_files, codex.build_codex_manifest, codex.manifest_posture, "codex_cli", "codex_cli"
-    ),
-    "copilot": Client(
-        copilot.copilot_plugin_files,
-        copilot.build_copilot_manifest,
-        copilot.manifest_posture,
-        "vscode_copilot",
-        "copilot",
-    ),
-    "cursor": Client(
-        cursor.cursor_plugin_files, cursor.build_cursor_manifest, cursor.manifest_posture, "cursor", "cursor"
-    ),
-    "devin": Client(devin.devin_plugin_files, devin.build_devin_manifest, devin.manifest_posture, "devin", "devin"),
-}
 
 
 @dataclass(frozen=True)
@@ -118,7 +81,7 @@ def member_grades(
 ) -> list[tuple[Member, int, str]]:
     """(member, grade, what it does) for each member, read from the hooks its own package in `client_name` ships."""
     client = CLIENTS[client_name]
-    hooks_rel = packaging.supports(client.package_agent, packaging.HOOKS)
+    hooks_rel = client.layout()[1]
     out = []
     for member in members:
         files = client.files(member.policy_dir, member.manifest, repo_root)
@@ -152,9 +115,10 @@ def _bundle_manifest(
 ) -> dict[str, Any]:
     """The client's own manifest for the bundle, its posture sentence the weakest member's."""
     text, grade = _describe(client, bundle, packages, note)
-    hooks_rel = Path(packaging.supports(client.package_agent, packaging.HOOKS))
+    hooks_rel = Path(client.layout()[1])
     weak_enforced, weak_gate, weak_guard = _weakest_flags(packages, grade, hooks_rel)
     synthetic = _synthetic_manifest(bundle, [m for m, *_ in packages], text, grade)
+    assert client.manifest is not None and client.posture is not None  # noqa: S101 -- callers skip manifest-less formats
     manifest = client.manifest(synthetic, Path(bundle["id"]), enforced=carries_hooks, gate=weak_gate, guard=weak_guard)
     posture = client.posture(enforced=weak_enforced, gate=weak_gate, guard=weak_guard)
     manifest["description"] = f"{text} [{posture}]"
@@ -264,26 +228,28 @@ def merged_files(
 ) -> dict[Path, str]:
     """One plugin carrying every member's skills, hooks, scripts and packages; `aggregate=False` drops the bundle claim."""
     client = CLIENTS[client_name]
-    hooks_rel = Path(packaging.supports(client.package_agent, packaging.HOOKS))
-    manifest_rel = Path(packaging.layout(client.package_agent)["manifest"])
+    manifest_name, hooks_name, skill_rel = client.layout()
+    hooks_rel = Path(hooks_name)
+    manifest_rel = Path(manifest_name) if manifest_name else None
+    special = (hooks_rel,) if manifest_rel is None else (hooks_rel, manifest_rel)
     packages = _member_packages(client, members, repo_root, hooks_rel.as_posix())
     files: dict[Path, str] = {}
     hooks: dict[str, Any] = {}
     for member, member_files, _grade, _what in packages:
-        doc = _merge_member(client, member.id, member_files, files, (hooks_rel, manifest_rel))
+        doc = _merge_member(client, member.id, member_files, files, special)
         if doc is not None:
             _merge_docs(hooks, guardrails.wrap_doc(doc, client.agent, bundle["id"], member.id))
     protect = Member(guardrails.protect_dir(), guardrails.protect_manifest())
     protect_files = client.files(protect.policy_dir, protect.manifest, repo_root)
     protect_doc = _merge_member(client, protect.id, _scripts_only(protect_files, hooks_rel), files, (hooks_rel,))
     _merge_docs(hooks, guardrails.verify_at_stop(protect_doc, client.agent))
-    skill_rel = packaging.supports(client.package_agent, packaging.SKILL)
     for rel, content in guardrails.files(bundle["id"], _rows(client, bundle, packages), skill_rel).items():
         _place(files, rel, content)
-    manifest = _bundle_manifest(client, bundle, packages, carries_hooks=bool(hooks))
-    if not aggregate:
-        manifest = _per_member(manifest, client, bundle, packages)
-    files[manifest_rel] = json.dumps(manifest, indent=2) + "\n"
+    if manifest_rel is not None:
+        manifest = _bundle_manifest(client, bundle, packages, carries_hooks=bool(hooks))
+        if not aggregate:
+            manifest = _per_member(manifest, client, bundle, packages)
+        files[manifest_rel] = json.dumps(manifest, indent=2) + "\n"
     if hooks:
         files[hooks_rel] = json.dumps(hooks, indent=2) + "\n"
     return dict(sorted(_with_licence(files, bundle, members).items()))

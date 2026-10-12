@@ -1,0 +1,35 @@
+{
+  "owned_subtrees": [
+    "scripts",
+    "hooks.json",
+    "skills"
+  ],
+  "layout": {
+    "manifest": "plugin.json",
+    "hooks": "hooks.json",
+    "skill": "skills/{name}/SKILL.md",
+    "plugin_root": null
+  },
+  "sources": [
+    {
+      "url": "https://antigravity.google/docs/cli/plugins",
+      "read": "2026-10-12",
+      "says": [
+        "Every plugin requires a `plugin.json` file at its root",
+        "\"required\": [\"name\"], \"additionalProperties\": false",
+        "agy plugin install </path/to/local/plugin>",
+        "~/.gemini/antigravity-cli/plugins/<plugin_name>/"
+      ]
+    },
+    {
+      "url": "https://antigravity.google/docs/hooks",
+      "read": "2026-10-12",
+      "says": [
+        "Plugin level: Packaged inside an installed plugin's `hooks.json` file.",
+        "The `hooks.json` file maps hook names to their event configurations",
+        "`command` | string | Required. The shell command to execute."
+      ],
+      "silent_on": "a plugin-root variable, the working directory a hook command runs in, and what a failing hook does"
+    }
+  ]
+}

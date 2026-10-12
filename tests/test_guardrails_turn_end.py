@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 
+import client_payloads
 import pytest
 from bundle_fixtures import ALL_ROOTS, BUNDLE_ID, GUARD_ID
 from conftest import run_hook_command
@@ -16,6 +17,9 @@ from chock.guardrails.plugin import WRAPPER
 
 
 def _stop(client: str, repo: Path) -> dict:
+    native = client_payloads.stop(client, repo)
+    if native is not None:
+        return native
     if client == "cursor":
         return {
             "conversation_id": "c",
@@ -31,7 +35,7 @@ def _stop(client: str, repo: Path) -> dict:
 
 def _verdict(proc) -> str:
     out = proc.stdout.lower()
-    if proc.returncode == 2 or '"block"' in out or '"deny"' in out or "followup_message" in out:
+    if proc.returncode == 2 or '"block"' in out or '"deny"' in out or "followup_message" in out or '"continue"' in out:
         return "refused" if "changed outside `chock bundle`" in (proc.stdout + proc.stderr) else f"other: {proc}"
     assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
     return "allowed"
@@ -47,6 +51,8 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _at_turn_end(client: str, tmp_path: Path, home: Path):
+    if not client_payloads.has_stop(client):
+        pytest.skip(f"{client}: agentseam records no blocking Stop, so no turn-end check is installed")
     plugin, repo, commands = build(tmp_path, client)
     verify = [c for c in commands if f'{WRAPPER}" {toggle.VERIFY}' in c]
     assert len(verify) == 1, commands
@@ -277,6 +283,8 @@ def test_the_cli_refuses_to_build_on_a_file_it_did_not_record(
 
 @pytest.mark.parametrize("client", MERGED_CLIENTS)
 def test_an_unreadable_stop_is_refused_by_the_turn_end_check(tmp_path: Path, home: Path, client: str) -> None:
+    if not client_payloads.has_stop(client):
+        pytest.skip(f"{client}: agentseam records no blocking Stop, so no turn-end check is installed")
     plugin, repo, commands = build(tmp_path, client)
     (verify,) = [c for c in commands if f'{WRAPPER}" {toggle.VERIFY}' in c]
     env = {**os.environ, **dict.fromkeys(ALL_ROOTS, plugin.as_posix()), "HOME": str(home)}

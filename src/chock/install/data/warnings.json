@@ -83,7 +83,53 @@
     },
     {
       "kind": "client",
-      "clients": [],
+      "clients": [
+        "goose"
+      ],
+      "says": "goose denies a PreToolUse call whose hook fails, because every entry sets on_failure: block; its Stop hooks stay fail-open, so a gate that fails at turn end lets the turn finish."
+    },
+    {
+      "kind": "client",
+      "clients": [
+        "grok"
+      ],
+      "says": "Grok's hooks fail open: a timeout, a crash or malformed output lets the action through, only an explicit deny blocks, and an allowManagedHooksOnly policy skips plugin hooks. No gate runs here: agentseam records neither a write-tool vocabulary nor a blocking Stop for grok."
+    },
+    {
+      "kind": "client",
+      "clients": [
+        "antigravity"
+      ],
+      "says": "Antigravity documents no fail mode for a hook and no plugin-root variable: the hooks name the plugin folder by absolute path, and a gate judges what a turn wrote only at turn end."
+    },
+    {
+      "kind": "client",
+      "clients": [
+        "goose"
+      ],
+      "says": "Evidence wanted: what you see goose do with this plugin, at https://github.com/open-coder-ai/agentseam/issues/177"
+    },
+    {
+      "kind": "client",
+      "clients": [
+        "grok"
+      ],
+      "says": "Evidence wanted: what you see Grok do with this plugin, at https://github.com/open-coder-ai/agentseam/issues/188"
+    },
+    {
+      "kind": "client",
+      "clients": [
+        "antigravity"
+      ],
+      "says": "Evidence wanted: what you see Antigravity do with this plugin, at https://github.com/open-coder-ai/agentseam/issues/129"
+    },
+    {
+      "kind": "client",
+      "clients": [
+        "goose",
+        "grok",
+        "antigravity"
+      ],
       "says": "Untested: chock has not witnessed an install in this client. Its steps, its hooks and the plugin version string (<bundle.version>+<digest12>) are unmeasured there."
     }
   ]

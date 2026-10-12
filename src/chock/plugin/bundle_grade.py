@@ -59,6 +59,9 @@ def grade_of(
     if hooks_text is None:
         return ADVISORY, ADVISORY_SAYS
     doc = json.loads(hooks_text)
+    group = vendors.hook_group(agent)
+    if group and isinstance(doc, dict) and isinstance(doc.get(group), dict):
+        doc = doc[group]
     commands = _hook_commands(doc)
     if any(_GATE_FLAG in c for c in commands):
         action = str((json.loads(gate_text) if gate_text else {}).get("action") or "block")

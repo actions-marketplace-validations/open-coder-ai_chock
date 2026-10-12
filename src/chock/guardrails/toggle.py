@@ -149,11 +149,11 @@ def log_off(governing: Path, bundle: str, member: str) -> None:
 
 
 def _wheres(payload: bytes) -> list[Path]:
-    """The folders the agent works in: the payload's `cwd`, then each workspace root (Cursor's `/C:/x` is `C:/x`)."""
+    """Where the agent works: `cwd` (goose: `working_dir`), then each workspace root (Cursor's `/C:/x` is `C:/x`)."""
     try:
         raw = json.loads(payload.decode("utf-8-sig"))
-        roots = raw.get("workspace_roots")
-        named = [raw.get("cwd"), *(roots if isinstance(roots, list) else [])]
+        roots = [r for k in ("workspace_roots", "workspacePaths") if isinstance(raw.get(k), list) for r in raw[k]]
+        named = [raw.get("cwd") or raw.get("working_dir"), *roots]
     except Exception:  # noqa: BLE001 -- an unreadable payload is the adapter's to refuse
         named = []
     folders = [t[1:] if t[:1] == "/" and t[2:3] == ":" and t[1:2].isalpha() else t for t in named if isinstance(t, str)]

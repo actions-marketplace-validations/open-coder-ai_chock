@@ -1,0 +1,34 @@
+{
+  "owned_subtrees": [
+    "scripts",
+    "hooks",
+    "skills"
+  ],
+  "layout": {
+    "manifest": null,
+    "hooks": "hooks/hooks.json",
+    "skill": "skills/{name}/SKILL.md",
+    "plugin_root": "${GROK_PLUGIN_ROOT}"
+  },
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/xai-org/grok-build/main/crates/codegen/xai-grok-pager/docs/user-guide/09-plugins.md",
+      "read": "2026-10-12",
+      "says": [
+        "**Hooks**: a `hooks/hooks.json` file",
+        "An optional `plugin.json` manifest can override paths or add metadata; without one, Grok discovers components from these standard directories.",
+        "Plugins are off by default, so list one in `enabled` to turn it on",
+        "`GROK_PLUGIN_ROOT` | Absolute path to the plugin's installed directory."
+      ]
+    },
+    {
+      "url": "https://raw.githubusercontent.com/xai-org/grok-build/main/crates/codegen/xai-grok-pager/docs/user-guide/10-hooks.md",
+      "read": "2026-10-12",
+      "says": [
+        "Both `command` and `url` support `${VAR}` and `$VAR` expansion.",
+        "Only an explicit `deny` decision returned by the hook blocks a tool call.",
+        "All hook failures (timeouts, crashes, malformed output, missing required env vars) are fail-open"
+      ]
+    }
+  ]
+}

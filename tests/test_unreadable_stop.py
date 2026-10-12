@@ -13,6 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import client_payloads
 import pytest
 from bundle_fixtures import ALL_ROOTS, bundle, hook_commands, make_members, project, write
 from conftest import run_hook_command
@@ -21,6 +22,7 @@ from chock.gate import runtime_bundle
 from chock.gate.stop_reentry import REENTRY_CAP
 from chock.gate.unreadable_stop import UNREADABLE_STOP_LEDGER, UNREADABLE_STOP_WINDOW_SECONDS
 from chock.guardrails.plugin import PROTECT_ID
+from chock.plugin import hook_dir
 from chock.plugin.bundle_build import CLIENTS, merged_files
 from chock.plugin.gate_package import gate_reach
 
@@ -48,6 +50,9 @@ STOP_REFUSALS = {
     "devin": _top_block,
     "copilot": lambda p: p.returncode == 0 and (_body(p).get("hookSpecificOutput") or {}).get("decision") == "block",
     "cursor": lambda p: p.returncode == 2,
+    "goose": _top_block,
+    # Antigravity's Stop words: `continue` keeps the turn going, as agentseam records (`words_at.Stop`).
+    "antigravity": lambda p: p.returncode == 0 and _body(p).get("decision") == "continue",
 }
 
 
@@ -67,12 +72,15 @@ def _run(command: str, repo: Path, payload: str, package: Path) -> subprocess.Co
 
 
 def _clean_stop(client: str, repo: Path) -> str:
+    native = client_payloads.stop(client, repo)
+    if native is not None:
+        return json.dumps(native)
     raw = runtime_bundle._wire_raw(CLIENTS[client].agent, "stop")
     return json.dumps({**raw, "cwd": str(repo), "session_id": "s", "conversation_id": "c", "generation_id": "g"})
 
 
-#: Every client's package as it ships: one member alone, and the merged bundle.
-SHAPES = [(name, merged) for merged in (False, True) for name in sorted(CLIENTS)]
+#: Every client's package as it ships: one member alone, and the merged bundle; grok runs no Stop to test.
+SHAPES = [(name, merged) for merged in (False, True) for name in sorted(CLIENTS) if client_payloads.has_stop(name)]
 
 
 @pytest.fixture(params=SHAPES, ids=[f"{n}-{'bundle' if m else 'single'}" for n, m in SHAPES])
@@ -84,7 +92,7 @@ def installed(request, tmp_path: Path) -> tuple[str, Path, Path, str]:
         files = merged_files(client, bundle(members), members, tmp_path)
     else:
         files = CLIENTS[client].files(members[0].policy_dir, members[0].manifest, tmp_path)
-    package = write(tmp_path / "pkg", files)
+    package = write(tmp_path / "pkg", hook_dir.resolve_root(files, tmp_path / "pkg"))
     return client, package, project(tmp_path), _stop_command(package)
 
 

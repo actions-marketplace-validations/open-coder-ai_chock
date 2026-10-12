@@ -2110,7 +2110,7 @@ _CHOCK_UNREADABLE = (
 )
 
 #: A payload naming only this vendor's own wire event, so `respond` picks that event's grammar.
-_CHOCK_WIRE_RAW = {PRE_TOOL: {}, STOP: {}}
+_CHOCK_WIRE_RAW = {PRE_TOOL: {}, STOP: {'fullyIdle': True}}
 
 #: The words a client reads as a refusal, in any of the answer fields a vendor grammar uses.
 _CHOCK_REFUSING = ("deny", "block", "ask", "continue")

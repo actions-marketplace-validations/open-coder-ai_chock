@@ -203,6 +203,14 @@ def hook_entry_bare(vendor: str) -> bool:
     return bool((entry or {}).get("bare"))
 
 
+def hook_group(vendor: str) -> str | None:
+    """The hook name `vendor`'s hooks file nests its event map under (antigravity), or None where it has none."""
+    config = getattr(_adapters.get(vendor), "CONFIG", None)
+    entry = (config or {}).get("hook_entry") if isinstance(config, dict) else None
+    group = (entry or {}).get("group")
+    return str(group) if group else None
+
+
 def hook_entry_flat(vendor: str) -> bool:
     """Whether `vendor`'s hook entries are the flat `{"command": ...}` shape, with no matcher.
 

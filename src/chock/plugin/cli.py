@@ -10,6 +10,7 @@ from pathlib import Path
 from chock.compile.compiler import _load_manifest
 from chock.manifest import CANONICAL_MANIFEST
 from chock.output import error
+from chock.plugin.antigravity import antigravity_plugin_differences, build_antigravity_plugin
 from chock.plugin.build import (
     NAMESPACE,
     PluginNameError,
@@ -22,11 +23,13 @@ from chock.plugin.codex import build_codex_plugin, codex_plugin_differences
 from chock.plugin.copilot import build_copilot_plugin, copilot_plugin_differences
 from chock.plugin.cursor import build_cursor_plugin, cursor_plugin_differences
 from chock.plugin.devin import build_devin_plugin, devin_plugin_differences
+from chock.plugin.goose import build_goose_plugin, goose_plugin_differences
+from chock.plugin.grok import build_grok_plugin, grok_plugin_differences
 from chock.scaffold.recompile import discover_policy_dirs
 
-FORMATS = ("agent-plugins", "claude", "copilot", "cursor", "codex", "devin")
+FORMATS = ("agent-plugins", "claude", "copilot", "cursor", "codex", "devin", "goose", "grok", "antigravity")
 
-HOOK_FORMATS = frozenset({"claude", "copilot", "cursor", "codex", "devin"})
+HOOK_FORMATS = frozenset({"claude", "copilot", "cursor", "codex", "devin", "goose", "grok", "antigravity"})
 
 HOOK_EMITTERS = {
     "claude": (claude_plugin_differences, build_claude_plugin),
@@ -34,6 +37,9 @@ HOOK_EMITTERS = {
     "cursor": (cursor_plugin_differences, build_cursor_plugin),
     "codex": (codex_plugin_differences, build_codex_plugin),
     "devin": (devin_plugin_differences, build_devin_plugin),
+    "goose": (goose_plugin_differences, build_goose_plugin),
+    "grok": (grok_plugin_differences, build_grok_plugin),
+    "antigravity": (antigravity_plugin_differences, build_antigravity_plugin),
 }
 
 
@@ -225,6 +231,16 @@ def main(argv: list[str] | None = None) -> int:
         print("  .codex-plugin/plugin.json + hooks/ (PreToolUse per guard policy; Stop per gate)")
     if "devin" in formats:
         print("  .devin-plugin/plugin.json + hooks.json (PreToolUse per guard policy; Stop per gate; best-effort)")
+    if "goose" in formats:
+        print(
+            "  hooks/hooks.json, no manifest (PreToolUse per guard policy, on_failure: block; write and Stop per gate)"
+        )
+    if "grok" in formats:
+        print("  hooks/hooks.json, no manifest (PreToolUse per guard policy; fails open by the vendor's design)")
+    if "antigravity" in formats:
+        print(
+            "  plugin.json + hooks.json (PreToolUse per guard policy; Stop per gate; hooks name the folder by absolute path)"
+        )
     if HOOK_FORMATS.intersection(formats):
         print("  A policy with both a guard and a tool_use gate ships both, where the client runs the gate.")
     print("  Skills are advisory in any client. Repo-level enforcement still needs `chock sync`.")
