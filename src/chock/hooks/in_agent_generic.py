@@ -8,7 +8,10 @@ from typing import Any
 
 from chock import vendors
 from chock.emit import write_generated_json
+from chock.hooks.in_agent_toml import install_toml, installed_toml_ids
 from chock.hooks.runtime_vendor import runtime_rel, vendor_runtime
+
+_TOML = "toml"
 
 
 def load_config(path: Path) -> dict:
@@ -81,19 +84,29 @@ def _merge(settings: dict, fragment: dict) -> None:
 FRAGMENT_SURFACES = ("pre-tool-use", "stop")
 
 
-def _fragments(repo_root: Path, vendor: str) -> list[tuple[str, dict]]:
+def _fragments(repo_root: Path, vendor: str) -> list[tuple[str, Any]]:
     compiled = repo_root / ".chock" / "compiled"
     globs = [f"*/{surface}/{vendor}-hooks.json" for surface in FRAGMENT_SURFACES]
     globs += [f"*/pre-tool-use/{vendor}-write-hooks.json", f"*/pre-tool-use/{vendor}-tool-call-hooks.json"]
-    found: list[tuple[str, dict]] = []
+    found: list[tuple[str, Any]] = []
     for path in sorted(path for glob in globs for path in compiled.glob(glob)):
         try:
             fragment = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
-        if isinstance(fragment, dict):
+        if isinstance(fragment, dict) or (isinstance(fragment, list) and vendors.config_format(vendor) == _TOML):
             found.append((path.parent.parent.name, fragment))
     return found
+
+
+def _sync_runtime(repo_root: Path, vendor: str, *, wanted: bool) -> None:
+    """Vendor `vendor`'s runtime while a hook entry runs it; otherwise drop it."""
+    if wanted:
+        vendor_runtime(repo_root, vendor)
+        return
+    vendored = repo_root / runtime_rel(vendor)
+    if vendored.exists():
+        vendored.unlink()
 
 
 def install_generic(repo_root: Path, vendor: str, *, uninstall: bool = False) -> list[str]:
@@ -106,6 +119,10 @@ def install_generic(repo_root: Path, vendor: str, *, uninstall: bool = False) ->
     repo_root = Path(repo_root)
     marker = _marker(vendor)
     fragments = [] if uninstall else _fragments(repo_root, vendor)
+    if vendors.config_format(vendor) == _TOML:
+        installed = install_toml(repo_root, vendor, fragments)
+        _sync_runtime(repo_root, vendor, wanted=bool(installed))
+        return installed
     config_path = repo_root / vendors.config_path(vendor)
     settings = load_config(config_path)
     prior: dict[str, dict] = {}
@@ -113,9 +130,7 @@ def install_generic(repo_root: Path, vendor: str, *, uninstall: bool = False) ->
     _strip_ours(settings, marker)
 
     if not fragments:
-        vendored = repo_root / runtime_rel(vendor)
-        if vendored.exists():
-            vendored.unlink()
+        _sync_runtime(repo_root, vendor, wanted=False)
         if config_path.exists() and prior:
             if settings:
                 write_generated_json(config_path, settings)
@@ -134,6 +149,8 @@ def install_generic(repo_root: Path, vendor: str, *, uninstall: bool = False) ->
 def installed_generic_ids(repo_root: Path, vendor: str) -> set[str]:
     """Policy ids whose fragment entries are all present in `vendor`'s config file."""
     repo_root = Path(repo_root)
+    if vendors.config_format(vendor) == _TOML:
+        return installed_toml_ids(repo_root, vendor, _fragments(repo_root, vendor))
     marker = _marker(vendor)
     config_path = repo_root / vendors.config_path(vendor)
     if not config_path.exists():

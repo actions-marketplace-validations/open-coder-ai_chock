@@ -63,10 +63,16 @@
     {
       "kind": "client",
       "clients": [
-        "copilot",
         "devin"
       ],
       "says": "This client names no file-write tool a hook can match, so a gate judges what a turn wrote only at turn end; the write itself is not held."
+    },
+    {
+      "kind": "client",
+      "clients": [
+        "copilot"
+      ],
+      "says": "A gate judges the write before it lands in Copilot CLI (witnessed 2026-10-11, CLI 1.0.94 on Windows); in VS Code agent mode that is unmeasured."
     },
     {
       "kind": "client",
@@ -77,9 +83,7 @@
     },
     {
       "kind": "client",
-      "clients": [
-        "cursor"
-      ],
+      "clients": [],
       "says": "Untested: chock has not witnessed an install in this client. Its steps, its hooks and the plugin version string (<bundle.version>+<digest12>) are unmeasured there."
     }
   ]

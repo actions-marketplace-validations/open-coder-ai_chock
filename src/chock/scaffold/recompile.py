@@ -13,6 +13,7 @@ from chock.compile.compiler import _load_manifest, compile_policy
 from chock.compile.levels import DISABLED, Grade
 from chock.config import agents_from_config, guidance_mcp_enabled, load_config, policy_status
 from chock.emit import write_generated_json
+from chock.hooks import sync_notes
 from chock.hooks.in_agent_install import (
     WIRED_VENDORS,
     agent_hooks_rel,
@@ -144,6 +145,8 @@ def _install_vendors(repo_root: Path, wired: tuple[str, ...]) -> list[str]:
         else:
             if installed:
                 print(f"Registered {len(installed)} {install_label(vendor)}")
+                for line in sync_notes.notes(vendor):
+                    print(line)
                 if hint := vendors.trust_hint(vendor):
                     # Codex skips an untrusted project hook without a word: wired is not live.
                     print(f"  ACTION NEEDED ({vendor}): hooks are not live until trusted -- {hint}")

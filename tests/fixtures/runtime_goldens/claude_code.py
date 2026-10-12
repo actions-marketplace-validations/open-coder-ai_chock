@@ -29,6 +29,7 @@ from pathlib import Path as _chock_Path
 from pathlib import PurePosixPath as _chock_PurePosixPath, PureWindowsPath as _chock_PureWindowsPath
 import traceback
 import warnings as _warnings
+import zlib as _zlib
 
 # ------------------------------------------------------------------------------
 # contract (agentseam 0.3.5)
@@ -235,11 +236,31 @@ OBSERVED_MARKERS = (
     "effort",
 )
 
+_MCP_PREFIX = "mcp_"
+
+_CLAUDE_MCP_PREFIX = "mcp__"
+
 def looks_like_claude_code(raw):
     """True when the payload carries a field only Claude Code has been seen to send."""
     return isinstance(raw, dict) and any(marker in raw for marker in OBSERVED_MARKERS)
 
-PROBES = {"looks_like_claude_code": looks_like_claude_code}
+def names_a_single_underscore_mcp_tool(raw):
+    """True when tool_name is an MCP tool ID in a spelling Claude Code never sends."""
+    name = raw.get("tool_name") if isinstance(raw, dict) else None
+    return isinstance(name, str) and name.startswith(_MCP_PREFIX) and not name.startswith(_CLAUDE_MCP_PREFIX)
+
+def event_keys_agree(raw):
+    """True when hookEventName names hook_event_name's event: the same text, or Grok Build's snake_case twin."""
+    snake, pascal = (raw.get("hookEventName"), raw.get("hook_event_name")) if isinstance(raw, dict) else (None, None)
+    if not isinstance(pascal, str) or not isinstance(snake, str):
+        return False
+    return snake == pascal or (snake.islower() and snake.replace("_", "") == pascal.lower())
+
+PROBES = {
+    "looks_like_claude_code": looks_like_claude_code,
+    "names_a_single_underscore_mcp_tool": names_a_single_underscore_mcp_tool,
+    "event_keys_agree": event_keys_agree,
+}
 
 UNREADABLE_NAME = ""
 
@@ -265,12 +286,22 @@ def _rejected_by_markers(c, raw):
     for marker in c.get("reject_markers", ()):
         if marker in raw:
             return True
+    for key, values in c.get("reject_values", {}).items():
+        if key in raw and raw[key] in values:
+            return True
     for probe, markers in c.get("reject_markers_unless_probe", {}).items():
         if any(marker in raw for marker in markers) and not PROBES[probe](raw):
             return True
     return any(PROBES[probe](raw) for probe in c.get("reject_probes", ()))
 
+def _accepted_by_values(c, raw):
+    """True unless the entry names accepted values and the payload carries none of them."""
+    values = c.get("accept_values")
+    return not values or any(key in raw and raw[key] in allowed for key, allowed in values.items())
+
 def _accepted_by_markers(c, raw, name):
+    if not _accepted_by_values(c, raw):
+        return False
     accept = c.get("accept_markers", ())
     if not accept or any(marker in raw for marker in accept):
         return True
@@ -309,12 +340,25 @@ def _segment(node, part):
         return items[i] if isinstance(items, (list, tuple)) and len(items) > i else None
     return node.get(part) if isinstance(node, dict) else None
 
+def _list_at(node, path):
+    """The list under `path`, decoding the JSON text Cline sends in a list's place."""
+    items = _walk(node, path)
+    if isinstance(items, str) and items.lstrip()[:1] == "[":
+        try:
+            items = _json.loads(items)
+        except (ValueError, RecursionError):
+            return None
+    return items if isinstance(items, (list, tuple)) else None
+
 def _walk(node, path):
-    """A dotted path off `node`; `a[].b` joins `b` over `a`'s dict items, `a[0]` indexes."""
+    """A dotted path off `node`; `a[].b` joins `b` over `a`'s dict items, `a[]` its strings, `a[0]` indexes."""
+    if path.endswith("[]"):
+        joined = "\n".join(item for item in _list_at(node, path[:-2]) or () if isinstance(item, str))
+        return joined or None
     if "[]." in path:
         head, sub = path.split("[].", 1)
-        items = _walk(node, head)
-        if not isinstance(items, (list, tuple)):
+        items = _list_at(node, head)
+        if items is None:
             return None
         joined = "\n".join(str(item.get(sub, "")) for item in items if isinstance(item, dict))
         return joined or None
@@ -344,7 +388,7 @@ def _tool_input_raw(cfg, raw):
     if not isinstance(raw, dict):
         return None
     for key in cfg["fields"].get("tool_input", ("tool_input",)):
-        value = raw.get(key)
+        value = _walk(raw, key)
         if value is not None:
             return value
     return None
@@ -566,6 +610,8 @@ def hj_respond(cfg, decision, event, wire=None):
         return "", 0
     if gate["grammar"] == "G2":
         return _g2(v, gate, decision, name)
+    if gate["grammar"] == "G7":
+        return _g7(v, decision, wire)
     return _g1(v, gate, decision, wire, name)
 
 _WINDOWS_KEYS = ("commandWindows", "windows")
@@ -581,16 +627,25 @@ def _hook_dict(cfg, command):
             entry[key] = value
     return entry
 
+def _flat_list_rule(hook_entry, ev, name, command, matcher):
+    """One `[[hooks]]` rule, under the vendor's own key names where `rule_keys` renames them."""
+    rule = {"event": name, "command": command}
+    if hook_entry["matcher"] and ev in _MATCHER_EVENTS:
+        matcher = matcher or hook_entry.get("default_match")
+        if matcher:
+            rule["matcher"] = matcher
+    if "rule_name_prefix" in hook_entry:
+        # Vibe dedupes [[hooks]] by name across files; the command's checksum keeps two owners' rules apart.
+        rule["name"] = "%s%s-%08x" % (hook_entry["rule_name_prefix"], name, _zlib.crc32(command.encode("utf-8")))
+    keys = hook_entry.get("rule_keys", {})
+    return {keys.get(key, key): value for key, value in rule.items()}
+
 def _flat_list_wrapper(hook_entry, reverse, canonical_events, command, matcher):
     rules = []
     for ev in canonical_events:
         name = reverse.get(ev)
-        if not name:
-            continue
-        rule = {"event": name, "command": command}
-        if matcher and hook_entry["matcher"] and ev in _MATCHER_EVENTS:
-            rule["matcher"] = matcher
-        rules.append(rule)
+        if name:
+            rules.append(_flat_list_rule(hook_entry, ev, name, command, matcher))
     return rules
 
 def _cursor_wrapper(cfg, reverse, canonical_events, command, *, fail_closed):
@@ -618,6 +673,10 @@ def _flat_entries_wrapper(hook_entry, reverse, canonical_events, command):
         if extra:
             hooks.setdefault(extra, []).append({"command": command})
     return {"hooks": hooks}
+
+def _hook_dir_wrapper(reverse, canonical_events, command):
+    """File name -> command: one executable per event, named exactly as the wire event (cline)."""
+    return {reverse[ev]: command for ev in canonical_events if reverse.get(ev)}
 
 def _default_wrapper(cfg, reverse, canonical_events, command, matcher):
     hook_entry = cfg["hook_entry"]
@@ -649,6 +708,8 @@ def hook_entry_config(cfg, canonical_events, command, matcher=None, *, fail_clos
         return _cursor_wrapper(cfg, reverse, canonical_events, command, fail_closed=fail_closed)
     if wrapper == "flat_entries":
         return _flat_entries_wrapper(hook_entry, reverse, canonical_events, command)
+    if wrapper == "hook_dir":
+        return _hook_dir_wrapper(reverse, canonical_events, command)
     return _default_wrapper(cfg, reverse, canonical_events, command, matcher)
 
 
@@ -657,7 +718,7 @@ def hook_entry_config(cfg, canonical_events, command, matcher=None, *, fail_clos
 
 AGENT = "claude_code"
 
-VENDOR = {'agent': 'claude_code', 'claims': {'client_types': (None, 'claude_code'), 'event_key': ('hook_event_name',), 'mode': 'marker', 'notes': 'prompt_id rejects only when looks_like_claude_code(raw) is also false; a real Claude Code payload may carry prompt_id and must still be accepted (matrix-notes.json: fixed 2026-08-27).', 'reject_markers': ('turn_id', 'project_path', 'timestamp'), 'reject_markers_unless_probe': {'looks_like_claude_code': ('prompt_id',)}}, 'config_format': 'json', 'config_path': '.claude/settings.json', 'display': 'Claude Code', 'events': {'FileChanged': 'file_changed', 'InstructionsLoaded': 'instructions_loaded', 'PostToolUse': 'post_tool', 'PostToolUseFailure': 'tool_failure', 'PreCompact': 'pre_compact', 'PreToolUse': 'pre_tool', 'SessionEnd': 'session_end', 'SessionStart': 'session_start', 'Stop': 'stop', 'SubagentStart': 'subagent_start', 'SubagentStop': 'subagent_stop', 'UserPromptSubmit': 'prompt_submit'}, 'evidence': {'claims': {'basis': 'live-run', 'date': '2026-09-07', 'test': 'tests/test_examples.py::test_each_payload_is_claimed_by_its_own_adapter'}, 'config_path': {'basis': 'live-run', 'date': '2026-09-07', 'test': 'tests/test_vendor_config.py::test_config_path_agrees_with_matrix'}, 'events': {'basis': 'live-run', 'date': '2026-09-07', 'test': 'tests/test_examples.py::test_each_payload_parses_to_the_event_it_is_filed_under'}, 'family': {'basis': 'live-run', 'date': '2026-09-07', 'test': 'tests/test_golden_fixtures.py::test_wire_output_matches_the_frozen_fixture'}, 'fields': {'basis': 'live-run', 'date': '2026-09-07', 'test': 'tests/test_vendor_config.py::test_entries_match_recount'}, 'hook_entry': {'basis': 'live-run', 'date': '2026-09-07', 'test': 'tests/test_golden_fixtures.py::test_hook_config_matches_the_frozen_fixture_on_both_matcher_paths'}, 'repo_root_token': {'basis': 'vendor-docs', 'date': '2026-09-01', 'test': 'tests/test_vendor_config.py::test_repo_root_token_is_recorded_only_where_primary_sourced'}, 'tools': {'basis': 'vendor-docs', 'date': '2026-09-27', 'test': 'tests/test_adapter_claude_code.py::test_powershell_is_a_shell_tool_and_its_command_is_parsed'}, 'verdicts': {'basis': 'live-run', 'date': '2026-09-07', 'test': 'tests/test_golden_fixtures.py::test_wire_output_matches_the_frozen_fixture'}}, 'family': 'hook_json', 'fields': {'command': ('tool_input.command',), 'content': ('tool_input.content', 'tool_input.new_string', 'tool_input.new_source', 'content', 'tool_input.edits[].new_string'), 'cwd': ('cwd',), 'output': ('tool_output',), 'path': ('tool_input.file_path', 'tool_input.path', 'tool_input.notebook_path', 'file_path'), 'prompt': ('prompt',), 'session_id': ('session_id',), 'tool': ('tool_name',), 'tool_use_id': ('tool_use_id',)}, 'hook_entry': {'matcher': True, 'wrapper': 'hooks_map'}, 'needs_trust': False, 'repo_root_token': '${CLAUDE_PROJECT_DIR}', 'tools': {'shell': ('Bash', 'PowerShell'), 'write': ('Write', 'Edit', 'MultiEdit', 'NotebookEdit')}, 'verdicts': {'answer_events': ('PreToolUse', 'Stop', 'UserPromptSubmit'), 'bare_allow': 'silent', 'context_events': ('SessionStart', 'UserPromptSubmit'), 'context_source': 'context', 'degrade_notes': {'escalate': 'confirmation requested; this event cannot prompt, so it blocks', 'transform': 'input rewrite requested; this event cannot modify input, so it blocks'}, 'echo': 'reverse_map', 'gates': {'PreToolUse': {'grammar': 'G2', 'honours_escalate': True, 'honours_transform': True}, 'Stop': {'grammar': 'G1', 'honours_escalate': False, 'honours_transform': False}, 'UserPromptSubmit': {'grammar': 'G1', 'honours_escalate': False, 'honours_transform': False}}, 'note_style': 'suffix', 'reason_defaults': {'deny_gate': 'blocked', 'escalate_gate': 'confirmation required'}, 'transform_grammar': 'hook_specific_updated_input', 'vocabulary': ('allow', 'ask', 'block', 'deny'), 'vocabulary_basis': 'verified', 'words': {'block': 'block', 'deny': 'deny', 'escalate': 'ask', 'transform': 'allow', 'vouch': 'allow'}}}
+VENDOR = {'agent': 'claude_code', 'claims': {'client_types': (None, 'claude_code'), 'event_key': ('hook_event_name',), 'mode': 'marker', 'notes': "prompt_id rejects only when looks_like_claude_code(raw) is also false; a real Claude Code payload may carry prompt_id and must still be accepted (matrix-notes.json: fixed 2026-08-27). A value Claude Code never sends beats every marker key, looks_like_claude_code's included (value-based detection, D1): permission_mode values off, spec, auto-low, auto-medium and auto-high are Factory Droid's (docs.factory.com/harness/hooks, read 2026-10-11); tool_name values fs_read, fsRead, fs_write, fsWrite, execute_bash, execute_cmd and use_aws (kiro.dev/docs/reference/built-in-tools, updated 2026-10-10), and an MCP tool spelled mcp_<server>_<tool> rather than Claude's mcp__<server>__<tool> (kiro.dev/docs/hooks/types, updated 2026-10-10), are Kiro's. Kiro's V3 primary names (read, write, shell) and its tool-less events carry nothing Claude Code does not, so those still read as claude_code. factory_droid claims Droid's payloads on those same permission_mode values (accept_values, D2a); Kiro has no adapter, so its separable payloads detect as no agent rather than as claude_code.", 'reject_markers': ('turn_id', 'project_path', 'timestamp'), 'reject_markers_unless_probe': {'looks_like_claude_code': ('prompt_id',)}, 'reject_probes': ('names_a_single_underscore_mcp_tool',), 'reject_values': {'permission_mode': ('off', 'spec', 'auto-low', 'auto-medium', 'auto-high'), 'tool_name': ('fs_read', 'fsRead', 'fs_write', 'fsWrite', 'execute_bash', 'execute_cmd', 'use_aws')}}, 'config_format': 'json', 'config_path': '.claude/settings.json', 'display': 'Claude Code', 'events': {'FileChanged': 'file_changed', 'InstructionsLoaded': 'instructions_loaded', 'PostToolUse': 'post_tool', 'PostToolUseFailure': 'tool_failure', 'PreCompact': 'pre_compact', 'PreToolUse': 'pre_tool', 'SessionEnd': 'session_end', 'SessionStart': 'session_start', 'Stop': 'stop', 'SubagentStart': 'subagent_start', 'SubagentStop': 'subagent_stop', 'UserPromptSubmit': 'prompt_submit'}, 'evidence': {'claims': {'basis': 'live-run', 'date': '2026-09-07', 'test': 'tests/test_examples.py::test_each_payload_is_claimed_by_its_own_adapter'}, 'config_path': {'basis': 'live-run', 'date': '2026-09-07', 'test': 'tests/test_vendor_config.py::test_config_path_agrees_with_matrix'}, 'events': {'basis': 'live-run', 'date': '2026-09-07', 'test': 'tests/test_examples.py::test_each_payload_parses_to_the_event_it_is_filed_under'}, 'family': {'basis': 'live-run', 'date': '2026-09-07', 'test': 'tests/test_golden_fixtures.py::test_wire_output_matches_the_frozen_fixture'}, 'fields': {'basis': 'live-run', 'date': '2026-09-07', 'test': 'tests/test_vendor_config.py::test_entries_match_recount'}, 'hook_entry': {'basis': 'live-run', 'date': '2026-09-07', 'test': 'tests/test_golden_fixtures.py::test_hook_config_matches_the_frozen_fixture_on_both_matcher_paths'}, 'repo_root_token': {'basis': 'vendor-docs', 'date': '2026-09-01', 'test': 'tests/test_vendor_config.py::test_repo_root_token_is_recorded_only_where_primary_sourced'}, 'tools': {'basis': 'vendor-docs', 'date': '2026-09-27', 'test': 'tests/test_adapter_claude_code.py::test_powershell_is_a_shell_tool_and_its_command_is_parsed'}, 'verdicts': {'basis': 'live-run', 'date': '2026-09-07', 'test': 'tests/test_golden_fixtures.py::test_wire_output_matches_the_frozen_fixture'}}, 'family': 'hook_json', 'fields': {'command': ('tool_input.command',), 'content': ('tool_input.content', 'tool_input.new_string', 'tool_input.new_source', 'content', 'tool_input.edits[].new_string'), 'cwd': ('cwd',), 'output': ('tool_output',), 'path': ('tool_input.file_path', 'tool_input.path', 'tool_input.notebook_path', 'file_path'), 'prompt': ('prompt',), 'session_id': ('session_id',), 'tool': ('tool_name',), 'tool_use_id': ('tool_use_id',)}, 'hook_entry': {'matcher': True, 'wrapper': 'hooks_map'}, 'needs_trust': False, 'repo_root_token': '${CLAUDE_PROJECT_DIR}', 'tools': {'shell': ('Bash', 'PowerShell'), 'write': ('Write', 'Edit', 'MultiEdit', 'NotebookEdit')}, 'verdicts': {'answer_events': ('PreToolUse', 'Stop', 'UserPromptSubmit'), 'bare_allow': 'silent', 'context_events': ('SessionStart', 'UserPromptSubmit'), 'context_source': 'context', 'degrade_notes': {'escalate': 'confirmation requested; this event cannot prompt, so it blocks', 'transform': 'input rewrite requested; this event cannot modify input, so it blocks'}, 'echo': 'reverse_map', 'gates': {'PreToolUse': {'grammar': 'G2', 'honours_escalate': True, 'honours_transform': True}, 'Stop': {'grammar': 'G1', 'honours_escalate': False, 'honours_transform': False}, 'UserPromptSubmit': {'grammar': 'G1', 'honours_escalate': False, 'honours_transform': False}}, 'note_style': 'suffix', 'reason_defaults': {'deny_gate': 'blocked', 'escalate_gate': 'confirmation required'}, 'transform_grammar': 'hook_specific_updated_input', 'vocabulary': ('allow', 'ask', 'block', 'deny'), 'vocabulary_basis': 'verified', 'words': {'block': 'block', 'deny': 'deny', 'escalate': 'ask', 'transform': 'allow', 'vouch': 'allow'}}}
 
 
 def claims(raw):

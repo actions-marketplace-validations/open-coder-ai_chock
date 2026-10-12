@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -33,7 +34,8 @@ def _repo(tmp_path: Path) -> Path:
 
 
 def _config(repo: Path, vendor: str) -> dict:
-    return json.loads((repo / vendors.config_path(vendor)).read_text(encoding="utf-8"))
+    text = (repo / vendors.config_path(vendor)).read_text(encoding="utf-8")
+    return tomllib.loads(text) if vendors.config_format(vendor) == "toml" else json.loads(text)
 
 
 def _commands(node) -> list[str]:

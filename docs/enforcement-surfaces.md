@@ -166,21 +166,25 @@ Which surfaces each agent supports today (from `src/chock/compile/surfaces.py`):
 | Tabnine | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
 | VS Code | ✅ | ✅ | ✅ | — | ✅ | — | ✅ |
 | Antigravity CLI | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
+| Factory Droid | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
+| goose | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
+| OpenHands | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
+| Mistral Vibe | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
+| Cline | ✅ | ✅ | ✅ | — | — | — | — |
 
-In-agent membership derives from agentseam's matrix: every adapted vendor whose row can block
-a pre-tool call from a repo-level JSON hook config gets `pre-tool-use` (Copilot CLI and VS Code:
-`agent-hooks`, chock's owned file). `stop` is derived the same way from the **turn-end** row, which
-is a different question with a different answer: Grok and Windsurf can observe a finished turn
-but not refuse one, so they are `detect` and get no column mark. Cursor cannot hold a turn either,
-but its `stop` hook hands a refusal back to the agent as a `followup_message` (witnessed live on
-3.21.18), which is `best-effort` and worth a mark: the agent is sent back to what the turn left
-behind rather than the user being told after the fact. Copilot and VS Code refuse one too: their
-`Stop` key in chock's own file was witnessed firing in VS Code agent mode (2026-09-28), and a block
-answer made the agent carry on with the turn. It is registered under `Stop` alone, since `agentStop` fires
-beside it and would run the gate twice; which of the top-level or nested block answers Copilot reads is
-not isolated, so chock writes both. Junie and Kimi Code block only via home-level configs (Kimi
-Code's in TOML), outside what `chock sync --repo` may write; Aider and Replit cannot block. A
-checkmark is a wiring claim: new-vendor cells stay `witnessed: false` until a real client run is recorded.
+In-agent membership derives from agentseam's matrix: every adapted vendor whose row can block a pre-tool call
+from a repo-level JSON or TOML hook config gets `pre-tool-use` (Copilot CLI and VS Code: `agent-hooks`, chock's
+owned file). `stop` is derived the same way from the **turn-end** row, which is a different question with a
+different answer: Grok and Windsurf can observe a finished turn but not refuse one, so they are `detect` and get
+no column mark. Cursor cannot hold a turn either, but its `stop` hook hands a refusal back to the agent as a
+`followup_message` (witnessed live on 3.21.18), which is `best-effort` and worth a mark: the agent is sent back
+to what the turn left behind rather than the user being told after the fact. Copilot and VS Code refuse one too:
+their `Stop` key in chock's own file was witnessed firing in VS Code agent mode (2026-09-28), and a block answer
+made the agent carry on with the turn. It is registered under `Stop` alone, since `agentStop` fires beside it
+and would run the gate twice; which of the top-level or nested block answers Copilot reads is not isolated, so
+chock writes both. Junie and Kimi Code block only via home configs, outside what `chock sync --repo` may write;
+Cline's per-event hooks directory is not wired yet; Aider and Replit cannot block. A checkmark is a wiring
+claim: new-vendor cells stay `witnessed: false` until a real client run is recorded; sync calls them "Untested".
 
 ## Coverage levels
 
@@ -190,22 +194,20 @@ evidence cap that bounds every grade -- is on its own page: **[Coverage Levels](
 
 ## How a policy picks its surfaces
 
-A hook that must stop a command targets `git-hook` + `ci-gate` (the universal floor) and, where
-available, `pre-tool-use` + `managed-setting`. A hook whose `on:` includes `tool_use` is compiled to
-the `pre-tool-use` surface on agents that support it (nine of them, Claude Code and Cursor
-among them; Copilot
-CLI and VS Code get the same guard via `agent-hooks`, and a content gate's write check as a `PreToolUse` entry over `Edit|Write` there). A hook whose `on:` includes
-`tool_call` (a `content_regex` or `script` gate with `params.tools`, globs over tool names such as
-`mcp__Firecrawl__*` or `WebFetch`) gates PreToolUse for any tool by name, on the five agents whose
-vendor facts record a tool vocabulary (Claude Code, Codex CLI, Cursor, Gemini CLI, and Copilot
-via `agent-hooks`); the others get no `tool_call` entry and are credited nothing for it. A gate's
-`outside_repo` globs let its PreToolUse write check see declared files outside the repository (the
-turn-end check cannot). A `script` gate on `tool_call` also keeps a local per-session tool-call log
-under `.chock/state/` that its script can read; see
-[`spec/session-log.md`](../spec/session-log.md). A best-practice rule with
-no deterministic check compiles only to `ambient-rule`. The compiler always pairs a control with the
-**strongest available backstop** — e.g. a git hook plus a CI gate, because a git hook alone can be
-skipped with `--no-verify`.
+A hook that must stop a command targets `git-hook` + `ci-gate` (the universal floor) and, where available,
+`pre-tool-use` + `managed-setting`. A hook whose `on:` includes `tool_use` is compiled to the `pre-tool-use`
+surface on agents that support it (thirteen of them, Claude Code and Cursor among them; Copilot CLI and VS Code
+get the same guard via `agent-hooks`, and a content gate's write check as a `PreToolUse` entry over `Edit|Write`
+there). A hook whose `on:` includes `tool_call` (a `content_regex` or `script` gate with `params.tools`, globs
+over tool names such as `mcp__Firecrawl__*` or `WebFetch`) gates PreToolUse for any tool by name, on the nine
+agents whose vendor facts record a tool vocabulary (Claude Code, Codex CLI, Cursor, Gemini CLI, Factory Droid,
+goose, Mistral Vibe, OpenHands, and Copilot via `agent-hooks`); the others get no `tool_call` entry and are
+credited nothing for it. A gate's `outside_repo` globs let its PreToolUse write check see declared files outside
+the repository (the turn-end check cannot). A `script` gate on `tool_call` also keeps a local per-session
+tool-call log under `.chock/state/` that its script can read; see
+[`spec/session-log.md`](../spec/session-log.md). A best-practice rule with no deterministic check compiles only
+to `ambient-rule`. The compiler always pairs a control with the **strongest available backstop** — e.g. a git
+hook plus a CI gate, because a git hook alone can be skipped with `--no-verify`.
 
 ## What happens when the guard cannot decide
 

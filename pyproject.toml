@@ -58,9 +58,10 @@ dependencies = [
     # Build-time only: chock's plugin packaging consumes agentseam's per-agent layout
     # data (packaging.plan/supports/plugin_root/executable_ref) to render plugin bundles.
     # It never ships to an adopter repo -- the vendored PreToolUse/SessionStart runners
-    # stay self-contained stdlib-only files, unaffected by this dependency. Pinned exact
-    # per plan/spine-a/contract.md: the wave boundary is the published PyPI artifact.
-    "agentseam==0.3.5",
+    # stay self-contained stdlib-only files, unaffected by this dependency. Pre-1.0 it is
+    # pinned to an agentseam main commit (its newest adapters are unreleased); release week
+    # swaps this for the released version, since PyPI refuses a direct reference.
+    "agentseam @ git+https://github.com/open-coder-ai/agentseam@bebbfa6f85cc6512238ecad5114c00d99952f664",
 ]
 
 [project.optional-dependencies]

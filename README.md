@@ -150,6 +150,11 @@ Full nine-surface matrix and per-agent caveats:
 | **Grok** | native pre-tool-use hook | `.grok/hooks/agentseam.json` |
 | **Tabnine** | native pre-tool-use hook | `.tabnine/agent/settings.json` |
 | **Antigravity CLI** | native pre-tool-use hook | `.agents/hooks.json` |
+| **Factory Droid** | native pre-tool-use hook | `.factory/hooks.json` |
+| **goose** | native pre-tool-use hook | `.agents/plugins/chock/hooks/hooks.json` |
+| **OpenHands** | native pre-tool-use hook | `.openhands/hooks.json` |
+| **Mistral Vibe** | native pre-tool-use hook | `.vibe/hooks.toml` |
+| **Cline** | git hook + CI gate only — one hook file per event; chock's multi-policy dispatch for it is not built yet | — |
 | **Aider** | git hook + CI gate only — no native hook API yet | — |
 | **Junie** | git hook + CI gate only — home-anchored config, outside chock's repo-scoped install | `~/.junie/config.json` |
 | **Kimi Code** | git hook + CI gate only — home-anchored config, outside chock's repo-scoped install | `~/.kimi-code/config.toml` |

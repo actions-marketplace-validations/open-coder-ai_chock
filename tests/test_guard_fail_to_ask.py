@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from agentseam import contract as _contract
+from runtime_payloads import DENY_ON_THE_WIRE, PAYLOADS
 
 from chock import evidence
 from chock.gate import budget, guard_runner, runtime_bundle
@@ -32,92 +33,6 @@ def make_guard(tmp_path: Path, name: str, body: str) -> Path:
     guard.write_text(f"#!/usr/bin/env bash\n{body}\n", encoding="utf-8", newline="\n")
     guard.chmod(guard.stat().st_mode | stat.S_IEXEC)
     return guard
-
-
-PAYLOADS = {
-    "claude_code": lambda c: {
-        "hook_event_name": "PreToolUse",
-        "tool_name": "Bash",
-        "tool_input": {"command": c},
-        "session_id": "s",
-        "transcript_path": "/t",
-        "permission_mode": "default",
-    },
-    "vscode_copilot": lambda c: {
-        "hook_event_name": "PreToolUse",
-        "timestamp": "2026-08-31T00:00:00Z",
-        "tool_name": "Bash",
-        "tool_input": {"command": c},
-        "tool_use_id": "1",
-    },
-    "cursor": lambda c: {
-        "hook_event_name": "beforeShellExecution",
-        "conversation_id": "a",
-        "generation_id": "b",
-        "cursor_version": "3.17.8",
-        "workspace_roots": ["/x"],
-        "command": c,
-        "cwd": "/x",
-        "sandbox": False,
-    },
-    "codex_cli": lambda c: {
-        "hook_event_name": "PreToolUse",
-        "turn_id": "t1",
-        "tool_name": "Bash",
-        "tool_input": {"command": c},
-    },
-    "antigravity": lambda c: {
-        "toolCall": {"name": "run_command", "args": {"CommandLine": c, "Cwd": "/x"}},
-        "conversationId": "c1",
-        "stepIdx": 1,
-        "workspacePaths": ["/x"],
-    },
-    "devin": lambda c: {
-        "hook_event_name": "PreToolUse",
-        "prompt_id": "p1",
-        "tool_name": "Bash",
-        "tool_input": {"command": c},
-        "session_id": "s",
-    },
-    "gemini_cli": lambda c: {
-        "hook_event_name": "BeforeTool",
-        "tool_name": "run_shell_command",
-        "tool_input": {"command": c},
-        "session_id": "s",
-    },
-    "grok": lambda c: {
-        "hookEventName": "PreToolUse",
-        "toolName": "Bash",
-        "toolInput": {"command": c},
-        "sessionId": "s",
-    },
-    "tabnine": lambda c: {
-        "hook_event_name": "BeforeTool",
-        "timestamp": "2026-08-31T00:00:00Z",
-        "tool_name": "shell",
-        "tool_input": {"command": c},
-    },
-    "windsurf": lambda c: {
-        "trajectory_id": "t1",
-        "tool_info": {"command_line": c},
-        "cwd": "/x",
-    },
-}
-
-#: The deny each vendor's wire actually carries, witnessed by the deny-guard fixture below:
-#: `block` is the devin-family spelling, `exit-2` windsurf's wordless exit-code grammar (G5).
-DENY_ON_THE_WIRE = {
-    "claude_code": "deny",
-    "codex_cli": "deny",
-    "cursor": "deny",
-    "vscode_copilot": "deny",
-    "antigravity": "deny",
-    "devin": "block",
-    "gemini_cli": "deny",
-    "grok": "deny",
-    "tabnine": "deny",
-    "windsurf": "exit-2",
-}
 
 
 def run(runtimes: dict[str, Path], agent: str, guard: Path, command: str) -> subprocess.CompletedProcess:

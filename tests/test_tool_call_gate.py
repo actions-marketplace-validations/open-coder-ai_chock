@@ -13,7 +13,17 @@ from chock.compile.emitters.in_agent_tool_call import glob_matcher
 from chock.hooks.in_agent_install import WIRED_VENDORS, install_hooks, installed_policy_ids
 from chock.validation.loading import schema_validator
 
-TOOL_CALL_VENDORS = {"claude_code", "codex_cli", "cursor", "gemini_cli", "vscode_copilot"}
+TOOL_CALL_VENDORS = {
+    "claude_code",
+    "codex_cli",
+    "cursor",
+    "factory_droid",
+    "gemini_cli",
+    "goose",
+    "mistral_vibe",
+    "openhands",
+    "vscode_copilot",
+}
 NO_EVIDENCE = {"antigravity", "devin", "grok", "tabnine", "windsurf"}
 
 

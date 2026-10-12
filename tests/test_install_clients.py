@@ -24,8 +24,8 @@ TREE = {
     "cursor": ("chock-guardrails", ".cursor-plugin/plugin.json", []),
     "devin": ("chock-guardrails", ".devin-plugin/plugin.json", []),
 }
-# Clients chock has not witnessed an install in; Claude Code, Codex, Copilot and Devin are witnessed.
-UNWITNESSED = ("cursor",)
+# Clients chock has not witnessed an install in; every client is witnessed (Cursor: W-CUR, 2026-10-11).
+UNWITNESSED: tuple[str, ...] = ()
 BINARY = {"claude-code": "claude", "copilot": "copilot", "codex": "codex", "devin": "devin"}
 
 
@@ -128,7 +128,8 @@ def test_the_flag_overrides_the_selections_client_and_the_marker_records_it(cata
             "once its hooks are trusted in /hooks: refuses a matched shell command",
             "once its hooks are trusted in /hooks: blocks on an agent's file writes",
         ),
-        ("copilot", "refuses a matched shell command", "blocks at turn end only; the write itself is not judged"),
+        # Copilot CLI refused the write before it landed (org-plan witness/results/witness-copilot-2026-10-11.md).
+        ("copilot", "refuses a matched shell command", "blocks on an agent's file writes and at turn end"),
         (
             "devin",
             "best-effort, fails open: refuses a matched shell command",
@@ -157,7 +158,8 @@ def test_client_warnings_say_untested_for_every_unwitnessed_client(catalog, tmp_
     assert ("warning: Untested: chock has not witnessed an install" in out) == (client in UNWITNESSED)
     assert ("trust them in /hooks" in out) == (client == "codex")
     assert ("fails open: a hook that errors" in out) == (client == "devin")
-    assert ("only at turn end" in out) == (client in ("copilot", "devin"))
+    assert ("only at turn end" in out) == (client == "devin")
+    assert ("in VS Code agent mode that is unmeasured" in out) == (client == "copilot")
     assert ("Allow Local Plugin Imports" in out) == (client == "cursor")
 
 

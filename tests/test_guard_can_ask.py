@@ -21,6 +21,8 @@ CLEAN = "exit 0"
 
 #: The plan's table (org-plan plan/one-oh-gaps.md C1b): each vendor's value at its shell pre-tool event.
 PLANNED = {"claude_code": "1", "vscode_copilot": "1", "cursor": "1", "codex_cli": "0", "devin": "0"}
+#: E-ALL's agents: agentseam records `honours_escalate: false` at each one's pre-tool gate (bebbfa6).
+PLANNED.update(dict.fromkeys(("factory_droid", "goose", "mistral_vibe", "openhands"), "0"))
 
 _HOOK = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"}}
 _CURSOR = {"command": "ls", "cwd": ".", "conversation_id": "c", "workspace_roots": ["."]}
@@ -34,6 +36,10 @@ PAYLOADS = {
     "tabnine": ("BeforeTool", {**_HOOK, "hook_event_name": "BeforeTool"}),
     "vscode_copilot": ("PreToolUse", _HOOK),
     "windsurf": ("pre_run_command", {"agent_action_name": "pre_run_command", "tool_info": {"command_line": "ls"}}),
+    "factory_droid": ("PreToolUse", {**_HOOK, "tool_name": "Execute", "permission_mode": "auto-medium"}),
+    "goose": ("PreToolUse", {"event": "PreToolUse", "tool_name": "shell", "tool_input": {"command": "ls"}}),
+    "mistral_vibe": ("pre_tool", {**_HOOK, "hook_event_name": "pre_tool", "tool_name": "bash", "tool_call_id": "1"}),
+    "openhands": ("PreToolUse", {"event_type": "PreToolUse", "tool_name": "terminal", "tool_input": {"command": "ls"}}),
 }
 #: Cursor events beyond the shell one: the value follows the event that fired, not the agent.
 CURSOR_EVENTS = [
