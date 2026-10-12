@@ -45,6 +45,14 @@ def owned_subtrees(store: str) -> tuple[str, ...]:
     return tuple(data["owned_subtrees"])
 
 
+def layout(store: str) -> dict[str, Any] | None:
+    """chock's own record of `store`'s plugin layout, where agentseam records none yet; else None."""
+    path = _DATA / f"{store}.json"
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8")).get("layout")
+
+
 def _owned_candidates(out_dir: Path, sub: str) -> list[Path]:
     """Files an owned-subtree entry can name: everything under a directory, or itself.
 

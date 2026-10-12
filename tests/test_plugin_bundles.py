@@ -26,7 +26,7 @@ from bundle_fixtures import (
 from packaging_helpers import tree_bytes
 
 from chock.guardrails.plugin import PROTECT_ID
-from chock.plugin import bundle_build
+from chock.plugin import bundle_build, gate_package
 from chock.plugin.bundle_build import CLIENTS, MergeCollisionError, merged_files
 
 WRITE = {
@@ -45,7 +45,7 @@ MERGED_CLIENTS = sorted(CLIENTS)
 
 
 def test_every_client_merges_including_claude(tmp_path: Path) -> None:
-    assert MERGED_CLIENTS == ["claude", "codex", "copilot", "cursor", "devin"]
+    assert MERGED_CLIENTS == ["antigravity", "claude", "codex", "copilot", "cursor", "devin", "goose", "grok"]
     members = make_members(tmp_path)
     out = tmp_path / "dist"
     build_claude_tree(tmp_path, members, out)
@@ -133,7 +133,9 @@ def test_no_path_or_hook_command_collides_and_every_command_reaches_a_shipped_fi
     commands = hook_commands(json.loads(_hooks_file(out).read_text(encoding="utf-8")))
     targets = {re.search(r"--(?:guard|gate) \"?[^\s\"]*?(scripts/[^\s\"]+)", c).group(1) for c in commands}
     protect = f"scripts/{PROTECT_ID}"
-    expected = {f"scripts/{GATE_ID}/gate.json", f"scripts/{GUARD_ID}/{GUARD_ID}.py", f"{protect}/{PROTECT_ID}.py"}
+    expected = {f"scripts/{GUARD_ID}/{GUARD_ID}.py", f"{protect}/{PROTECT_ID}.py"}
+    if gate_package.gate_reaches(CLIENTS[client].agent):
+        expected.add(f"scripts/{GATE_ID}/gate.json")
     assert targets - {f"{protect}/gate.json"} == expected, "one target per member and the built-in, none shared"
     for command in commands:
         paths = re.findall(r"scripts/[\w./-]+", command)
@@ -143,6 +145,9 @@ def test_no_path_or_hook_command_collides_and_every_command_reaches_a_shipped_fi
 @pytest.mark.parametrize("client", MERGED_CLIENTS)
 def test_the_merged_manifest_is_the_bundles_own_and_states_each_member(tmp_path: Path, client: str) -> None:
     out, _ = _merged(tmp_path, client)
+    if CLIENTS[client].layout()[0] is None:
+        assert not list(out.rglob("plugin.json")), "a manifest-less format ships no manifest"
+        return
     manifest_path = next(p for p in out.rglob("plugin.json") if "skills" not in p.parts)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["name"] == BUNDLE_ID

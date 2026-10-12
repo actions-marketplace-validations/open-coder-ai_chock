@@ -1,0 +1,98 @@
+{
+  "files": [
+    "hooks/hooks.json",
+    "scripts/chock-guardrails-protect/chock-guardrails-protect-gate.py",
+    "scripts/chock-guardrails-protect/chock-guardrails-protect.py",
+    "scripts/chock-guardrails-protect/chock_guardrails_protect/__init__.py",
+    "scripts/chock-guardrails-protect/gate.json",
+    "scripts/chock-guardrails-protect/gate.py",
+    "scripts/chock-guardrails-protect/implementations/chock-guardrails-protect-gate.py",
+    "scripts/chock-guardrails-protect/implementations/chock-guardrails-protect.py",
+    "scripts/chock-guardrails-protect/implementations/chock_guardrails_protect/__init__.py",
+    "scripts/chock_bundle.json",
+    "scripts/chock_bundle.py",
+    "scripts/demo-shell-guard/demo-shell-guard.py",
+    "scripts/demo-shell-guard/tinyparse/__init__.py",
+    "scripts/demo-write-gate/gate.json",
+    "scripts/demo-write-gate/gate.py",
+    "scripts/goose.py",
+    "scripts/launch.sh",
+    "skills/customize-guardrails/SKILL.md",
+    "skills/demo-advice/SKILL.md",
+    "skills/demo-shell-guard/SKILL.md",
+    "skills/demo-write-gate/SKILL.md"
+  ],
+  "manifest": null,
+  "hooks": {
+    "hooks": {
+      "PreToolUse": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${PLUGIN_ROOT}/scripts/launch.sh\" \"${PLUGIN_ROOT}/scripts/chock_bundle.py\" --bundle demo-bundle --member demo-write-gate \"${PLUGIN_ROOT}/scripts/goose.py\" --gate \"${PLUGIN_ROOT}/scripts/demo-write-gate/gate.json\"",
+              "on_failure": "block",
+              "timeout": 45
+            }
+          ],
+          "matcher": "write|edit"
+        },
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${PLUGIN_ROOT}/scripts/launch.sh\" \"${PLUGIN_ROOT}/scripts/chock_bundle.py\" --bundle demo-bundle --member demo-shell-guard \"${PLUGIN_ROOT}/scripts/goose.py\" --guard \"${PLUGIN_ROOT}/scripts/demo-shell-guard/demo-shell-guard.py\"",
+              "on_failure": "block",
+              "timeout": 45
+            }
+          ],
+          "matcher": "shell"
+        },
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${PLUGIN_ROOT}/scripts/launch.sh\" \"${PLUGIN_ROOT}/scripts/goose.py\" --guard \"${PLUGIN_ROOT}/scripts/chock-guardrails-protect/chock-guardrails-protect.py\"",
+              "on_failure": "block",
+              "timeout": 45
+            }
+          ],
+          "matcher": "shell"
+        },
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${PLUGIN_ROOT}/scripts/launch.sh\" \"${PLUGIN_ROOT}/scripts/goose.py\" --gate \"${PLUGIN_ROOT}/scripts/chock-guardrails-protect/gate.json\"",
+              "on_failure": "block",
+              "timeout": 45
+            }
+          ],
+          "matcher": "write|edit"
+        }
+      ],
+      "Stop": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${PLUGIN_ROOT}/scripts/launch.sh\" \"${PLUGIN_ROOT}/scripts/chock_bundle.py\" --bundle demo-bundle --member demo-write-gate \"${PLUGIN_ROOT}/scripts/goose.py\" --gate \"${PLUGIN_ROOT}/scripts/demo-write-gate/gate.json\" --stop",
+              "on_failure": "block",
+              "timeout": 45
+            }
+          ]
+        },
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${PLUGIN_ROOT}/scripts/launch.sh\" \"${PLUGIN_ROOT}/scripts/chock_bundle.py\" --verify \"${PLUGIN_ROOT}/scripts/goose.py\" --gate \"${PLUGIN_ROOT}/scripts/chock-guardrails-protect/gate.json\" --stop",
+              "on_failure": "block",
+              "timeout": 45
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

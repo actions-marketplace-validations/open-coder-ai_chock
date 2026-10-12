@@ -7,11 +7,15 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+from agentseam import tier_table
 
 import chock
+from chock import vendors
 from chock.emit import write_generated
-from chock.plugin import bundle_build, bundle_grade
+from chock.gate import runtime_bundle
+from chock.plugin import bundle_build, bundle_grade, hook_dir
 from chock.plugin.build import _one_line
 from chock.plugin.bundle_build import Member
 from chock.plugin.store import build_store_plugin
@@ -52,6 +56,24 @@ class Label:
         return f"{words['origin']['custom']}; {own}" if self.custom else own
 
 
+def _prefix(data: dict[str, Any]) -> str:
+    """What an enforcing label starts with: the client's own words, or agentseam's pre-tool tier row for it."""
+    if not data.get("tier_label"):
+        return str(data["label_prefix"])
+    agent = bundle_build.CLIENTS[data["format"]].agent
+    row = next(r for r in tier_table.rows() if r["agent"] == agent)
+    return f"{row['grade']}, fail mode {row['fail_mode']} (agentseam {row['basis']}): "
+
+
+def _unasked(data: dict[str, Any], level: int) -> str:
+    """For a tier-labelled client whose pre-tool gate cannot prompt: why an ask is not enforced there."""
+    agent = bundle_build.CLIENTS[data["format"]].agent
+    if not data.get("tier_label") or level != bundle_grade.ASKS or any(runtime_bundle.pre_tool_can_ask(agent).values()):
+        return ""
+    why = vendors.entry(agent)["verdicts"]["degrade_notes"]["escalate"]
+    return f"; the ask is not enforced here: {why}"
+
+
 def labels(members: list[Member], catalog: Path, client_id: str, custom: frozenset[str] = frozenset()) -> list[Label]:
     """Each member's label from the hooks its own package for the client ships (`bundle_grade`); never an aggregate.
 
@@ -63,7 +85,7 @@ def labels(members: list[Member], catalog: Path, client_id: str, custom: frozens
         Label(
             m.id,
             bundle_grade.enforcement_keyword(level),
-            says if level == bundle_grade.ADVISORY else f"{data['label_prefix']}{says}",
+            says if level == bundle_grade.ADVISORY else f"{_prefix(data)}{says}{_unasked(data, level)}",
             _one_line(m.manifest.get("description")),
             custom=m.id in custom,
         )
@@ -100,10 +122,13 @@ def bundle(members: list[Member], name: str, version: str) -> dict[str, Any]:
     }
 
 
-def stage(members: list[Member], catalog: Path, record_of: dict[str, Any], into: Path, version: str) -> None:
-    """Write the merged plugin for the marker's client into `into`, with the install marker `record_of`.
+def stage(
+    members: list[Member], catalog: Path, record_of: dict[str, Any], version: str, final: Path
+) -> Callable[[Path], None]:
+    """The build `replace` runs: the merged plugin for the marker's client, with the install marker `record_of`.
 
-    The local ids the marker accepted are labelled custom on every surface.
+    The local ids the marker accepted are labelled custom on every surface. `final` is the folder the build is
+    renamed to: a client that documents no plugin-root variable has its hook commands name it.
     """
     custom = frozenset(accepted(record_of))
     fmt = client(record_of["client"])["format"]
@@ -113,10 +138,13 @@ def stage(members: list[Member], catalog: Path, record_of: dict[str, Any], into:
     }
 
     def files_fn(_dir: Path, _manifest: dict[str, Any], root: Path) -> dict[Path, str]:
-        return bundle_build.merged_files(fmt, record, members, root, aggregate=False)
+        return hook_dir.resolve_root(bundle_build.merged_files(fmt, record, members, root, aggregate=False), final)
 
-    build_store_plugin(fmt, files_fn, Path(record["id"]), {"id": record["id"]}, catalog, into)
-    write_generated(into / MARKER, json.dumps(record_of, indent=2, sort_keys=True) + "\n")
+    def build(into: Path) -> None:
+        build_store_plugin(fmt, files_fn, Path(record["id"]), {"id": record["id"]}, catalog, into)
+        write_generated(into / MARKER, json.dumps(record_of, indent=2, sort_keys=True) + "\n")
+
+    return build
 
 
 def read_marker(plugin_dir: Path) -> dict[str, Any] | None:

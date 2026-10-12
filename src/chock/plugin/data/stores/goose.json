@@ -1,0 +1,33 @@
+{
+  "owned_subtrees": [
+    "scripts",
+    "hooks",
+    "skills"
+  ],
+  "layout": {
+    "manifest": null,
+    "hooks": "hooks/hooks.json",
+    "skill": "skills/{name}/SKILL.md",
+    "plugin_root": "${PLUGIN_ROOT}"
+  },
+  "sources": [
+    {
+      "url": "https://goose-docs.ai/docs/guides/context-engineering/hooks/",
+      "read": "2026-10-12",
+      "says": [
+        "Each plugin that defines hooks must include a `hooks/hooks.json` file",
+        "Use `${PLUGIN_ROOT}` in a command to reference the plugin directory.",
+        "Shell command to run. goose runs it with `sh -c`.",
+        "`allow` (the default) continues the tool call, `block` denies it."
+      ]
+    },
+    {
+      "url": "https://goose-docs.ai/docs/guides/context-engineering/plugins/",
+      "read": "2026-10-11",
+      "says": [
+        "Hook-only Open Plugins can be discovered from `hooks/hooks.json`; if no manifest is present, goose infers the plugin name",
+        "Plugins copied manually into `.agents/plugins/` are discovered"
+      ]
+    }
+  ]
+}

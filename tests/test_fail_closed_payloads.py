@@ -13,6 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import client_payloads
 import pytest
 from bundle_fixtures import ALL_ROOTS, BUNDLE_ID, bundle, hook_commands, make_members, project, write
 from conftest import run_hook_command
@@ -29,6 +30,8 @@ SHELLS = [s for s in ("dash", "bash --posix") if shutil.which(s.split()[0])]
 
 
 def _payload(client: str, repo: Path, command: str) -> str:
+    if (native := client_payloads.bash_json(client, repo, command)) is not None:
+        return native
     body: dict = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": command}}
     body["cwd"] = str(repo)
     if client == "cursor":
@@ -62,6 +65,7 @@ DENIES = {
     "cursor": lambda p: p.returncode == 0 and _body(p).get("permission") == "deny",
     "devin": lambda p: p.returncode == 0 and _body(p).get("decision") == "block",
     "grok": lambda p: p.returncode == 0 and _body(p).get("decision") == "deny",
+    **client_payloads.PRE_TOOL_DENIES,
     "windsurf": lambda p: p.returncode == 2,
 }
 
@@ -86,8 +90,8 @@ def _run(command: str, repo: Path, payload: str, roots: Path | None) -> object:
 @pytest.fixture(params=CLIENTS_UNDER_TEST)
 def installed(request, tmp_path: Path) -> tuple[str, Path, Path]:
     client = request.param
-    members = make_members(tmp_path)
-    package = write(tmp_path / "dist" / client / BUNDLE_ID, merged_files(client, bundle(members), members, tmp_path))
+    files = merged_files(client, bundle(members := make_members(tmp_path)), members, tmp_path)
+    package = client_payloads.write_resolved(tmp_path / "dist" / client / BUNDLE_ID, files)
     return client, package, project(tmp_path)
 
 
@@ -118,6 +122,7 @@ def test_an_ordinary_payload_is_still_allowed_and_a_dangerous_one_still_refused(
 def test_a_hook_whose_root_lacks_its_package_refuses(installed, shell: str) -> None:
     """A root that is set but wrong is a broken install, under dash and bash-as-sh (which exits 127) alike."""
     client, package, repo = installed
+    client_payloads.skip_rootless(client)
     env = {
         **{k: v for k, v in os.environ.items() if k not in ALL_ROOTS},
         **dict.fromkeys(ALL_ROOTS, str(repo / "nope")),
@@ -133,6 +138,7 @@ def test_a_hook_whose_root_lacks_its_package_refuses(installed, shell: str) -> N
 def test_an_unset_root_refuses_only_where_the_format_exports_one(installed) -> None:
     """Copilot's agent-plugin format exports no root, so unset allows; every other client exports one."""
     client, package, repo = installed
+    client_payloads.skip_rootless(client)
     for command in _commands(package):
         done = _run(command, repo, _payload(client, repo, "rm -rf /"), None)
         expected = 0 if client == "copilot" else 2
@@ -171,7 +177,7 @@ ODD_ROOTS = ["with space", "O'Brien", "x'; exit 0; echo '", 'q"uote', "$HOME", "
 STUB_LAUNCHER = "echo LAUNCHED >&2\nexit 7\n"
 
 
-@pytest.mark.parametrize("client", sorted(CLIENTS))
+@pytest.mark.parametrize("client", [c for c in sorted(CLIENTS) if not client_payloads.rootless(c)])
 def test_an_odd_plugin_root_runs_the_launcher_or_refuses_never_allows(tmp_path: Path, client: str) -> None:
     """Present: the launcher runs (its own rc 7). Missing: rc 2. Never rc 0 without the launcher."""
     repo = project(tmp_path)

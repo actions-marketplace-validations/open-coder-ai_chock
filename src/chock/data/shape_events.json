@@ -1,0 +1,8 @@
+{
+  "antigravity": {
+    "stop": {"fullyIdle": true},
+    "source": "https://antigravity.google/docs/hooks",
+    "read": "2026-10-12",
+    "says": "Stop input: `fullyIdle` | boolean | **Required.**"
+  }
+}

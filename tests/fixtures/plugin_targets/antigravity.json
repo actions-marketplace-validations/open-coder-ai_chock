@@ -1,0 +1,74 @@
+{
+  "files": [
+    "hooks.json",
+    "plugin.json",
+    "scripts/antigravity.py",
+    "scripts/chock-guardrails-protect/chock-guardrails-protect-gate.py",
+    "scripts/chock-guardrails-protect/chock-guardrails-protect.py",
+    "scripts/chock-guardrails-protect/chock_guardrails_protect/__init__.py",
+    "scripts/chock-guardrails-protect/gate.json",
+    "scripts/chock-guardrails-protect/gate.py",
+    "scripts/chock-guardrails-protect/implementations/chock-guardrails-protect-gate.py",
+    "scripts/chock-guardrails-protect/implementations/chock-guardrails-protect.py",
+    "scripts/chock-guardrails-protect/implementations/chock_guardrails_protect/__init__.py",
+    "scripts/chock_bundle.json",
+    "scripts/chock_bundle.py",
+    "scripts/demo-shell-guard/demo-shell-guard.py",
+    "scripts/demo-shell-guard/tinyparse/__init__.py",
+    "scripts/demo-write-gate/gate.json",
+    "scripts/demo-write-gate/gate.py",
+    "scripts/launch.sh",
+    "skills/customize-guardrails/SKILL.md",
+    "skills/demo-advice/SKILL.md",
+    "skills/demo-shell-guard/SKILL.md",
+    "skills/demo-write-gate/SKILL.md"
+  ],
+  "manifest": {
+    "name": "demo-bundle",
+    "description": "Two demo policies. Members: demo-write-gate: blocks at turn end only; the write itself is not judged; demo-shell-guard: refuses a matched shell command before it runs; demo-advice: advisory only: skill text, nothing stops a violation. [Advisory skill only; enforcement needs chock installed in the repo.]"
+  },
+  "hooks": {
+    "agentseam": {
+      "Stop": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"__CHOCK_PLUGIN_ROOT__/scripts/launch.sh\" \"__CHOCK_PLUGIN_ROOT__/scripts/chock_bundle.py\" --bundle demo-bundle --member demo-write-gate \"__CHOCK_PLUGIN_ROOT__/scripts/antigravity.py\" --gate \"__CHOCK_PLUGIN_ROOT__/scripts/demo-write-gate/gate.json\" --stop",
+              "timeout": 45
+            }
+          ]
+        },
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"__CHOCK_PLUGIN_ROOT__/scripts/launch.sh\" \"__CHOCK_PLUGIN_ROOT__/scripts/chock_bundle.py\" --verify \"__CHOCK_PLUGIN_ROOT__/scripts/antigravity.py\" --gate \"__CHOCK_PLUGIN_ROOT__/scripts/chock-guardrails-protect/gate.json\" --stop",
+              "timeout": 45
+            }
+          ]
+        }
+      ],
+      "PreToolUse": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"__CHOCK_PLUGIN_ROOT__/scripts/launch.sh\" \"__CHOCK_PLUGIN_ROOT__/scripts/chock_bundle.py\" --bundle demo-bundle --member demo-shell-guard \"__CHOCK_PLUGIN_ROOT__/scripts/antigravity.py\" --guard \"__CHOCK_PLUGIN_ROOT__/scripts/demo-shell-guard/demo-shell-guard.py\"",
+              "timeout": 45
+            }
+          ]
+        },
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"__CHOCK_PLUGIN_ROOT__/scripts/launch.sh\" \"__CHOCK_PLUGIN_ROOT__/scripts/antigravity.py\" --guard \"__CHOCK_PLUGIN_ROOT__/scripts/chock-guardrails-protect/chock-guardrails-protect.py\"",
+              "timeout": 45
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -94,6 +94,47 @@
         {"command": ["devin", "plugins", "install", "--local", "__PLUGIN_DIR__"]},
         {"note": "The plugin is linked in place: a rebuild applies from the next Devin session."}
       ]
+    },
+    "goose": {
+      "name": "goose",
+      "format": "goose",
+      "layout": "plugin-dir",
+      "dest": "~/.agents/plugins",
+      "binary": null,
+      "index": [],
+      "tier_label": true,
+      "gate_turn_end_only": false,
+      "steps": [
+        {"note": "goose discovers __PLUGIN_DIR__ as a user plugin, in every project: start a new goose session. There is no command to run (`goose plugin install` takes a git URL only). To turn it off, add __PLUGIN__ to disabledPlugins in ~/.config/goose/settings.json."}
+      ]
+    },
+    "grok": {
+      "name": "Grok",
+      "format": "grok",
+      "layout": "plugin-dir",
+      "dest": "~/.chock/marketplace/grok",
+      "binary": "grok",
+      "index": [],
+      "tier_label": true,
+      "gate_turn_end_only": false,
+      "steps": [
+        {"command": ["grok", "plugin", "install", "__PLUGIN_DIR__", "--trust"]},
+        {"note": "Plugins are off in grok until enabled, and chock does not edit grok's config: run `grok plugin list` for the name grok gave this plugin (chock expects __PLUGIN__, its folder name; the docs do not say how a plugin with no plugin.json is named), then `grok plugin enable <name>`, or add it to `enabled` under [plugins] in ~/.grok/config.toml, or press Space on it in the Plugins tab. Re-run the install command after a rebuild."}
+      ]
+    },
+    "antigravity": {
+      "name": "Antigravity",
+      "format": "antigravity",
+      "layout": "plugin-dir",
+      "dest": "~/.chock/marketplace/antigravity",
+      "binary": "agy",
+      "index": [],
+      "tier_label": true,
+      "gate_turn_end_only": true,
+      "steps": [
+        {"command": ["agy", "plugin", "install", "__PLUGIN_DIR__"]},
+        {"note": "Antigravity 2.0 and the IDE read plugin folders from ~/.gemini/config/plugins/ instead: copy __PLUGIN_DIR__ there. Its hooks name __PLUGIN_DIR__ by absolute path (Antigravity documents no plugin-root variable), so keep that folder where it is; re-run the install command after a rebuild."}
+      ]
     }
   }
 }

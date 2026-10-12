@@ -18,7 +18,7 @@ from chock.plugin.bundle_build import Member
 from chock.scaffold.add import IntegrityError
 from chock.scaffold.pin import PinError, fetch_catalog
 
-#: The five client ids, in the order data/install.json lists them.
+#: The client ids, in the order data/install.json lists them.
 CLIENTS = tuple(package.settings()["clients"])
 
 
@@ -135,7 +135,7 @@ def install(chosen: dict[str, Any], dest: Path, options: Options) -> tuple[list[
         if package.client(client_id)["layout"] == place.MARKETPLACE:
             place.migrate_legacy(dest)
         record = package.marker(chosen, accepted)
-        package.replace(target, lambda into: package.stage(members, repo_root, record, into, version))
+        package.replace(target, package.stage(members, repo_root, record, version, target))
         place.write_marketplace(client_id, dest)
     return labels, lines
 
