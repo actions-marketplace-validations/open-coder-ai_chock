@@ -23,9 +23,11 @@ from chock.plugin.codex import build_codex_plugin, codex_plugin_differences
 from chock.plugin.copilot import build_copilot_plugin, copilot_plugin_differences
 from chock.plugin.cursor import build_cursor_plugin, cursor_plugin_differences
 from chock.plugin.devin import build_devin_plugin, devin_plugin_differences
+from chock.plugin.factory_droid import build_droid_plugin, droid_plugin_differences
 from chock.plugin.gemini import build_gemini_plugin, gemini_plugin_differences
 from chock.plugin.goose import build_goose_plugin, goose_plugin_differences
 from chock.plugin.grok import build_grok_plugin, grok_plugin_differences
+from chock.plugin.kimi_code import build_kimi_plugin, kimi_plugin_differences
 from chock.plugin.openhands import build_openhands_plugin, openhands_plugin_differences
 from chock.scaffold.recompile import discover_policy_dirs
 
@@ -41,6 +43,8 @@ FORMATS = (
     "antigravity",
     "gemini",
     "openhands",
+    "kimi",
+    "droid",
 )
 
 HOOK_FORMATS = frozenset(FORMATS) - {"agent-plugins"}
@@ -56,6 +60,8 @@ HOOK_EMITTERS = {
     "antigravity": (antigravity_plugin_differences, build_antigravity_plugin),
     "gemini": (gemini_plugin_differences, build_gemini_plugin),
     "openhands": (openhands_plugin_differences, build_openhands_plugin),
+    "kimi": (kimi_plugin_differences, build_kimi_plugin),
+    "droid": (droid_plugin_differences, build_droid_plugin),
 }
 
 
@@ -264,6 +270,10 @@ def main(argv: list[str] | None = None) -> int:
             "  .plugin/plugin.json + hooks/hooks.json (PreToolUse per guard policy; write and Stop per gate; "
             "hooks name the folder by absolute path)"
         )
+    if "kimi" in formats:
+        print("  kimi.plugin.json with its hooks array (PreToolUse per guard policy; Stop per gate)")
+    if "droid" in formats:
+        print("  .factory-plugin/plugin.json + hooks/hooks.json (PreToolUse per guard policy; write and Stop per gate)")
     if HOOK_FORMATS.intersection(formats):
         print("  A policy with both a guard and a tool_use gate ships both, where the client runs the gate.")
     print("  Skills are advisory in any client. Repo-level enforcement still needs `chock sync`.")

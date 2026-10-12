@@ -8,7 +8,21 @@ from typing import Any, Callable
 
 from agentseam import packaging
 
-from chock.plugin import antigravity, claude, codex, copilot, cursor, devin, gemini, goose, grok, openhands, store
+from chock.plugin import (
+    antigravity,
+    claude,
+    codex,
+    copilot,
+    cursor,
+    devin,
+    factory_droid,
+    gemini,
+    goose,
+    grok,
+    kimi_code,
+    openhands,
+    store,
+)
 
 FilesFn = Callable[[Path, dict[str, Any], Path], dict[Path, str]]
 
@@ -23,7 +37,7 @@ class Client:
     agent: str
     package_agent: str
     #: The store whose layout chock records itself, where agentseam's packaging records none (goose, grok,
-    #: antigravity, openhands).
+    #: antigravity, openhands, kimi, droid).
     own_layout: str | None = None
 
     def layout(self) -> tuple[str | None, str, str]:
@@ -85,5 +99,21 @@ CLIENTS: dict[str, Client] = {
         "openhands",
         "openhands",
         own_layout="openhands",
+    ),
+    "kimi": Client(
+        kimi_code.kimi_plugin_files,
+        kimi_code.build_kimi_manifest,
+        kimi_code.manifest_posture,
+        "kimi_code",
+        "kimi_code",
+        own_layout="kimi",
+    ),
+    "droid": Client(
+        factory_droid.droid_plugin_files,
+        factory_droid.build_droid_manifest,
+        factory_droid.manifest_posture,
+        "factory_droid",
+        "factory_droid",
+        own_layout="droid",
     ),
 }

@@ -1,10 +1,11 @@
-"""Hook-folder plugins (goose, grok, antigravity, gemini, openhands): one builder, the layout from data.
+"""Hook-folder plugins (goose, grok, antigravity, gemini, openhands, kimi, droid): one builder, the layout from data.
 
 The hook documents are agentseam's own rendering for the vendor (`vendors.*_hook_config`), so the
 event spelling, matcher, wrapper, hook group and entry extras (goose's `on_failure`) are never
 typed here. The folder layout and the plugin-root token are agentseam's packaging record where it
 has one (gemini_cli), else chock's store data, each with the vendor page it was read from
-(data/stores/<store>.json).
+(data/stores/<store>.json). A layout with `hooks_key` (kimi) ships the hooks document inside
+its manifest: it is built at `hooks` like every other, then folded in when the package is written.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from typing import Any, Callable
 from agentseam import packaging
 
 from chock import vendors
+from chock.compile.emitters import in_agent_hooks
 from chock.compile.emitters.in_agent_hooks import generic_pre_tool_config, generic_stop_config
 from chock.gate.write_gate import STOP_FLAG
 from chock.hooks import launch
@@ -100,6 +102,14 @@ def gate_doc(agent: str, command: str) -> Any:
     return doc
 
 
+def _store_timeout(store_name: str, doc: Any) -> Any:
+    """`doc` with the store's own timeout field, where agentseam's rendering writes none and chock sync has no row (kimi)."""
+    field = store.hook_timeout_field(store_name)
+    if field is not None:
+        in_agent_hooks._stamp(doc, field, in_agent_hooks.TIMEOUT_SECONDS)
+    return doc
+
+
 def plugin_files(spec: Spec, policy_dir: Path, manifest: dict[str, Any], repo_root: Path) -> dict[Path, str]:
     """The plugin's files as {relative path: content}, writing nothing; `ROOT_TOKEN` left unresolved."""
     policy_dir = Path(policy_dir)
@@ -109,7 +119,8 @@ def plugin_files(spec: Spec, policy_dir: Path, manifest: dict[str, Any], repo_ro
     parts = guard_gate.halves(spec.agent, policy_dir, policy_id, Path(repo_root))
     script, gate = parts.script, parts.gate
 
-    skill = build_skill(policy_dir, manifest, Path(repo_root), hooks=shape["hooks"] if parts.enforced else None)
+    shipped = shape["manifest"] if shape.get("hooks_key") else shape["hooks"]
+    skill = build_skill(policy_dir, manifest, Path(repo_root), hooks=shipped if parts.enforced else None)
     note = guard_gate.skill_note(
         spec.guard_note if script else None,
         gate_package.gate_skill_note(spec.agent, gate.get("action")) if gate else None,
@@ -131,7 +142,7 @@ def plugin_files(spec: Spec, policy_dir: Path, manifest: dict[str, Any], repo_ro
         gate_doc(spec.agent, hook_command(spec, "--gate", "gate.json")) if gate else None,
     )
     if hooks is not None:
-        files[Path(shape["hooks"])] = json.dumps(hooks, indent=2) + "\n"
+        files[Path(shape["hooks"])] = json.dumps(_store_timeout(spec.store, hooks), indent=2) + "\n"
         files.update(_runtime_files(spec.agent))
     if script:
         guard_gate.place(files, store.guard_files(policy_dir, script))
@@ -160,12 +171,25 @@ def resolve_root(files: dict[Path, str], folder: PurePath) -> dict[Path, str]:
     return {rel: content.replace(ROOT_TOKEN, root) for rel, content in files.items()}
 
 
+def fold(files: dict[Path, str], store_name: str) -> dict[Path, str]:
+    """`files` as written to disk: a store whose layout names a `hooks_key` carries its hooks inside the manifest."""
+    shape = store.layout(store_name) or {}
+    key, hooks_rel = shape.get("hooks_key"), Path(shape.get("hooks") or "")
+    if not key or hooks_rel not in files:
+        return files
+    out = dict(files)
+    doc = json.loads(out.pop(hooks_rel))
+    manifest_rel = Path(shape["manifest"])
+    out[manifest_rel] = json.dumps({**json.loads(out[manifest_rel]), key: doc}, indent=2) + "\n"
+    return out
+
+
 def bind(spec: Spec, out_dir: Path | None = None) -> store.FilesFn:
-    """`plugin_files` for `spec` in the packagers' (policy_dir, manifest, repo_root) shape, its root resolved to `out_dir`."""
+    """`plugin_files` for `spec` in the packagers' (policy_dir, manifest, repo_root) shape, as written to `out_dir`."""
 
     def files_fn(policy_dir: Path, manifest: dict[str, Any], repo_root: Path) -> dict[Path, str]:
         files = plugin_files(spec, policy_dir, manifest, repo_root)
-        return resolve_root(files, out_dir) if out_dir is not None else files
+        return fold(resolve_root(files, out_dir) if out_dir is not None else files, spec.store)
 
     return files_fn
 

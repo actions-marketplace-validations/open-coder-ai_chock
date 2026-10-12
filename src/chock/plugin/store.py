@@ -53,6 +53,14 @@ def layout(store: str) -> dict[str, Any] | None:
     return json.loads(path.read_text(encoding="utf-8")).get("layout")
 
 
+def hook_timeout_field(store: str) -> str | None:
+    """The seconds-valued timeout key `store`'s hook entries take, where chock's store data records one; else None."""
+    path = _DATA / f"{store}.json"
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8")).get("hook_timeout_field")
+
+
 def _owned_candidates(out_dir: Path, sub: str) -> list[Path]:
     """Files an owned-subtree entry can name: everything under a directory, or itself.
 

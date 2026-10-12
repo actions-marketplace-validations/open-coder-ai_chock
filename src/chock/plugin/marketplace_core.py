@@ -13,6 +13,7 @@ from typing import Any
 from agentseam import packaging
 
 from chock.lock import compute_pack_hash
+from chock.plugin import store
 from chock.vendors import CHOCK_AGENT
 
 OWNER = {"name": "open-coder-ai", "url": "https://github.com/open-coder-ai"}
@@ -42,8 +43,9 @@ INDEX_PATHS = TREES["claude"]["index_paths"]
 
 
 def _manifest_rel(tree: str) -> str:
-    """This tree's plugin manifest path, from agentseam's packaging layout."""
-    return packaging.layout(CHOCK_AGENT[tree])["manifest"]
+    """This tree's plugin manifest path: chock's store data where it records one (droid), else agentseam's packaging."""
+    own = store.layout(tree)
+    return own["manifest"] if own is not None else packaging.layout(CHOCK_AGENT[tree])["manifest"]
 
 
 def collect_entries(dist_root: Path, tree: str = CLAUDE_TREE) -> list[dict[str, Any]]:
@@ -72,7 +74,7 @@ DESCRIPTION = (
 
 def build_index(dist_root: Path, name: str, tree: str = CLAUDE_TREE) -> dict[str, Any]:
     entries = collect_entries(dist_root, tree)
-    if TREES[tree]["style"] == "cursor":
+    if TREES.get(tree, {}).get("style") == "cursor":
         return {
             "name": name,
             "owner": {"name": OWNER["name"]},

@@ -1,9 +1,10 @@
-"""goose, grok, antigravity, gemini and openhands payloads, for suites parametrized over every plugin client.
+"""goose, grok, antigravity, gemini, openhands, kimi and droid payloads, for suites over every plugin client.
 
 Shapes follow agentseam's vendor fields (and each vendor's hooks page): goose names the event under
 `event` and the folder under `working_dir`; grok sends both event keys; antigravity names no event,
 nests the call under `toolCall` and lists `workspacePaths`; gemini sends BeforeTool/AfterAgent under
-`hook_event_name`; openhands names the event under `event_type` and the folder under `working_dir`.
+`hook_event_name`; openhands names the event under `event_type` and the folder under `working_dir`;
+kimi marks itself by `client_type`; droid sends Claude's keys with its own `permission_mode` values.
 """
 
 from __future__ import annotations
@@ -20,6 +21,12 @@ from chock.plugin.bundle_build import CLIENTS
 
 def pre_tool(client: str, repo: Path, tool: str, tool_input: dict[str, Any]) -> dict[str, Any] | None:
     """`tool` ("Bash" or "Write") called in `client`'s own shape; None for a client not covered here."""
+    if client in _ENVELOPES:
+        return _marked_pre_tool(client, repo, tool == "Write", tool_input)
+    return _named_pre_tool(client, repo, tool, tool_input)
+
+
+def _named_pre_tool(client: str, repo: Path, tool: str, tool_input: dict[str, Any]) -> dict[str, Any] | None:
     write = tool == "Write"
     if client == "goose":
         args = {"path": tool_input["file_path"], "content": tool_input["content"]} if write else tool_input
@@ -51,8 +58,32 @@ def pre_tool(client: str, repo: Path, tool: str, tool_input: dict[str, Any]) -> 
     return None
 
 
+#: The envelope keys kimi and droid send on every event (agentseam's golden payloads at bebbfa6).
+_ENVELOPES = {
+    "kimi": {"session_id": "s", "session_title": "t", "client_type": "kimi_code_cli"},
+    "droid": {"session_id": "s", "permission_mode": "auto-medium", "transcript_path": "/x/.factory/projects/x/s.jsonl"},
+}
+
+
+def _marked_pre_tool(client: str, repo: Path, write: bool, tool_input: dict[str, Any]) -> dict[str, Any]:
+    """kimi and droid, which mark themselves by an envelope value: kimi's write names its file `path`."""
+    names = {"kimi": ("WriteFile", "Shell"), "droid": ("Create", "Execute")}[client]
+    args = dict(tool_input)
+    if write and client == "kimi":
+        args = {"path": tool_input["file_path"], "content": tool_input["content"]}
+    body = {**_ENVELOPES[client], "hook_event_name": "PreToolUse", "cwd": str(repo)}
+    return {**body, "tool_name": names[0] if write else names[1], "tool_input": args}
+
+
 def stop(client: str, repo: Path) -> dict[str, Any] | None:
     """A clean turn end in `client`'s own shape; None for a client not covered here."""
+    if client in _ENVELOPES:
+        extra = {"stop_hook_active": False} if client == "droid" else {}
+        return {**_ENVELOPES[client], "hook_event_name": "Stop", "cwd": str(repo), **extra}
+    return _named_stop(client, repo)
+
+
+def _named_stop(client: str, repo: Path) -> dict[str, Any] | None:
     if client == "goose":
         return {"event": "Stop", "session_id": "s", "last_assistant_message": "done"}
     if client == "grok":
@@ -85,7 +116,18 @@ PRE_TOOL_DENIES = {
     "antigravity": lambda p: p.returncode == 0 and _decision(p) == "deny",
     "gemini_cli": lambda p: p.returncode == 0 and _decision(p) == "deny",
     "openhands": lambda p: p.returncode == 0 and _decision(p) == "deny",
+    # Kimi and Droid answer PreToolUse in G2: a deny under hookSpecificOutput (agentseam gates.PreToolUse.grammar).
+    "kimi_code": lambda p: p.returncode == 0 and _nested(p) == "deny",
+    "factory_droid": lambda p: p.returncode == 0 and _nested(p) == "deny",
 }
+
+
+def _nested(proc: Any) -> Any:
+    try:
+        body = json.loads(proc.stdout or "null")
+    except ValueError:
+        return None
+    return (body.get("hookSpecificOutput") or {}).get("permissionDecision") if isinstance(body, dict) else None
 
 
 def _decision(proc: Any) -> Any:

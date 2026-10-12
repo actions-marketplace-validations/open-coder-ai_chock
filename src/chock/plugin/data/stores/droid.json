@@ -1,0 +1,44 @@
+{
+  "owned_subtrees": [
+    "scripts",
+    "hooks",
+    "skills"
+  ],
+  "layout": {
+    "manifest": ".factory-plugin/plugin.json",
+    "hooks": "hooks/hooks.json",
+    "skill": "skills/{name}/SKILL.md",
+    "plugin_root": "${DROID_PLUGIN_ROOT}"
+  },
+  "sources": [
+    {
+      "url": "https://docs.factory.com/harness/plugins",
+      "read": "2026-10-12",
+      "says": [
+        "Native Droid plugin layouts use a `.factory-plugin/` directory.",
+        "Droid does not require or read the fields inside `plugin.json`. It identifies an installed plugin from its marketplace entry name and registered marketplace name.",
+        "Plugin hooks live at `hooks/hooks.json` and may reference scripts in the plugin",
+        "Droid expands `${DROID_PLUGIN_ROOT}`, `$DROID_PLUGIN_ROOT`, `${CLAUDE_PLUGIN_ROOT}`, and `$CLAUDE_PLUGIN_ROOT` to the installed plugin cache path when the plugin loads.",
+        "`marketplace add` takes a marketplace, not a plugin, so a plugin directory on its own is rejected",
+        "droid plugin marketplace add ./my-marketplace / droid plugin install my-plugin@my-marketplace --scope user",
+        "Droid reads `.factory-plugin/marketplace.json` first",
+        "`plugins[].source` | Yes | Relative path string or source object.",
+        "Absolute paths and paths that escape the marketplace directory are rejected.",
+        "`name` | Yes | Manifest metadata. The registered name is derived from the source or set by the `extraKnownMarketplaces` key."
+      ]
+    },
+    {
+      "url": "https://docs.factory.com/harness/hooks",
+      "read": "2026-10-12",
+      "says": [
+        "Exit code 2 | Blocking or corrective feedback. PreToolUse blocks the tool call",
+        "Any other non-zero exit | Non-blocking error. Droid records stderr and continues where the event permits.",
+        "deny | Blocks the tool call and sends the reason to Droid.",
+        "ask | Forces a user confirmation prompt.",
+        "allowManagedHooksOnly | When true, only org-managed hooks and hooks from org-enabled plugins load."
+      ]
+    }
+  ],
+  "silent_on": "How a local path's registered marketplace name is derived: chock's default marketplace folder is named `chock-local`, the name its marketplace.json carries, so either derivation gives the same name. A plugin manifest field Droid reads: it reads none, so chock writes name, version and description as source metadata.",
+  "disagrees": "Docs (read 2026-10-12) say ask forces a prompt; droid 0.238.0's bundle only logs it, so chock blocks (agentseam D2a, vendor-source)."
+}
