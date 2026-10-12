@@ -130,10 +130,12 @@ def root_path(folder: PurePath) -> str:
 def resolve_root(files: dict[Path, str], folder: PurePath) -> dict[Path, str]:
     """`files` with every `ROOT_TOKEN` naming `folder`; a folder whose path a hook command cannot carry is refused."""
     root = root_path(folder)
-    if any(ROOT_TOKEN in content for content in files.values()) and re.search(r'[\s"$`\\]', root):
+    # A plain space is literal inside the command's double quotes; every other whitespace is refused.
+    if any(ROOT_TOKEN in content for content in files.values()) and re.search(r'[^\S ]|["$`\\]', root):
         msg = (
             f"{root}: this client names the plugin folder by absolute path inside a quoted hook command, "
-            "so the path may not hold whitespace, quotes, `$`, backquotes or backslashes; choose another --dest"
+            "so the path may not hold tabs, line breaks or other non-space whitespace, quotes, `$`, backquotes "
+            "or backslashes; choose another --dest"
         )
         raise ValueError(msg)
     return {rel: content.replace(ROOT_TOKEN, root) for rel, content in files.items()}

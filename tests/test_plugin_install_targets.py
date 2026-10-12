@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
+import sys
 from pathlib import Path, PureWindowsPath
 
 import pytest
@@ -134,7 +136,33 @@ def test_a_windows_folder_is_named_with_forward_slashes() -> None:
     assert "C:/Users/me/" in hook_dir.resolve_root(files, folder)[Path("hooks.json")]
 
 
-@pytest.mark.parametrize("folder", [PureWindowsPath(r"C:\Users\Jo Smith\p"), Path("/home/a$b/p"), Path('/x/"q"/p')])
+def test_a_windows_profile_with_a_space_is_named_as_one_path() -> None:
+    folder = PureWindowsPath(r"C:\Users\Jo Smith\.chock\marketplace\antigravity\chock-guardrails")
+    files = {Path("hooks.json"): f'"{hook_dir.ROOT_TOKEN}/scripts/launch.sh"'}
+    resolved = hook_dir.resolve_root(files, folder)[Path("hooks.json")]
+    assert resolved == '"C:/Users/Jo Smith/.chock/marketplace/antigravity/chock-guardrails/scripts/launch.sh"'
+
+
+def test_a_spaced_root_reaches_the_launcher_as_exact_single_arguments(tmp_path: Path) -> None:
+    """Executed: the rendered Antigravity command, run by sh, hands each path to the launcher whole."""
+    root = tmp_path / "First Last" / "plugin dir"
+    stub = "import json, sys\nprint(json.dumps(sys.argv[1:]))\n"
+    (root / "scripts").mkdir(parents=True)
+    (root / "scripts" / "argv.py").write_text(stub, encoding="utf-8")
+    launcher = f'exec "{sys.executable}" "$(dirname "$0")/argv.py" "$@"\n'
+    (root / "scripts" / "launch.sh").write_text(launcher, encoding="utf-8")
+    command = hook_dir.hook_command(antigravity.SPEC, "--guard", "g.py")
+    resolved = hook_dir.resolve_root({Path("c"): command}, root)[Path("c")]
+    done = subprocess.run(["sh", "-c", resolved], cwd=project(tmp_path), capture_output=True, text=True, check=False)
+    scripts = root.as_posix() + "/scripts"
+    assert done.returncode == 0, done.stderr
+    assert json.loads(done.stdout) == [f"{scripts}/antigravity.py", "--guard", f"{scripts}/g.py"]
+
+
+@pytest.mark.parametrize(
+    "folder",
+    [Path("/home/a\tb/p"), Path("/home/a\nb/p"), Path("/home/a\u00a0b/p"), Path("/home/a$b/p"), Path('/x/"q"/p')],
+)
 def test_a_folder_a_quoted_hook_command_cannot_carry_is_refused(folder) -> None:
     with pytest.raises(ValueError, match="choose another --dest"):
         hook_dir.resolve_root({Path("hooks.json"): hook_dir.ROOT_TOKEN}, folder)
