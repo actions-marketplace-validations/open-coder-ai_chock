@@ -116,7 +116,18 @@ PRE_TOOL_DENIES = {
     "antigravity": lambda p: p.returncode == 0 and _decision(p) == "deny",
     "gemini_cli": lambda p: p.returncode == 0 and _decision(p) == "deny",
     "openhands": lambda p: p.returncode == 0 and _decision(p) == "deny",
+    # Kimi and Droid answer PreToolUse in G2: a deny under hookSpecificOutput (agentseam gates.PreToolUse.grammar).
+    "kimi_code": lambda p: p.returncode == 0 and _nested(p) == "deny",
+    "factory_droid": lambda p: p.returncode == 0 and _nested(p) == "deny",
 }
+
+
+def _nested(proc: Any) -> Any:
+    try:
+        body = json.loads(proc.stdout or "null")
+    except ValueError:
+        return None
+    return (body.get("hookSpecificOutput") or {}).get("permissionDecision") if isinstance(body, dict) else None
 
 
 def _decision(proc: Any) -> Any:
