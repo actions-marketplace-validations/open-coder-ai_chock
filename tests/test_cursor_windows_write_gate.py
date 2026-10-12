@@ -255,3 +255,24 @@ def test_the_real_pin_policy_refuses_the_witnessed_workflow(real: tuple) -> None
 def test_every_windows_spelling_of_the_witnessed_workflow_is_refused(real: tuple, file_form: str, root_form: str):
     assert _real_refuses(real, file_form, root_form, UNPINNED), (real[0], file_form, root_form)
     assert not _real_refuses(real, file_form, root_form, PINNED)
+
+
+@pytest.mark.parametrize("head", ["unborn", "committed"])
+def test_a_cursor_write_from_a_home_with_chock_is_judged_in_the_workspace(plugin: Path, tmp_path: Path, head: str):
+    """CU-1, witnessed: the hook ran from HOME (holding `.chock/`), the repo beside it, no `cwd` in the payload.
+
+    A build that took the root from the process cwd judged `witness-repo-cursor/.github/...` and allowed it.
+    """
+    home = tmp_path / "home"
+    (home / ".chock" / "marketplace").mkdir(parents=True)
+    project = home / "witness-repo-cursor"
+    project.mkdir()
+    init_repo(project)
+    if head == "committed":
+        (project / "README.md").write_text("w\n", encoding="utf-8")
+        subprocess.run(["git", "add", "README.md"], cwd=project, check=True)
+        subprocess.run(["git", "commit", "-qm", "init"], cwd=project, check=True)
+    root = _root_spellings(project)["/C:/"] if WINDOWS else str(project)
+    target = str(project.joinpath(*WORKFLOW))
+    assert _cursor_write(plugin, home, target, [root]) == "deny"
+    assert _cursor_write(plugin, home, target, [root], content="ok") == "allow"
