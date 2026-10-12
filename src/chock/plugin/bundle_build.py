@@ -160,6 +160,11 @@ def _merge_docs(into: Any, other: Any, where: str = "hooks") -> Any:
     return into
 
 
+def _merge_into(into: Any, other: Any) -> Any:
+    """`other` merged into the hooks gathered so far; the first document starts them."""
+    return other if into is None else _merge_docs(into, other)
+
+
 def _repoint(doc: Any, moved: dict[str, str]) -> Any:
     """`doc` with every hook command's member-owned script path moved under the member's directory."""
     if isinstance(doc, dict):
@@ -236,15 +241,15 @@ def merged_files(
     special = (hooks_rel,) if manifest_rel is None else (hooks_rel, manifest_rel)
     packages = _member_packages(client, members, repo_root, hooks_rel.as_posix())
     files: dict[Path, str] = {}
-    hooks: dict[str, Any] = {}
+    hooks: Any = None  # a map of events, or (kimi) a flat list of rules
     for member, member_files, _grade, _what in packages:
         doc = _merge_member(client, member.id, member_files, files, special)
         if doc is not None:
-            _merge_docs(hooks, guardrails.wrap_doc(doc, client.agent, bundle["id"], member.id))
+            hooks = _merge_into(hooks, guardrails.wrap_doc(doc, client.agent, bundle["id"], member.id))
     protect = Member(guardrails.protect_dir(), guardrails.protect_manifest())
     protect_files = client.files(protect.policy_dir, protect.manifest, repo_root)
     protect_doc = _merge_member(client, protect.id, _scripts_only(protect_files, hooks_rel), files, (hooks_rel,))
-    _merge_docs(hooks, guardrails.verify_at_stop(protect_doc, client.agent))
+    hooks = _merge_into(hooks, guardrails.verify_at_stop(protect_doc, client.agent))
     for rel, content in guardrails.files(bundle["id"], _rows(client, bundle, packages), skill_rel).items():
         _place(files, rel, content)
     if manifest_rel is not None:

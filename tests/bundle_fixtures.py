@@ -40,6 +40,8 @@ ALL_ROOTS = (
     "DEVIN_PLUGIN_ROOT",
     "GROK_PLUGIN_ROOT",
     "extensionPath",
+    "KIMI_PLUGIN_ROOT",
+    "DROID_PLUGIN_ROOT",
 )
 
 
