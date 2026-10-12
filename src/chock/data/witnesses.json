@@ -22,6 +22,13 @@
   },
   {
     "agent": "claude_code",
+    "surface": "plugin-hook",
+    "client": "Claude Code 2.1.283, Windows",
+    "date": "2026-10-12",
+    "method": "live probe of the chock plugin, every other chock plugin disabled: block-no-verify refused a Bash call and pin-github-actions refused a Write at PreToolUse, before either ran; Stop not exercised (org-plan witness/results/witness-claude-code-2026-10-12.md, 198694b)"
+  },
+  {
+    "agent": "claude_code",
     "surface": "git-hook-env",
     "client": "Claude Code, Bash tool (CLAUDECODE=1, AI_AGENT=claude-code_<version>_agent)",
     "date": "2026-09-29",
