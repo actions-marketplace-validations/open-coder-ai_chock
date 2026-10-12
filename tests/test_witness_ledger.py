@@ -163,6 +163,15 @@ def test_every_tested_claim_names_a_test_that_actually_exercises_that_agent() ->
         )
 
 
+def test_claude_codes_plugin_witness_cites_its_record_and_witnesses_no_repo_hook() -> None:
+    """W-CC: the plugin route was witnessed, so only plugin-hook has a row; the repo-hook route was not."""
+    row = evidence.witness("claude_code", evidence.PLUGIN_HOOK)
+    assert row is not None
+    assert "witness/results/witness-claude-code-2026-10-12.md" in row.method
+    assert "198694b" in row.method
+    assert evidence.witness("claude_code", Surface.PRE_TOOL_USE.value) is None
+
+
 def test_the_shipped_ledger_is_the_file_on_disk() -> None:
     """The loader reads packaged data, so the check must be against that file, not a fixture."""
     rows = json.loads(evidence.WITNESSES_PATH.read_text(encoding="utf-8"))

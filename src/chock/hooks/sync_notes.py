@@ -6,8 +6,8 @@ from agentseam import tier_table
 
 from chock import evidence
 
-#: Ledger surfaces that witness chock's own hooks deciding in a client; git-hook-env witnesses a marker only.
-_HOOK_SURFACES = ("pre-tool-use", "agent-hooks", evidence.PLUGIN_HOOK)
+#: Surfaces sync installs; plugin-hook witnesses `chock install` only, git-hook-env a marker only.
+_HOOK_SURFACES = ("pre-tool-use", "agent-hooks")
 
 UNTESTED = (
     "Untested: chock has not witnessed its hooks run in this client; the wiring follows agentseam's record. "
@@ -26,9 +26,9 @@ def tier_line(vendor: str) -> str | None:
     )
 
 
-def witnessed(vendor: str) -> bool:
-    """Whether the ledger holds a live observation of chock's hooks deciding in `vendor`'s client."""
-    return any(evidence.witness(vendor, surface) for surface in _HOOK_SURFACES)
+def witnessed(vendor: str, *, ledger: tuple[evidence.Witness, ...] | None = None) -> bool:
+    """Whether the ledger holds a live run of chock's repo hooks deciding in `vendor`'s client."""
+    return any(evidence.witness(vendor, surface, ledger=ledger) for surface in _HOOK_SURFACES)
 
 
 def notes(vendor: str) -> list[str]:
