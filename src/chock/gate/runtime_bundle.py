@@ -5,11 +5,11 @@ from __future__ import annotations
 import ast
 import functools
 import inspect
-import json
 import re
 
-from agentseam import bundler, contract, packaging
+from agentseam import bundler, contract
 
+from chock.gate.plugin_manifests import plugin_manifests
 from chock.gate.wire_shapes import EVENT_KEYS as _EVENT_KEYS
 from chock.gate.wire_shapes import wire_raw as _wire_raw
 from chock.resources import package_data_dir
@@ -169,17 +169,6 @@ def pre_tool_can_ask(agent: str) -> dict[str, bool]:
     gates = vendor.get("verdicts", {}).get("gates", {})
     pre_tool = [name for name, canonical in vendor.get("events", {}).items() if canonical == contract.PRE_TOOL]
     return {name: bool((gates.get(name) or {}).get("honours_escalate")) for name in pre_tool}
-
-
-@functools.cache
-def plugin_manifests() -> tuple[str, ...]:
-    """Every manifest path a chock-built package may carry: agentseam's layouts, then chock's own store formats."""
-    layouts = (packaging.layout(agent) for agent in sorted(RUNTIME_AGENTS))
-    found = [layout["manifest"] for layout in layouts if layout and layout.get("manifest")]
-    stores = sorted(package_data_dir("chock.plugin", "data", "stores").glob("*.json"))
-    layouts = (json.loads(path.read_text(encoding="utf-8")).get("layout") or {} for path in stores)
-    found += [layout["manifest"] for layout in layouts if layout.get("manifest")]
-    return tuple(dict.fromkeys(found))
 
 
 def _can_ask_tokens(agent: str) -> dict[str, str]:

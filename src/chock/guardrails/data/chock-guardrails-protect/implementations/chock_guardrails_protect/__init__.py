@@ -26,7 +26,6 @@ TOGGLE = f"{FOLDER}/{NAME}"
 PROTECTED = (TOGGLE, f"{FOLDER}/state/{RECORD}")
 #: The decision log's settings, one per scope: how much chock logs is a person's call, raised or lowered.
 LOG_SETTINGS = "chock-log.json"
-LOG_PROTECTED = (f"{FOLDER}/{LOG_SETTINGS}",)
 #: The install marker inside every chock-built plugin: it records the custom-policy hashes a person accepted.
 MARKER = "chock.selection.json"
 #: `chock install --trust-local <id>=<sha256>` accepts custom code without asking: only a person passes it.
@@ -144,11 +143,7 @@ def names_log(token: str, cwd: Path) -> bool:
 
 def is_log_path(path: str, root: Path) -> bool:
     """Whether a written path is a log settings file (in any `.chock` folder), as written or through links."""
-    return any(
-        folded == want or folded.endswith("/" + want)
-        for folded in (fold(path), _real(path, root))
-        for want in LOG_PROTECTED
-    )
+    return any(("/" + folded).endswith(f"/{FOLDER}/{LOG_SETTINGS}") for folded in (fold(path), _real(path, root)))
 
 
 def is_marker_path(path: str, root: Path) -> bool:

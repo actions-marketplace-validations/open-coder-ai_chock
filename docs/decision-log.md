@@ -32,7 +32,7 @@ and keeps its own fields (`kind`, `match_count`, `matches`, `rules`).
 {"level": "debug", "max_bytes": 4194304}
 ```
 
-One file per scope, both optional, both `.chock/chock-log.json`:
+One file per scope, both optional, each named `chock-log.json` inside a `.chock` folder:
 
 1. the environment: `CHOCK_LOG_LEVEL=off|info|debug` in the shell the agent client was started from;
 2. the repository: `<repo>/.chock/chock-log.json`;
