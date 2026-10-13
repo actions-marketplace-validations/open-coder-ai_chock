@@ -35,6 +35,10 @@
       "module": "chock.doctor.cli",
       "help": "Check each client's hooks on each route: present, current, and seen running (--client X)"
     },
+    "witness": {
+      "module": "chock.witness_export",
+      "help": "Export one client's redacted decision log for its agentseam evidence issue (witness export --client C)"
+    },
     "enable": {
       "module": "chock.toggles",
       "fn": "enable_main",

@@ -24,6 +24,8 @@ ROUTES = ("sync", "plugin")
 LEVELS = (journal.LOG_INFO, journal.LOG_DEBUG)
 VERDICTS = ("allow", "block", "ask", "warn", "off")
 FOLLOW_INTERVAL = 0.5
+#: OBS-1's heartbeat: one record per session start, carrying no policy id.
+HEARTBEAT_EVENT = "session_start"
 
 
 def _home() -> Path:
@@ -48,15 +50,17 @@ def log_files(repo_root: Path, route: str | None = None, home: Path | None = Non
     return files
 
 
-def _records(lines: Iterable[str]) -> list[dict[str, Any]]:
-    """The readable records among `lines`; a record needs a policy id."""
+def _records(lines: Iterable[str], *, heartbeats: bool = False) -> list[dict[str, Any]]:
+    """The readable records among `lines`; a record needs a policy id, or is a heartbeat when `heartbeats`."""
     found = []
     for line in lines:
         try:
             record = json.loads(line) if line.strip() else None
         except json.JSONDecodeError:
             continue
-        if isinstance(record, dict) and record.get("policy_id"):
+        if isinstance(record, dict) and (
+            record.get("policy_id") or (heartbeats and record.get("event") == HEARTBEAT_EVENT)
+        ):
             found.append(record)
     return found
 
@@ -72,9 +76,14 @@ def record_level(record: dict[str, Any]) -> str:
 
 
 def read_events(
-    repo_root: Path, since_days: int | None = None, *, route: str | None = None, home: Path | None = None
+    repo_root: Path,
+    since_days: int | None = None,
+    *,
+    route: str | None = None,
+    home: Path | None = None,
+    heartbeats: bool = False,
 ) -> list[dict[str, Any]]:
-    """Every readable record on the routes asked for, oldest first."""
+    """Every readable record on the routes asked for, oldest first; `heartbeats` adds the `session_start` records."""
     cutoff = None
     if since_days is not None:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=since_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -82,7 +91,7 @@ def read_events(
     events: list[dict[str, Any]] = []
     for path in log_files(repo_root, route, home):
         try:
-            events += _records(path.read_text(encoding="utf-8", errors="replace").splitlines())
+            events += _records(path.read_text(encoding="utf-8", errors="replace").splitlines(), heartbeats=heartbeats)
         except OSError:
             continue
     events = [e for e in events if route is None or record_route(e) == route]

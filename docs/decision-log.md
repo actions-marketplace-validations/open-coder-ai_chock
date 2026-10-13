@@ -82,3 +82,40 @@ chock status --only log --route plugin --plugin <name> --verdict block --since 7
 chock status --only log --level debug --json  # allows included
 chock status --only log --follow              # print new lines as they are written
 ```
+
+## Summary
+
+```bash
+chock status --summary [--since DAYS] [--route sync|plugin] [--json]
+```
+
+- Fires per policy and per client, with block, ask, warn and fault counts and rates. A fault is a hook
+  that could not judge the call: reason `guard-errored`, `guard-missing` or `fault`.
+- p50 and p95 `duration_ms` per hook (client and surface), nearest rank. At `info` only the calls a
+  policy fired on are logged, so the latencies cover those; set `debug` to time every call.
+- **WARN when a hook's p95 is within 25% of its client's hook timeout.** A client timeout fails
+  open, so a call slower than that goes through unchecked. The timeout is the one chock writes on
+  every hook entry; where a vendor's hook schema has no timeout field (`src/chock/data/hook_timeouts.json`),
+  the client's own default applies, and an undocumented one is shown as `unknown`, never warned on.
+- The top 5 guard faults, by policy and reason code.
+- Heartbeats (`session_start` records): hook records with no `session_start` before them, and
+  `session_start` records with no hook record after them, per route and client. The summary groups by
+  heartbeat, not by `session_id`: a session runs from one heartbeat to the next. A client agentseam records no
+  session-start event for is listed as "no heartbeat available", never as missing one.
+
+## Evidence export
+
+```bash
+chock witness export --client <client> [--since DAYS] [--out FILE] [--repo .]
+```
+
+Writes one client's records from both routes to a local JSON file, redacted: the home folder is
+written `~`, and every string goes through the same scan-secrets redaction and 200-character cap as a
+debug trace. Beside the records it names what an agentseam evidence report asks for: the agent, its
+version (fill it in), the platform, chock's version and commit, each plugin's version string, the
+catalog ref (the plugin's install marker, or `chock.lock`), and the events seen. It prints the
+agentseam issue to attach the file to: the client's "evidence wanted" issue, read from agentseam's
+matrix row or chock's install warnings, otherwise a new evidence report. `--client` takes an
+agentseam id (`gemini_cli`), a `chock install` client (`gemini-cli`) or a `chock sync` agent name
+(`gemini`). `--out` must name a new `.json` file: an existing file is refused, never overwritten, and the
+export is created readable by you only. Nothing is uploaded: you attach the file yourself, after reading it.
