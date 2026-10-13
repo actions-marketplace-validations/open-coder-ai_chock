@@ -9,6 +9,7 @@ from typing import Any
 
 import yaml
 
+from chock.gate.runner import journal
 from chock.gate.write_gate import STOP_FLAG
 from chock.guardrails import chock_bundle_log, toggle
 from chock.plugin.store import SCRIPTS_TEMPLATE
@@ -17,8 +18,9 @@ _DATA = Path(__file__).resolve().parent / "data"
 PROTECT_ID = "chock-guardrails-protect"
 SKILL_NAME = "customize-guardrails"
 WRAPPER = SCRIPTS_TEMPLATE.format(name="chock_bundle.py")
-#: The wrapper's log settings reader, beside it so the wrapper imports it with no chock installed.
+#: The wrapper's log line and the gate's journal it writes through, beside it: no chock need be installed.
 WRAPPER_LOG = SCRIPTS_TEMPLATE.format(name="chock_bundle_log.py")
+WRAPPER_JOURNAL = SCRIPTS_TEMPLATE.format(name="chock_journal.py")
 MEMBERS = SCRIPTS_TEMPLATE.format(name="chock_bundle.json")
 
 
@@ -96,6 +98,7 @@ def files(bundle: str, rows: list[tuple[str, str]], skill_template: str) -> dict
     return {
         Path(WRAPPER): Path(toggle.__file__).read_text(encoding="utf-8"),
         Path(WRAPPER_LOG): Path(chock_bundle_log.__file__).read_text(encoding="utf-8"),
+        Path(WRAPPER_JOURNAL): Path(journal.__file__).read_text(encoding="utf-8"),
         Path(MEMBERS): json.dumps(members, indent=2) + "\n",
         Path(skill_template.format(name=SKILL_NAME)): skill(bundle, rows),
     }

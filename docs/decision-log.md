@@ -10,7 +10,10 @@ no network, no telemetry. A file's contents are never logged.
 | sync | `chock sync` (hooks run `<repo>/.chock/bin/<agent>.py`) | `<repo>/.chock/log/gate-events.jsonl` |
 | plugin | `chock install` (hooks run inside the plugin package) | `~/.chock/log/<agent>/events.jsonl` |
 
-One rotated file is kept beside each (`gate-events.1.jsonl`, `events.1.jsonl`). The sync file is
+Every chock plugin in a client, the merged bundle and single catalog plugins alike, appends to that
+client's one file; each line names its `plugin`. A line is written in one append, so hooks running at
+once never interleave. One rotated file is kept beside each (`gate-events.1.jsonl`, `events.1.jsonl`);
+rotation takes a lock (fcntl, or msvcrt on Windows), and a writer that finds it busy skips rotating. The sync file is
 the same file earlier versions wrote, so older readers keep working.
 
 ## Levels
@@ -23,7 +26,7 @@ the same file earlier versions wrote, so older readers keep working.
 
 Each line carries `ts`, `route`, `level`, `agent`, `client` (when the payload names one), `event`,
 `policy_id`, `surface`, `verdict`, `reason`, `duration_ms`, `can_ask`, `chock_version`, and on the
-plugin route `plugin_version`. On the sync route a compiled gate's line is written by `gate.py`
+plugin route `plugin` and `plugin_version`. On the sync route a compiled gate's line is written by `gate.py`
 and keeps its own fields (`kind`, `match_count`, `matches`, `rules`).
 
 ## Settings (a person's, only)
@@ -58,7 +61,7 @@ dropped silently.
 
 ```bash
 chock status --only log                       # both routes, per policy
-chock status --only log --route plugin --verdict block --since 7
+chock status --only log --route plugin --plugin <name> --verdict block --since 7
 chock status --only log --level debug --json  # allows included
 chock status --only log --follow              # print new lines as they are written
 ```

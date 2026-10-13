@@ -91,7 +91,7 @@ def test_an_agents_edit_or_write_to_the_settings_is_refused_in_both_scopes(tmp_p
 
 def _seed(repo: Path, home: Path) -> None:
     sync = [{"policy_id": "a", "verdict": "block"}, {"policy_id": "a", "verdict": "allow"}]
-    plugin = [{"policy_id": "b", "verdict": "ask", "route": "plugin", "level": "info"}]
+    plugin = [{"policy_id": "b", "verdict": "ask", "route": "plugin", "level": "info", "plugin": "b-pack"}]
     for path, lines in ((sync_log(repo), sync), (plugin_log(home), plugin)):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
@@ -108,6 +108,8 @@ def _seed(repo: Path, home: Path) -> None:
         (["--verdict", "ask"], {"b"}),
         (["--level", "info", "--route", "sync"], {"a"}),
         (["--policy", "b"], {"b"}),
+        (["--plugin", "b-pack"], {"b"}),
+        (["--plugin", "other"], set()),
     ],
 )
 def test_the_reader_reads_both_routes_and_filters(

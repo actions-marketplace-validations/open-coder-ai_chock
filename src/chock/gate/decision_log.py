@@ -177,8 +177,8 @@ def log_decision(argv, event, decision, judged, context):
         client = _dlog_client(event.raw)
         if client:
             record["client"] = client
-        if route == DLOG_ROUTE_PLUGIN:
-            record["plugin_version"] = plugin_version
+        if route == DLOG_ROUTE_PLUGIN:  # one file per client, shared by every plugin in it: each line names its own
+            record.update(plugin=plugin_name, plugin_version=plugin_version)
         if level == LOG_DEBUG:
             record["trace"] = _dlog_trace(event, context.get("wire"), rule, stages)
         log_write(log_path, record, repo)

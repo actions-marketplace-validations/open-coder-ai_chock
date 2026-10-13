@@ -99,15 +99,71 @@ def log_trace_text(text):
     return redacted if len(redacted) <= LOG_TRACE_CAP else redacted[:LOG_TRACE_CAP] + "..."
 
 
+def log_windows():
+    """Whether this is Windows, whose lock is msvcrt's rather than fcntl's."""
+    return os.name == "nt"
+
+
+def log_lock(fd):
+    """Take a non-blocking exclusive lock on `fd` (msvcrt on Windows, fcntl elsewhere); False when it is held."""
+    try:
+        if log_windows():
+            import msvcrt  # noqa: PLC0415 -- the platform's own lock, imported where it exists
+
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl  # noqa: PLC0415 -- the platform's own lock, imported where it exists
+
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (OSError, ImportError):
+        return False
+    return True
+
+
+def log_unlock(fd):
+    """Release `log_lock`'s lock; closing the descriptor releases an fcntl lock on its own."""
+    if log_windows():
+        try:
+            import msvcrt  # noqa: PLC0415 -- the platform's own lock, imported where it exists
+
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        except (OSError, ImportError):
+            return
+
+
+def log_rotate(path, max_bytes):
+    """Move a file past `max_bytes` to `<stem>.1<suffix>` under a lock; a busy lock or a failed move skips it this time."""
+    try:
+        if not path.exists() or path.stat().st_size <= max_bytes:
+            return
+        lock = os.open(str(path) + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError:
+        return
+    try:
+        if log_lock(lock):
+            try:
+                if path.stat().st_size > max_bytes:  # another writer may have rotated it first
+                    path.replace(path.with_name(path.stem + ".1" + path.suffix))
+            finally:
+                log_unlock(lock)
+    except OSError:
+        return
+    finally:
+        os.close(lock)
+
+
 def log_append(path, record, max_bytes=LOG_DEFAULT_MAX_BYTES):
-    """Append one stamped line to `path`, first moving a file past `max_bytes` to `<stem>.1<suffix>` (one kept)."""
+    """Append one stamped, complete line to `path` in a single write, so writers in parallel never interleave."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists() and path.stat().st_size > max_bytes:
-        path.replace(path.with_name(path.stem + ".1" + path.suffix))
+    log_rotate(path, max_bytes)
     stamped = {"ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), **record}
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(stamped, ensure_ascii=False) + "\n")
+    line = (json.dumps(stamped, ensure_ascii=False) + "\n").encode("utf-8")
+    fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o644)
+    try:
+        os.write(fd, line)
+    finally:
+        os.close(fd)
 
 
 def log_write(path, record, repo_root):

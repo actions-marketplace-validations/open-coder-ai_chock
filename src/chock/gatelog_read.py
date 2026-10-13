@@ -91,10 +91,12 @@ def read_events(
 
 
 def keep(record: dict[str, Any], args: argparse.Namespace) -> bool:
-    """Whether a record passes the `--policy`, `--verdict` and `--level` filters."""
+    """Whether a record passes the `--policy`, `--plugin`, `--verdict` and `--level` filters."""
     if args.policy and record.get("policy_id") != args.policy:
         return False
     if args.verdict and record.get("verdict") != args.verdict:
+        return False
+    if args.plugin and record.get("plugin") != args.plugin:
         return False
     return not (args.level == journal.LOG_INFO and record_level(record) != journal.LOG_INFO)
 

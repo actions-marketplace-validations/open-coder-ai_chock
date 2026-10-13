@@ -193,6 +193,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--level", choices=LEVELS, help="info: only decisions a policy made; debug: allows too")
     parser.add_argument("--verdict", choices=VERDICTS, help="Only records with this verdict")
+    parser.add_argument("--plugin", help="Only records from this plugin (plugin route)")
     parser.add_argument("--follow", action="store_true", help="Print new records as they are written (Ctrl-C stops)")
     parser.add_argument("--json", action="store_true", help="Emit machine-readable results")
     parser.add_argument("--by", choices=GROUP_KEYS, help="Group counts by policy, rule, agent or event")

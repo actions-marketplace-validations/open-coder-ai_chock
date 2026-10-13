@@ -201,7 +201,7 @@ def _run_baseline(args: argparse.Namespace) -> int:
 def _log_args(args: argparse.Namespace) -> list[str]:
     """The `status` flags that belong to the gate log, in `chock.gatelog`'s own spelling."""
     flags = [("--policy", args.policy), ("--since", args.since), ("--by", args.by), ("--format", args.format)]
-    flags += [("--route", args.route), ("--level", args.level), ("--verdict", args.verdict)]
+    flags += [("--route", args.route), ("--level", args.level), ("--verdict", args.verdict), ("--plugin", args.plugin)]
     given = [part for flag, value in flags if value is not None for part in (flag, str(value))]
     return given + [flag for flag, on in (("--json", args.json), ("--follow", args.follow)) if on]
 
@@ -239,6 +239,7 @@ def status_main(argv: list[str] | None) -> int:
     log_flags.add_argument("--route", choices=ROUTES, help="Log: only the sync route (this repo) or the plugin route")
     log_flags.add_argument("--level", choices=LEVELS, help="Log: info shows policy decisions only; debug adds allows")
     log_flags.add_argument("--verdict", choices=VERDICTS, help="Log: only records with this verdict")
+    log_flags.add_argument("--plugin", help="Log: only records from this plugin (plugin route)")
     log_flags.add_argument("--follow", action="store_true", help="Log: print new records as they are written")
     args = parser.parse_args(argv)
 
@@ -251,7 +252,7 @@ def status_main(argv: list[str] | None) -> int:
 
     if "log" not in selected and _log_args(args):
         print(
-            "--policy, --since, --json, --by, --format, --route, --level, --verdict and --follow apply to `--only log`",
+            "--policy, --since, --json, --by, --format, --route, --level, --verdict, --plugin and --follow apply to `--only log`",
             file=sys.stderr,
         )
         return 2

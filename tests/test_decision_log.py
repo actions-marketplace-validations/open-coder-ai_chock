@@ -27,7 +27,7 @@ from history_support import SECRET
 
 from chock.gate import assemble
 from chock.gate.runner import journal
-from chock.guardrails import chock_bundle_log as toggle
+from chock.guardrails import chock_bundle_log
 from chock.guardrails.plugin import protect_dir
 
 LAYOUTS = {
@@ -81,7 +81,7 @@ def test_the_plugin_route_names_its_package_version_and_writes_nothing_into_the_
 ) -> None:
     _, written = _call(tmp_path, home, "plugin", BLOCKING_GUARD)
 
-    assert written[0]["plugin_version"] == PLUGIN_VERSION
+    assert (written[0]["plugin"], written[0]["plugin_version"]) == (POLICY, PLUGIN_VERSION)
     assert not (tmp_path / "repo" / ".chock").exists()
 
 
@@ -176,30 +176,21 @@ def test_precedence_is_env_then_repo_then_user_then_info(tmp_path: Path, monkeyp
     assert journal.log_settings(repo)[0] == "off", "the deprecated switch still turns logging off"
 
 
-def test_the_toggle_wrapper_reads_the_settings_as_the_runtime_does(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize(("level", "lines"), [("off", 0), ("info", 1), ("debug", 1)])
+def test_the_toggle_wrapper_writes_its_off_line_at_the_level_in_force(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, level: str, lines: int
+) -> None:
     repo, home = tmp_path / "repo", tmp_path / "home"
     (repo / ".git").mkdir(parents=True)
+    monkeypatch.chdir(repo)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("CHOCK_GATE_LOG", raising=False)
-    cases = [
-        ({}, {}, None),
-        ({"level": "debug"}, {"max_bytes": 70_000}, None),
-        ({"level": "x"}, {"level": "off"}, None),
-    ]
-    cases += [({"max_bytes": 1}, {"level": "info"}, "debug"), ({}, {}, "off"), ({}, {"level": "debug"}, "bogus")]
-    for user, repo_values, env in cases:
-        settings(home, **user)
-        settings(repo, **repo_values)
-        if env is None:
-            monkeypatch.delenv("CHOCK_LOG_LEVEL", raising=False)
-        else:
-            monkeypatch.setenv("CHOCK_LOG_LEVEL", env)
-        assert toggle.log_settings(repo) == journal.log_settings(repo), (user, repo_values, env)
-    assert (toggle._LOG_LEVEL_ENV, toggle._LOG_SETTINGS) == (
-        journal.LOG_LEVEL_ENV,
-        "/".join(journal.LOG_SETTINGS_PARTS),
-    )
-    assert toggle._LOG_BYTES_RANGE == (journal.LOG_MIN_MAX_BYTES, journal.LOG_MAX_MAX_BYTES)
+    monkeypatch.setenv("CHOCK_LOG_LEVEL", level)
+
+    chock_bundle_log.log_off(repo / ".chock" / "guardrails.json", "bundle-x", "member-y")
+
+    written = records(repo / ".chock" / "log" / "gate-events.jsonl")
+    assert [(r["policy_id"], r["verdict"], r["level"]) for r in written] == [("member-y", "off", "info")] * lines
 
 
 def test_the_vendored_redaction_is_the_scan_secrets_pattern() -> None:
