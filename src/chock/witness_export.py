@@ -26,6 +26,8 @@ DATA: dict[str, Any] = json.loads(
 #: A plugin name a log line gives is only ever a folder name; anything else is not looked up.
 _PLUGIN_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _UNKNOWN = "unknown"
+#: The only file type an export writes: it never replaces a config, a script or anything else.
+EXPORT_SUFFIX = ".json"
 
 
 def install_agents() -> dict[str, str]:
@@ -133,6 +135,14 @@ def bundle(agent: str, records: list[dict[str, Any]], repo_root: Path, since: in
     }
 
 
+def write_new(path: Path, text: str) -> None:
+    """Create `path` owner-only and write `text`; an existing file (or link) raises FileExistsError, never overwritten."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    fd = os.open(path, flags, 0o600)
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(text.encode("utf-8"))
+
+
 def default_out(agent: str) -> Path:
     return Path(f"chock-witness-{agent}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.json")
 
@@ -143,13 +153,21 @@ def _parser() -> argparse.ArgumentParser:
     export = verbs.add_parser("export", help="Write one client's redacted log records to a local file; never uploads")
     export.add_argument("--client", required=True, help="The client: an agentseam id, or a chock install/sync name")
     export.add_argument("--since", type=positive_days, metavar="DAYS", help=SINCE_HELP)
-    export.add_argument("--out", type=Path, help="The file to write (default: ./chock-witness-<client>-<date>.json)")
+    export.add_argument(
+        "--out",
+        type=Path,
+        help="A new .json file to write; an existing file is refused (default: ./chock-witness-<client>-<date>.json)",
+    )
     export.add_argument("--repo", default=".", help="Repository root whose sync-route log is read (default: cwd)")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    out = args.out
+    if out is not None and out.suffix.lower() != EXPORT_SUFFIX:
+        sys.stderr.write(f"chock witness: --out must name a {EXPORT_SUFFIX} file, not {out}\n")
+        return 2
     agent = resolve_agent(args.client)
     if agent is None:
         sys.stderr.write(f"chock witness: unknown client {args.client!r}\n")
@@ -157,9 +175,12 @@ def main(argv: list[str] | None = None) -> int:
     repo_root = Path(args.repo).resolve()
     records = [r for r in read_events(repo_root, args.since, heartbeats=True) if r.get("agent") == agent]
     doc = bundle(agent, records, repo_root, args.since)
-    out = args.out or default_out(agent)
+    out = out or default_out(agent)
     try:
-        out.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+        write_new(out, json.dumps(doc, indent=2) + "\n")
+    except FileExistsError:
+        sys.stderr.write(f"chock witness: {out} already exists; move or rename it first, nothing was overwritten\n")
+        return 2
     except OSError as exc:
         sys.stderr.write(f"chock witness: cannot write {out}: {exc}\n")
         return 1

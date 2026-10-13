@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -128,3 +129,30 @@ def test_every_issue_url_is_an_agentseam_issue() -> None:
 def test_an_unknown_client_is_refused(tmp_path: Path, home: Path) -> None:
     assert cli_main(["witness", "export", "--client", "no-such-agent", "--out", str(tmp_path / "x.json")]) == 2
     assert not (tmp_path / "x.json").exists()
+
+
+def test_an_existing_file_is_refused_and_left_byte_identical(tmp_path: Path, home: Path) -> None:
+    target = tmp_path / ".claude" / "settings.json"
+    target.parent.mkdir()
+    original = b'{"hooks": {"PreToolUse": []}}\n'
+    target.write_bytes(original)
+
+    assert cli_main(["witness", "export", "--client", "goose", "--out", str(target), "--repo", str(tmp_path)]) == 2
+    assert target.read_bytes() == original
+
+
+@pytest.mark.parametrize("name", ["hooks.toml", "run.sh", "settings", "x.json.bak"])
+def test_out_must_be_a_json_file(tmp_path: Path, home: Path, name: str) -> None:
+    target = tmp_path / name
+    assert cli_main(["witness", "export", "--client", "goose", "--out", str(target), "--repo", str(tmp_path)]) == 2
+    assert not target.exists()
+
+
+def test_the_default_name_is_written_owner_only(tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert cli_main(["witness", "export", "--client", "goose", "--repo", str(tmp_path)]) == 0
+    written = we.default_out("goose")
+    assert json.loads((tmp_path / written).read_text(encoding="utf-8"))["agent"] == "goose"
+    if os.name == "posix":
+        assert (tmp_path / written).stat().st_mode & 0o777 == 0o600
+    assert cli_main(["witness", "export", "--client", "goose", "--repo", str(tmp_path)]) == 2

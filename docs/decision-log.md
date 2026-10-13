@@ -101,4 +101,5 @@ catalog ref (the plugin's install marker, or `chock.lock`), and the events seen.
 agentseam issue to attach the file to: the client's "evidence wanted" issue, read from agentseam's
 matrix row or chock's install warnings, otherwise a new evidence report. `--client` takes an
 agentseam id (`gemini_cli`), a `chock install` client (`gemini-cli`) or a `chock sync` agent name
-(`gemini`). Nothing is uploaded: you attach the file yourself, after reading it.
+(`gemini`). `--out` must name a new `.json` file: an existing file is refused, never overwritten, and the
+export is created readable by you only. Nothing is uploaded: you attach the file yourself, after reading it.
