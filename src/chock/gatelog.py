@@ -32,6 +32,9 @@ FORMATS = ("text", "md")
 UNKNOWN = "unknown"
 TOP_FILES = 3
 _SINCE_RANGE = "must be 1 or more days"
+REPO_HELP = "Repository root (default: cwd)"
+SINCE_HELP = "Only records from the last N days"
+JSON_HELP = "Emit machine-readable results"
 #: A gate's `matches` line is `<path>[:<line>]: <label>`; only the path is read, never the label.
 _MATCH_PATH_RE = re.compile(r"^(?P<path>[^\s:]+)(?::\d+)?: ")
 
@@ -185,9 +188,9 @@ def positive_days(value: str) -> int:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="chock status --only log", description="Read the decision log, both routes")
-    parser.add_argument("--repo", default=".", help="Repository root (default: cwd)")
+    parser.add_argument("--repo", default=".", help=REPO_HELP)
     parser.add_argument("--policy", help="Restrict the report to one policy id")
-    parser.add_argument("--since", type=positive_days, metavar="DAYS", help="Only records from the last N days")
+    parser.add_argument("--since", type=positive_days, metavar="DAYS", help=SINCE_HELP)
     parser.add_argument(
         "--route", choices=ROUTES, help="Only the sync route (this repo) or the plugin route (~/.chock)"
     )
@@ -195,7 +198,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--verdict", choices=VERDICTS, help="Only records with this verdict")
     parser.add_argument("--plugin", help="Only records from this plugin (plugin route)")
     parser.add_argument("--follow", action="store_true", help="Print new records as they are written (Ctrl-C stops)")
-    parser.add_argument("--json", action="store_true", help="Emit machine-readable results")
+    parser.add_argument("--json", action="store_true", help=JSON_HELP)
     parser.add_argument("--by", choices=GROUP_KEYS, help="Group counts by policy, rule, agent or event")
     parser.add_argument("--format", choices=FORMATS, default="text", help="md prints a paste-able markdown summary")
     return parser

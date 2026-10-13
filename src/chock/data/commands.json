@@ -31,6 +31,10 @@
       "fn": "status_main",
       "help": "Policy states and coverage (--only registry,log for more)"
     },
+    "witness": {
+      "module": "chock.witness_export",
+      "help": "Export one client's redacted decision log for its agentseam evidence issue (witness export --client C)"
+    },
     "enable": {
       "module": "chock.toggles",
       "fn": "enable_main",

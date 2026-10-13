@@ -230,6 +230,7 @@ def status_main(argv: list[str] | None) -> int:
     parser = argparse.ArgumentParser(prog="chock status")
     parser.add_argument("--repo", default=".", help="Repo root")
     parser.add_argument("--only", default=None, help="Comma-separated subset of: policies, registry, log")
+    parser.add_argument("--summary", action="store_true", help="Log summary: rates, latency vs timeout, faults")
     log_flags = parser.add_argument_group("log section")
     log_flags.add_argument("--policy", help="Log: restrict to one policy id")
     log_flags.add_argument("--since", type=positive_days, metavar="DAYS", help="Log: only records from the last N days")
@@ -242,6 +243,15 @@ def status_main(argv: list[str] | None) -> int:
     log_flags.add_argument("--plugin", help="Log: only records from this plugin (plugin route)")
     log_flags.add_argument("--follow", action="store_true", help="Log: print new records as they are written")
     args = parser.parse_args(argv)
+    if args.summary:
+        from chock.gatelog_summary import main as summary_main
+
+        if any((args.only, args.policy, args.by, args.format, args.level, args.verdict, args.plugin, args.follow)):
+            print("--summary takes --since, --route and --json only", file=sys.stderr)
+            return 2
+        flags = [("--since", args.since), ("--route", args.route)]
+        given = [part for flag, value in flags if value is not None for part in (flag, str(value))]
+        return int(summary_main(["--repo", args.repo, *given, *(["--json"] if args.json else [])]) or 0)
 
     sections = ("policies", "registry", "log")
     selected = [s.strip() for s in args.only.split(",")] if args.only else ["policies"]
