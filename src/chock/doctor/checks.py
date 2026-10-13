@@ -110,7 +110,7 @@ def client_version(target: Target, given: str | None) -> Check:
     seen = recordings.versions(target.agent)
     if not seen:
         return Check(
-            WARN,
+            INFO,
             "client",
             f"agentseam has witnessed no {target.agent} version",
             "see agentseam's evidence wanted issues",

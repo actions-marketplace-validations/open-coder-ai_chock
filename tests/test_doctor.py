@@ -179,3 +179,15 @@ def test_the_command_exits_1_on_a_fail_0_otherwise_and_filters_by_client(tmp_pat
     assert cli.main(["--repo", str(repo), "--json"]) == 1
     rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert {(r["client"], r["route"]) for r in rows} == {(AGENT, "sync")}
+
+
+def test_a_healthy_install_of_an_unwitnessed_client_reports_info_and_exits_0(tmp_path, home, capsys):
+    repo = _sync_repo(tmp_path, "windsurf")
+    [target] = sync_targets(repo)
+    assert not recordings.versions("windsurf")
+    assert checks.client_version(target, None).status == "INFO"
+    found = checks.run(target, repo)
+    assert {c.status for c in found} <= {"PASS", "INFO"}
+    assert "INFO" in {c.status for c in found}
+    assert cli.main(["--repo", str(repo)]) == 0
+    assert "WARN" not in capsys.readouterr().out
