@@ -1,0 +1,16 @@
+{
+  "format": "chock-witness-export/1",
+  "template": "https://github.com/open-coder-ai/agentseam/blob/main/.github/ISSUE_TEMPLATE/evidence-report.yml",
+  "new_issue_url": "https://github.com/open-coder-ai/agentseam/issues/new?template=evidence-report.yml",
+  "evidence_marker": "Evidence wanted",
+  "issue_url_pattern": "https://github\\.com/open-coder-ai/agentseam/issues/\\d+",
+  "form_fields": {
+    "agent": "Agent",
+    "agent_version": "Agent version",
+    "platform": "Platform",
+    "events": "Gate",
+    "records": "Report"
+  },
+  "agent_version_unknown": "fill in: exactly as the agent reports it",
+  "notice": "Skim this file before you attach it: anything you did not expect in it is a redaction bug. chock never uploads it."
+}

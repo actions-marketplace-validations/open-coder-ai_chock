@@ -10,6 +10,7 @@ Everyday:
   sync       Recompile + rewire so the repo matches its policies (--ci/--skills for extras)
   check      Run every truth check: validate, verify, evals, matrix (--only to narrow; --history scans past commits)
   status     Policy states and coverage (--only registry,log for more)
+  witness    Export one client's redacted decision log for its agentseam evidence issue (witness export --client C)
   enable     Enable a policy by id
   disable    Disable a policy by id
   bundle     Switch a member of an installed plugin bundle on or off (bundle on|off <id>, bundle status)
