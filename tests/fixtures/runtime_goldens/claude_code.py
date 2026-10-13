@@ -1286,7 +1286,10 @@ def log_decision(argv, event, decision, judged, context):
             return
         plugin_name, plugin_version = _dlog_plugin_manifest(runtime, context.get('manifests', ())) if route == DLOG_ROUTE_PLUGIN else ('', '')
         target = next((v for v in (_dlog_flag_value(argv, f) for f in _DLOG_TARGET_FLAGS) if v), None)
-        record = {'route': route, 'agent': agent, 'event': _DLOG_EVENT_LOGGED.get(event.event, event.event), 'policy_id': _dlog_policy_id(target, route, plugin_name), 'surface': _DLOG_SURFACE.get(event.event, str(event.event)), 'verdict': _DLOG_SPOKEN.get(outcome, 'allow'), 'reason': _dlog_reason(source, outcome), 'duration_ms': round((_chock_time.monotonic() - started) * 1000), 'can_ask': context.get('can_ask'), 'chock_version': _dlog_chock_version()}
+        record = {'route': route, 'agent': agent, 'event': _DLOG_EVENT_LOGGED.get(event.event, event.event), 'policy_id': _dlog_policy_id(target, route, plugin_name), 'surface': _DLOG_SURFACE.get(event.event, str(event.event)), 'verdict': _DLOG_SPOKEN.get(outcome, 'allow'), 'reason': _dlog_reason(source, outcome), 'duration_ms': round((_chock_time.monotonic() - started) * 1000), 'can_ask': context.get('can_ask')}
+        version = _dlog_chock_version()
+        if version:
+            record['chock_version'] = version
         client = _dlog_client(event.raw)
         if client:
             record['client'] = client

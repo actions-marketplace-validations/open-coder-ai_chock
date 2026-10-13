@@ -71,7 +71,8 @@ def test_each_level_on_each_route_writes_exactly_its_records(
     for record in written:
         assert record["route"] == route
         assert record["policy_id"] == POLICY
-        assert {"ts", "agent", "event", "surface", "reason", "duration_ms", "can_ask", "chock_version"} <= set(record)
+        assert {"ts", "agent", "event", "surface", "reason", "duration_ms", "can_ask"} <= set(record)
+        assert record["chock_version"], "the suite's Python has chock installed: its version is named"
         assert ("trace" in record) == (level == "debug")
         assert ("plugin_version" in record) == (route == "plugin")
 
@@ -252,3 +253,30 @@ def test_a_sync_gate_decision_is_one_line_not_two(tmp_path: Path, home: Path, le
     written = records(sync_log(repo))
     assert [(r["policy_id"], r["verdict"], r["route"]) for r in written] == [("p-gate", "block", "sync")]
     assert SECRET not in sync_log(repo).read_text(encoding="utf-8")
+
+
+def test_an_unknown_chock_version_is_left_out_not_written_empty(tmp_path: Path, home: Path) -> None:
+    """A Python with no chock installed (no site-packages, `-S`) cannot name a version: the key is absent."""
+    repo, runtime, guard = plugin_layout(tmp_path, BLOCKING_GUARD)
+
+    subprocess.run(
+        [sys.executable, "-S", str(runtime), "--guard", str(guard)],
+        input=json.dumps(
+            {
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Bash",
+                "tool_input": {"command": "rm -rf x"},
+                "session_id": "s",
+                "cwd": str(repo),
+            }
+        ),
+        capture_output=True,
+        text=True,
+        cwd=repo,
+        env=hook_env(home),
+        timeout=60,
+        check=False,
+    )
+
+    [record] = records(plugin_log(home))
+    assert "chock_version" not in record
