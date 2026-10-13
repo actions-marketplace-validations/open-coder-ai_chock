@@ -9,8 +9,7 @@ from pathlib import Path
 
 from agentseam import recordings
 
-import chock
-from chock import vendors
+from chock import __version__, vendors
 from chock.doctor import fired
 from chock.doctor.targets import ROUTE_SYNC, Target, marker_engine
 from chock.gate import runtime_bundle
@@ -78,7 +77,7 @@ def launcher(target: Target) -> Check:
 
 def _engine_names() -> str:
     commit = engine_commit()
-    return f"chock {chock.__version__}" + (f" ({commit[:12]})" if commit else "")
+    return f"chock {__version__}" + (f" ({commit[:12]})" if commit else "")
 
 
 def engine(target: Target) -> Check:
@@ -93,7 +92,7 @@ def engine(target: Target) -> Check:
         return Check(PASS, "engine", f"runtime matches {_engine_names()}")
     built = marker_engine(target)
     recorded, version = built.get("commit"), built.get("version")
-    if version != chock.__version__ or (recorded and engine_commit() and recorded != engine_commit()):
+    if version != __version__ or (recorded and engine_commit() and recorded != engine_commit()):
         what = f"chock {version}" + (f" ({str(recorded)[:12]})" if recorded else "")
         return Check(WARN, "engine", f"runtime matches, but built by {what}, not {_engine_names()}", _rebuild(target))
     return Check(PASS, "engine", f"runtime matches; built by {_engine_names()}")
