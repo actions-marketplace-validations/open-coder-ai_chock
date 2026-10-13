@@ -14,8 +14,7 @@ from typing import Any
 
 from agentseam import matrix as _matrix
 
-import chock
-from chock import vendors
+from chock import __version__, vendors
 from chock.gate.runner import journal
 from chock.gatelog import SINCE_HELP, positive_days
 from chock.gatelog_read import read_events, record_route
@@ -124,7 +123,7 @@ def bundle(agent: str, records: list[dict[str, Any]], repo_root: Path, since: in
         "agent_version": DATA["agent_version_unknown"],
         "clients": sorted({str(r["client"]) for r in records if r.get("client")}),
         "platform": f"{platform.system()} {platform.release()} {platform.machine()}",
-        "engine": {"chock_version": chock.__version__, "commit": engine_commit() or _UNKNOWN},
+        "engine": {"chock_version": __version__, "commit": engine_commit() or _UNKNOWN},
         "plugins": plugins,
         "catalog_refs": refs or [_UNKNOWN],
         "events": sorted({str(r.get("event")) for r in records if r.get("event")}),
