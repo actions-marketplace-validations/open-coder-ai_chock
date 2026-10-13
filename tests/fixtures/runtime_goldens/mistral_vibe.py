@@ -888,7 +888,7 @@ def log_append(path, record, max_bytes=LOG_DEFAULT_MAX_BYTES):
     log_rotate(path, max_bytes)
     stamped = {'ts': _chock_datetime.now(_chock_timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), **record}
     line = (json.dumps(stamped, ensure_ascii=False) + '\n').encode('utf-8')
-    fd = _chock_os.open(str(path), _chock_os.O_WRONLY | _chock_os.O_APPEND | _chock_os.O_CREAT | getattr(_chock_os, 'O_BINARY', 0), 420)
+    fd = _chock_os.open(str(path), _chock_os.O_WRONLY | _chock_os.O_APPEND | _chock_os.O_CREAT | getattr(_chock_os, 'O_BINARY', 0), 384)
     try:
         _chock_os.write(fd, line)
     finally:

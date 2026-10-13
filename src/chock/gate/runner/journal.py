@@ -159,7 +159,7 @@ def log_append(path, record, max_bytes=LOG_DEFAULT_MAX_BYTES):
     log_rotate(path, max_bytes)
     stamped = {"ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), **record}
     line = (json.dumps(stamped, ensure_ascii=False) + "\n").encode("utf-8")
-    fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o644)
+    fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o600)
     try:
         os.write(fd, line)
     finally:

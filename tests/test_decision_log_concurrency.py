@@ -115,3 +115,12 @@ def test_two_plugins_in_one_client_share_its_file_and_each_line_names_its_plugin
         run_hook(repo, runtime, guard, "rm -rf build", hook_env(home))
 
     assert sorted(r["plugin"] for r in records(plugin_log(home))) == sorted([POLICY, "other-pack"])
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX modes")
+def test_a_new_log_file_is_readable_by_its_owner_only(tmp_path: Path) -> None:
+    log = tmp_path / "events.jsonl"
+
+    journal.log_append(log, {"policy_id": "p"})
+
+    assert log.stat().st_mode & 0o077 == 0
