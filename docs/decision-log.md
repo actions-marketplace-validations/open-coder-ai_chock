@@ -25,8 +25,9 @@ the same file earlier versions wrote, so older readers keep working.
 | `debug` | every hook call, allows included, plus a `trace`: wire event, tool, matched rule (or "no rule matched"), the guard's exit code, per-stage timings, and the command or path cut to 200 characters with every value the scan-secrets policy would block replaced by `[redacted]` |
 
 Each line carries `ts`, `route`, `level`, `agent`, `client` (when the payload names one), `event`,
-`policy_id`, `surface`, `verdict`, `reason`, `duration_ms`, `can_ask`, `chock_version` (left out when the hook's Python has no chock installed), and on the
-plugin route `plugin` and `plugin_version`. On the sync route a compiled gate's line is written by `gate.py`
+`policy_id`, `surface`, `verdict`, `reason`, `duration_ms` and `can_ask`. The sync route adds
+`chock_version` (left out when the hook's Python has no chock installed). The plugin route adds
+`plugin` and `plugin_version` instead, never `chock_version`: a plugin runs its own bundled Python, not chock. On the sync route a compiled gate's line is written by `gate.py`
 and keeps its own fields (`kind`, `match_count`, `matches`, `rules`).
 
 ## Settings (a person's, only)

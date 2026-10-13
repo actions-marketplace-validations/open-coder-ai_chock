@@ -173,7 +173,7 @@ def log_decision(argv, event, decision, judged, context):
             "duration_ms": round((time.monotonic() - started) * 1000),
             "can_ask": context.get("can_ask"),
         }
-        version = _dlog_chock_version()
+        version = _dlog_chock_version() if route == DLOG_ROUTE_SYNC else ""  # a plugin runs no chock: never named
         if version:  # unknown is left out, never written empty
             record["chock_version"] = version
         client = _dlog_client(event.raw)

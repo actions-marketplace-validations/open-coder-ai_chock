@@ -72,7 +72,12 @@ def test_each_level_on_each_route_writes_exactly_its_records(
         assert record["route"] == route
         assert record["policy_id"] == POLICY
         assert {"ts", "agent", "event", "surface", "reason", "duration_ms", "can_ask"} <= set(record)
-        assert record["chock_version"], "the suite's Python has chock installed: its version is named"
+        if route == "sync":
+            assert record["chock_version"], "the suite's Python has chock installed: the sync line names it"
+        else:
+            assert "chock_version" not in record, (
+                "a plugin runs its own Python, not chock: even a findable chock is not named"
+            )
         assert ("trace" in record) == (level == "debug")
         assert ("plugin_version" in record) == (route == "plugin")
 
@@ -256,8 +261,8 @@ def test_a_sync_gate_decision_is_one_line_not_two(tmp_path: Path, home: Path, le
 
 
 def test_an_unknown_chock_version_is_left_out_not_written_empty(tmp_path: Path, home: Path) -> None:
-    """A Python with no chock installed (no site-packages, `-S`) cannot name a version: the key is absent."""
-    repo, runtime, guard = plugin_layout(tmp_path, BLOCKING_GUARD)
+    """A sync hook whose Python has no chock installed (no site-packages, `-S`) cannot name it: the key is absent."""
+    repo, runtime, guard = sync_layout(tmp_path, BLOCKING_GUARD)
 
     subprocess.run(
         [sys.executable, "-S", str(runtime), "--guard", str(guard)],
@@ -278,5 +283,5 @@ def test_an_unknown_chock_version_is_left_out_not_written_empty(tmp_path: Path, 
         check=False,
     )
 
-    [record] = records(plugin_log(home))
+    [record] = records(sync_log(repo))
     assert "chock_version" not in record
