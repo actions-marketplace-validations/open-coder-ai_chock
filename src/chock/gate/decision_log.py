@@ -58,7 +58,7 @@ def runtime_route(runtime):
     return DLOG_ROUTE_SYNC if (folder.parent.name, folder.name) == _DLOG_SYNC_BIN else DLOG_ROUTE_PLUGIN
 
 
-def _dlog_plugin_manifest(runtime, manifests):
+def dlog_plugin_manifest(runtime, manifests):
     """(name, version) from the nearest plugin manifest above the runtime; empty strings when there is none."""
     folder = Path(runtime).resolve().parent
     for root in [folder, *folder.parents][:_DLOG_MANIFEST_DEPTH]:
@@ -159,7 +159,7 @@ def log_decision(argv, event, decision, judged, context):
         if not log_admits(level, log_record_level({"verdict": _DLOG_SPOKEN.get(outcome, "allow")})):
             return  # nothing to write: skip the manifest and version lookups on the hot path
         plugin_name, plugin_version = (
-            _dlog_plugin_manifest(runtime, context.get("manifests", ())) if route == DLOG_ROUTE_PLUGIN else ("", "")
+            dlog_plugin_manifest(runtime, context.get("manifests", ())) if route == DLOG_ROUTE_PLUGIN else ("", "")
         )
         target = next((v for v in (_dlog_flag_value(argv, f) for f in _DLOG_TARGET_FLAGS) if v), None)
         record = {
@@ -185,4 +185,23 @@ def log_decision(argv, event, decision, judged, context):
             record["trace"] = _dlog_trace(event, context.get("wire"), rule, stages)
         log_write(log_path, record, repo)
     except Exception:  # noqa: BLE001 -- a log line must never change the decision or raise
+        return
+
+
+def log_heartbeat(event, manifests):
+    """The `session_start` line a session-start hook writes at info: which route, agent and package ran. Never raises."""
+    try:
+        runtime = globals().get("__file__") or sys.argv[0]
+        route = runtime_route(runtime)
+        agent = str(getattr(event, "agent", None) or "unknown")
+        log_path, repo = _dlog_paths(route, runtime, agent, event)
+        record = {"event": "session_start", "route": route, "agent": agent}
+        if route == DLOG_ROUTE_PLUGIN:
+            plugin_name, plugin_version = dlog_plugin_manifest(runtime, manifests)
+            record.update(plugin=plugin_name, plugin_version=plugin_version)
+        version = _dlog_chock_version() if route == DLOG_ROUTE_SYNC else ""
+        if version:
+            record["chock_version"] = version
+        log_write(log_path, record, repo)
+    except Exception:  # noqa: BLE001 -- a heartbeat must never block a session or raise
         return

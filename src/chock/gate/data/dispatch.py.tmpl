@@ -56,6 +56,9 @@ def _judge(event, judged):
 
 
 def handle(event):
+    starting = event.event == "session_start"
+    if starting:
+        log_heartbeat(event, _CHOCK_PLUGIN_MANIFESTS)
     # A door that cannot decide refuses. An exception escaping here would exit the hook
     # with a traceback, which every client reads as a non-blocking error: fail-open, with
     # the reason on a stderr nobody watches. The refusal carries the reason instead.
@@ -73,5 +76,6 @@ def handle(event):
         context.update(wire=_chock_wire(event.raw), can_ask=_chock_can_ask(event.raw))
     except Exception:  # noqa: BLE001 -- the log's context must never change the decision
         pass
-    log_decision(sys.argv[1:], event, decision, judged, context)
+    if not starting:  # a session start's one line is its heartbeat
+        log_decision(sys.argv[1:], event, decision, judged, context)
     return decision

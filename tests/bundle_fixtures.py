@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import textwrap
 from pathlib import Path
 from typing import Any
@@ -123,6 +124,11 @@ def hook_commands(doc: Any) -> list[str]:
         own = [doc["command"]] if isinstance(doc.get("command"), str) else []
         return own + [c for v in doc.values() for c in hook_commands(v)]
     return [c for v in doc for c in hook_commands(v)] if isinstance(doc, list) else []
+
+
+def judging_commands(doc: Any) -> list[str]:
+    """`hook_commands` minus the session-start heartbeat: the commands handed a guard or gate to judge with."""
+    return [c for c in hook_commands(doc) if re.search(r" --(?:guard|gate) ", c)]
 
 
 def run_command(command: str, plugin_root: Path, cwd: Path, payload: dict) -> Any:

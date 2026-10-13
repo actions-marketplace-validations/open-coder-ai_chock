@@ -16,7 +16,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from chock.guardrails import plugin as guardrails
-from chock.plugin import bundle_grade, bundles, claude
+from chock.hooks import heartbeat
+from chock.plugin import bundle_grade, bundles, claude, hook_dir
 from chock.plugin.clients import CLIENTS, Client
 from chock.plugin.listing import LICENSE_REL, license_text
 from chock.plugin.store import SCRIPTS_TEMPLATE
@@ -250,6 +251,9 @@ def merged_files(
     protect_files = client.files(protect.policy_dir, protect.manifest, repo_root)
     protect_doc = _merge_member(client, protect.id, _scripts_only(protect_files, hooks_rel), files, (hooks_rel,))
     hooks = _merge_into(hooks, guardrails.verify_at_stop(protect_doc, client.agent))
+    beat = heartbeat.plugin_doc(client.agent, hooks)
+    if beat is not None:  # one session_start line per session, from the runtime the protection already ships
+        hooks = _merge_into(hooks, hook_dir.store_timeout(client.own_layout, beat) if client.own_layout else beat)
     for rel, content in guardrails.files(bundle["id"], _rows(client, bundle, packages), skill_rel).items():
         _place(files, rel, content)
     if manifest_rel is not None:

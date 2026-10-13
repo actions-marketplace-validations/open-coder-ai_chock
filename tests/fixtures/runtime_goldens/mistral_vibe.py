@@ -1149,7 +1149,7 @@ def runtime_route(runtime):
     folder = _chock_Path(runtime).resolve().parent
     return DLOG_ROUTE_SYNC if (folder.parent.name, folder.name) == _DLOG_SYNC_BIN else DLOG_ROUTE_PLUGIN
 
-def _dlog_plugin_manifest(runtime, manifests):
+def dlog_plugin_manifest(runtime, manifests):
     """(name, version) from the nearest plugin manifest above the runtime; empty strings when there is none."""
     folder = _chock_Path(runtime).resolve().parent
     for root in [folder, *folder.parents][:_DLOG_MANIFEST_DEPTH]:
@@ -1241,7 +1241,7 @@ def log_decision(argv, event, decision, judged, context):
         level = log_settings(repo)[0]
         if not log_admits(level, log_record_level({'verdict': _DLOG_SPOKEN.get(outcome, 'allow')})):
             return
-        plugin_name, plugin_version = _dlog_plugin_manifest(runtime, context.get('manifests', ())) if route == DLOG_ROUTE_PLUGIN else ('', '')
+        plugin_name, plugin_version = dlog_plugin_manifest(runtime, context.get('manifests', ())) if route == DLOG_ROUTE_PLUGIN else ('', '')
         target = next((v for v in (_dlog_flag_value(argv, f) for f in _DLOG_TARGET_FLAGS) if v), None)
         record = {'route': route, 'agent': agent, 'event': _DLOG_EVENT_LOGGED.get(event.event, event.event), 'policy_id': _dlog_policy_id(target, route, plugin_name), 'surface': _DLOG_SURFACE.get(event.event, str(event.event)), 'verdict': _DLOG_SPOKEN.get(outcome, 'allow'), 'reason': _dlog_reason(source, outcome), 'duration_ms': round((_chock_time.monotonic() - started) * 1000), 'can_ask': context.get('can_ask')}
         version = _dlog_chock_version() if route == DLOG_ROUTE_SYNC else ''
@@ -1254,6 +1254,24 @@ def log_decision(argv, event, decision, judged, context):
             record.update(plugin=plugin_name, plugin_version=plugin_version)
         if level == LOG_DEBUG:
             record['trace'] = _dlog_trace(event, context.get('wire'), rule, stages)
+        log_write(log_path, record, repo)
+    except Exception:
+        return
+
+def log_heartbeat(event, manifests):
+    """The `session_start` line a session-start hook writes at info: which route, agent and package ran. Never raises."""
+    try:
+        runtime = globals().get('__file__') or sys.argv[0]
+        route = runtime_route(runtime)
+        agent = str(getattr(event, 'agent', None) or 'unknown')
+        log_path, repo = _dlog_paths(route, runtime, agent, event)
+        record = {'event': 'session_start', 'route': route, 'agent': agent}
+        if route == DLOG_ROUTE_PLUGIN:
+            plugin_name, plugin_version = dlog_plugin_manifest(runtime, manifests)
+            record.update(plugin=plugin_name, plugin_version=plugin_version)
+        version = _dlog_chock_version() if route == DLOG_ROUTE_SYNC else ''
+        if version:
+            record['chock_version'] = version
         log_write(log_path, record, repo)
     except Exception:
         return
@@ -2561,6 +2579,9 @@ def _judge(event, judged):
 
 
 def handle(event):
+    starting = event.event == "session_start"
+    if starting:
+        log_heartbeat(event, _CHOCK_PLUGIN_MANIFESTS)
     # A door that cannot decide refuses. An exception escaping here would exit the hook
     # with a traceback, which every client reads as a non-blocking error: fail-open, with
     # the reason on a stderr nobody watches. The refusal carries the reason instead.
@@ -2578,7 +2599,8 @@ def handle(event):
         context.update(wire=_chock_wire(event.raw), can_ask=_chock_can_ask(event.raw))
     except Exception:  # noqa: BLE001 -- the log's context must never change the decision
         pass
-    log_decision(sys.argv[1:], event, decision, judged, context)
+    if not starting:  # a session start's one line is its heartbeat
+        log_decision(sys.argv[1:], event, decision, judged, context)
     return decision
 # <<< agentseam handler <<<
 

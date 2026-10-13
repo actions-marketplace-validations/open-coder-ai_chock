@@ -31,6 +31,10 @@
       "fn": "status_main",
       "help": "Policy states and coverage (--only registry,log for more)"
     },
+    "doctor": {
+      "module": "chock.doctor.cli",
+      "help": "Check each client's hooks on each route: present, current, and seen running (--client X)"
+    },
     "enable": {
       "module": "chock.toggles",
       "fn": "enable_main",

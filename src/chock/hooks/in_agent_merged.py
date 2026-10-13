@@ -16,6 +16,7 @@ from typing import NamedTuple
 
 from chock import vendors
 from chock.emit import write_generated_json
+from chock.hooks import heartbeat
 from chock.hooks.in_agent_generic import load_config as _load_config
 from chock.hooks.runtime_vendor import owned_markers, runtime_rel, vendor_runtime
 
@@ -198,6 +199,7 @@ def install_merged(repo_root: Path, vendor: str, *, uninstall: bool = False) -> 
         wanted = [] if uninstall else _compiled(repo_root, wiring)
         installed_any = installed_any or bool(wanted)
         reported.extend(_merge_event(hooks, wiring, wanted, markers))
+    _merge_heartbeat(hooks, vendor, markers, wanted=installed_any)
 
     if installed_any or _runtime_referenced(hooks, vendor):
         vendor_runtime(repo_root, vendor)
@@ -214,6 +216,16 @@ def install_merged(repo_root: Path, vendor: str, *, uninstall: bool = False) -> 
     config_path.parent.mkdir(parents=True, exist_ok=True)
     write_generated_json(config_path, settings)
     return reported
+
+
+def _merge_heartbeat(hooks: dict, vendor: str, markers: tuple[str, ...], *, wanted: bool) -> None:
+    """chock's session-start heartbeat entry, while any other entry of chock's is installed; none otherwise."""
+    beat = heartbeat.sync_doc(vendor)
+    if beat is None:
+        return
+    event = vendors.wire_event(vendor, "session_start")
+    flat = MERGED[vendor].wirings[0].flat
+    _merge_event(hooks, Wiring(event, "", flat, "command"), list(beat["hooks"][event]) if wanted else [], markers)
 
 
 def _runtime_referenced(hooks: dict, vendor: str) -> bool:

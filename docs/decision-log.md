@@ -30,6 +30,21 @@ Each line carries `ts`, `route`, `level`, `agent`, `client` (when the payload na
 `plugin` and `plugin_version` instead, never `chock_version`: a plugin runs its own bundled Python, not chock. On the sync route a compiled gate's line is written by `gate.py`
 and keeps its own fields (`kind`, `match_count`, `matches`, `rules`).
 
+## Heartbeat
+
+Where the client documents a session-start event, chock wires one more hook there (the runtime,
+with no flags) on both routes, and it writes one line per session at `info`:
+
+```json
+{"ts": "...", "event": "session_start", "route": "sync", "agent": "codex_cli", "chock_version": "0.15.2", "level": "info"}
+```
+
+The plugin route's line carries `plugin` and `plugin_version` instead of `chock_version`. The
+hook never refuses and never blocks the session; a heartbeat that cannot be written is dropped.
+Most clients fail open when a hook crashes or never loads, so a session with no heartbeat is the
+sign of a hook that did not run: `chock doctor` reports it. Antigravity, Mistral Vibe and
+Windsurf document no session-start event, so they have no heartbeat.
+
 ## Settings (a person's, only)
 
 ```json

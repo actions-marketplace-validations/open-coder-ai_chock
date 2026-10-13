@@ -14,6 +14,7 @@ from chock.compile.emitters.in_agent import (
 )
 from chock.compile.emitters.in_agent_tool_call import COPILOT_FILE
 from chock.emit import write_generated_json
+from chock.hooks import heartbeat
 from chock.hooks.in_agent_generic import install_generic, installed_generic_ids
 from chock.hooks.in_agent_merged import MERGED, install_merged, installed_merged_ids
 from chock.hooks.runtime_vendor import vendor_runtime
@@ -115,6 +116,8 @@ def _install_agent_hooks(repo_root: Path, *, uninstall: bool = False) -> list[st
     for by_event in entries.values():
         for event, kept in by_event.items():
             events.setdefault(event, []).extend(kept)
+    for event, beat in heartbeat.copilot_entries(_OWNED_FILE_VENDOR).items():
+        events.setdefault(event, []).extend(beat)
     doc = {**AGENT_HOOKS_ENVELOPE, "hooks": dict(sorted(events.items()))}
     dest.parent.mkdir(parents=True, exist_ok=True)
     write_generated_json(dest, doc)
