@@ -1119,6 +1119,13 @@ def _dlog_repo_root(start):
         return None
     return next((folder for folder in (here, *here.parents) if (folder / '.git').exists()), None)
 
+def dlog_session(event, record):
+    """`record` with the client's session id, where the payload carries one: what groups a session's lines."""
+    session = getattr(event, 'session_id', None)
+    if isinstance(session, str) and session:
+        record['session_id'] = session
+    return record
+
 def _dlog_client(raw):
     named = raw.get('client_type') if isinstance(raw, dict) else None
     return named if isinstance(named, str) else None
@@ -1173,6 +1180,7 @@ def log_decision(argv, event, decision, judged, context):
         version = _dlog_chock_version() if route == DLOG_ROUTE_SYNC else ''
         if version:
             record['chock_version'] = version
+        dlog_session(event, record)
         client = _dlog_client(event.raw)
         if client:
             record['client'] = client
@@ -1191,7 +1199,7 @@ def log_heartbeat(event, manifests):
         route = runtime_route(runtime)
         agent = str(getattr(event, 'agent', None) or 'unknown')
         log_path, repo = _dlog_paths(route, runtime, agent, event)
-        record = {'event': 'session_start', 'route': route, 'agent': agent}
+        record = dlog_session(event, {'event': 'session_start', 'route': route, 'agent': agent})
         if route == DLOG_ROUTE_PLUGIN:
             plugin_name, plugin_version = dlog_plugin_manifest(runtime, manifests)
             record.update(plugin=plugin_name, plugin_version=plugin_version)

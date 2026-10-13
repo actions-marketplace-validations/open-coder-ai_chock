@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from bundle_fixtures import make_members
 from decision_log_support import (
+    BLOCKING_GUARD,
     CLEAN_GUARD,
     PLUGIN_VERSION,
     POLICY,
@@ -17,6 +18,7 @@ from decision_log_support import (
     plugin_layout,
     plugin_log,
     records,
+    run_hook,
     settings,
     sync_layout,
     sync_log,
@@ -70,11 +72,12 @@ def test_one_heartbeat_per_session_start_at_each_level_and_route(tmp_path, route
         return
     assert len(found) == 1  # the heartbeat only: a session start writes no decision line, even at debug
     beat = found[0]
-    assert {k: beat[k] for k in ("event", "route", "agent", "level")} == {
+    assert {k: beat[k] for k in ("event", "route", "agent", "level", "session_id")} == {
         "event": "session_start",
         "route": route,
         "agent": "claude_code",
         "level": "info",
+        "session_id": "s",
     }
     if route == "plugin":
         assert (beat["plugin"], beat["plugin_version"]) == (POLICY, PLUGIN_VERSION)
@@ -177,3 +180,12 @@ def test_a_plugins_session_start_never_arms_the_repository(tmp_path):
     done = _start(runtime, repo, hook_env(tmp_path / "home"))
     assert (done.returncode, done.stdout) == (0, "")  # no arming advice, no `chock sync` run: only the heartbeat
     assert not (repo / ".chock" / "bin").exists()
+
+
+@pytest.mark.parametrize("route", sorted(LAYOUTS))
+def test_tool_use_lines_carry_the_session_id_their_heartbeat_does(tmp_path, route):
+    make, log_of = LAYOUTS[route]
+    repo, runtime, guard = make(tmp_path, BLOCKING_GUARD)
+    home = tmp_path / "home"
+    run_hook(repo, runtime, guard, "rm -rf build", hook_env(home))
+    assert [r.get("session_id") for r in records(log_of(repo, home))] == ["s"]
