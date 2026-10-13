@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import json
 import os
 import shlex
 import shutil
 import subprocess
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 from .budget import ENGINE_BUDGET_SECONDS, engine_deadline, engine_remaining, time_left
+from .runner.journal import log_write
 
 GUARD_VIOLATION = 1
 #: A guard that wants the user asked before the command runs, with its own reason.
@@ -43,8 +42,9 @@ _WINDOWS = "nt"
 #: The bash found by the first probe, reused for every later guard in this process.
 _FOUND_BASH = {}
 
-GATE_LOG_ENV = "CHOCK_GATE_LOG"
-_LOG_MAX_BYTES = 1_048_576
+#: The last guard run in this process: its `outcome` and exit `code`, for the decision log.
+GUARD_LAST = {}
+GUARD_MISSING = "missing"
 
 _BASH_PROBE_SECONDS = 10
 
@@ -201,6 +201,7 @@ def run_guard_detailed(guard: Path, command: str, tool: str = "", *, can_ask: bo
         print(f"chock: guard could not run, not checked: {exc}", file=sys.stderr)
         return GUARD_ERRORED, ""
 
+    GUARD_LAST["code"] = proc.returncode
     output = ((proc.stderr or "") + (proc.stdout or "")).strip()
     first_line = output.splitlines()[0].strip() if output else ""
     if proc.returncode == GUARD_VIOLATION:
@@ -224,43 +225,8 @@ def run_guard_detailed(guard: Path, command: str, tool: str = "", *, can_ask: bo
 
 
 def append_gate_log(chock_root: Path, record: dict) -> None:
-    """Append one record, stamped, to `<chock_root>/log/gate-events.jsonl`, rotating past the size cap."""
-    log_dir = chock_root / "log"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / "gate-events.jsonl"
-    if log_path.exists() and log_path.stat().st_size > _LOG_MAX_BYTES:
-        log_path.replace(log_dir / "gate-events.1.jsonl")
-    stamped = {"ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), **record}
-    with log_path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(stamped, ensure_ascii=False) + "\n")
-
-
-def log_outcome(guard: Path, tool: str, *, verdict: str) -> None:
-    """Append one outcome record. Best effort: never raises, never changes the verdict."""
-    try:
-        if os.environ.get(GATE_LOG_ENV) == "0":
-            return
-        guard = guard.resolve()
-        if guard.parent.name != "implementations":
-            return
-        artifact_root = None
-        for parent in guard.parents:
-            if (parent / ".chock").is_dir():
-                artifact_root = parent / ".chock"
-                break
-        if artifact_root is None:
-            return
-        record = {
-            "policy_id": guard.parent.parent.name,
-            "surface": "pre-tool-use",
-            "event": "tool_use",
-            "kind": guard.stem,
-            "tool": tool,
-            "verdict": verdict,
-        }
-        append_gate_log(artifact_root, record)
-    except Exception:  # noqa: BLE001 -- best effort logging: never raises, never changes the verdict
-        return
+    """Append one sync-route record to `<chock_root>/log/gate-events.jsonl` at the level in force; raises on I/O."""
+    log_write(Path(chock_root) / "log" / "gate-events.jsonl", {"route": "sync", **record}, Path(chock_root).parent)
 
 
 def evaluate(argv: list[str], command: str, tool: str = "", *, can_ask: bool | None = None) -> tuple[str, str] | None:
@@ -269,6 +235,7 @@ def evaluate(argv: list[str], command: str, tool: str = "", *, can_ask: bool | N
     if guard is None:
         return None
     if not guard.exists():
+        GUARD_LAST["outcome"] = GUARD_MISSING
         # The hook config names this guard, so its absence is a broken install, not "nothing to check".
         return (
             VERDICT_DENY,
@@ -276,9 +243,7 @@ def evaluate(argv: list[str], command: str, tool: str = "", *, can_ask: bool | N
             "Run `chock sync --repo .` to reinstall the policy's guards.",
         )
     verdict, message = run_guard_detailed(guard, command, tool, can_ask=can_ask)
-    logged = {GUARD_BLOCKED: "block", GUARD_ASKED: "ask", GUARD_CLEAN: "allow"}
-    if verdict in logged:
-        log_outcome(guard, tool, verdict=logged[verdict])
+    GUARD_LAST["outcome"] = verdict
     if verdict == GUARD_BLOCKED:
         return (VERDICT_DENY, f"Blocked by chock policy: {guard.stem}")
     if verdict == GUARD_ASKED:

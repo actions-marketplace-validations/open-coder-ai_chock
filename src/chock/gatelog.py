@@ -5,16 +5,27 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from collections import Counter
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from chock.gatelog_read import (
+    LEVELS,
+    LOG_NAME,
+    PLUGIN_LOG_NAME,
+    ROUTES,
+    VERDICTS,
+    follow,
+    keep,
+    log_files,
+    read_events,
+    record_route,
+    settings_problems,
+)
 from chock.gatelog_report import _printable, render_groups_md, render_groups_text
 
-LOG_DIR = "log"
-LOG_NAME = "gate-events.jsonl"
-ROTATED_NAME = "gate-events.1.jsonl"
+__all__ = ["LEVELS", "ROUTES", "VERDICTS", "follow", "log_files", "read_events"]
 
 GROUP_KEYS = ("policy", "rule", "agent", "event")
 FORMATS = ("text", "md")
@@ -23,39 +34,6 @@ TOP_FILES = 3
 _SINCE_RANGE = "must be 1 or more days"
 #: A gate's `matches` line is `<path>[:<line>]: <label>`; only the path is read, never the label.
 _MATCH_PATH_RE = re.compile(r"^(?P<path>[^\s:]+)(?::\d+)?: ")
-
-
-def log_files(repo_root: Path) -> list[Path]:
-    """Current and rotated log files, oldest first, skipping any that are absent."""
-    base = Path(repo_root) / ".chock" / LOG_DIR
-    return [path for path in (base / ROTATED_NAME, base / LOG_NAME) if path.exists()]
-
-
-def read_events(repo_root: Path, since_days: int | None = None) -> list[dict[str, Any]]:
-    """Every readable record, oldest first."""
-    cutoff = None
-    if since_days is not None:
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=since_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    events: list[dict[str, Any]] = []
-    for path in log_files(repo_root):
-        try:
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
-            continue
-        for line in lines:
-            if not line.strip():
-                continue
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(record, dict) or not record.get("policy_id"):
-                continue
-            if cutoff and str(record.get("ts", "")) < cutoff:
-                continue
-            events.append(record)
-    return events
 
 
 def summarize(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -205,22 +183,41 @@ def positive_days(value: str) -> int:
     return days
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="chock status --only log", description="Read the gate outcome log")
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="chock status --only log", description="Read the decision log, both routes")
     parser.add_argument("--repo", default=".", help="Repository root (default: cwd)")
     parser.add_argument("--policy", help="Restrict the report to one policy id")
     parser.add_argument("--since", type=positive_days, metavar="DAYS", help="Only records from the last N days")
+    parser.add_argument(
+        "--route", choices=ROUTES, help="Only the sync route (this repo) or the plugin route (~/.chock)"
+    )
+    parser.add_argument("--level", choices=LEVELS, help="info: only decisions a policy made; debug: allows too")
+    parser.add_argument("--verdict", choices=VERDICTS, help="Only records with this verdict")
+    parser.add_argument("--plugin", help="Only records from this plugin (plugin route)")
+    parser.add_argument("--follow", action="store_true", help="Print new records as they are written (Ctrl-C stops)")
     parser.add_argument("--json", action="store_true", help="Emit machine-readable results")
     parser.add_argument("--by", choices=GROUP_KEYS, help="Group counts by policy, rule, agent or event")
     parser.add_argument("--format", choices=FORMATS, default="text", help="md prints a paste-able markdown summary")
+    return parser
+
+
+def main(argv: list[str] | None = None, *, polls: int | None = None) -> int:
+    parser = _parser()
     args = parser.parse_args(argv)
     if args.json and args.format == "md":
         parser.error("--json and --format md are mutually exclusive")
 
     repo_root = Path(args.repo).resolve()
-    events = read_events(repo_root, args.since)
-    if args.policy:
-        events = [e for e in events if e.get("policy_id") == args.policy]
+    for problem in settings_problems(repo_root):
+        print(f"chock: log settings: {problem}", file=sys.stderr)
+    if args.follow:
+        current = (LOG_NAME, PLUGIN_LOG_NAME)
+        return follow(
+            lambda: [p for p in log_files(repo_root, args.route) if p.name in current],
+            lambda record: keep(record, args) and (args.route is None or record_route(record) == args.route),
+            polls=polls,
+        )
+    events = [e for e in read_events(repo_root, args.since, route=args.route) if keep(e, args)]
 
     by = args.by or ("policy" if args.format == "md" else None)
     if by:

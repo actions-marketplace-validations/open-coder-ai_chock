@@ -16,8 +16,12 @@ import os
 import re
 import runpy
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
+
+try:  # beside this wrapper in a merged plugin; inside the chock package everywhere else
+    from chock_bundle_log import log_off
+except ImportError:
+    from chock.guardrails.chock_bundle_log import log_off
 
 FILENAME = ".chock/guardrails.json"
 VERSION = 1
@@ -26,8 +30,6 @@ STATES = (ON, OFF)
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{2,63}$")
 REPO, USER = "repo", "user"
 _TOP_KEYS = frozenset({"version", "bundles"})
-_LOG_PARTS, _LOG_ROTATED, _LOG_MAX_BYTES = ("log", "gate-events.jsonl"), "gate-events.1.jsonl", 1_048_576
-_GATE_LOG_ENV = "CHOCK_GATE_LOG"
 _ARGC = 5
 #: The record `chock bundle` keeps of the file it last wrote, beside it under the engine's own state folder.
 RECORD_PARTS = ("state", "guardrails.sha256")
@@ -129,23 +131,6 @@ def load(start: Path) -> tuple[Path | None, str | None, dict[str, dict[str, str]
 def state(toggles: dict[str, dict[str, str]], bundle: str, member: str) -> str:
     """A member's state: off only when its own entry says so."""
     return OFF if toggles.get(bundle, {}).get(member) == OFF else ON
-
-
-def log_off(governing: Path, bundle: str, member: str) -> None:
-    """One line in chock's log beside the governing file. Best effort: never raises."""
-    try:
-        if os.environ.get(_GATE_LOG_ENV) == "0":
-            return
-        log = governing.parent.joinpath(*_LOG_PARTS)
-        log.parent.mkdir(parents=True, exist_ok=True)
-        if log.exists() and log.stat().st_size > _LOG_MAX_BYTES:
-            log.replace(log.parent / _LOG_ROTATED)
-        record = {"ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "policy_id": member}
-        record |= {"surface": "plugin", "event": "toggle", "kind": "guardrails-off", "bundle": bundle, "verdict": OFF}
-        with log.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record) + "\n")
-    except Exception:  # noqa: BLE001 -- a log line must never change the verdict
-        return
 
 
 def _wheres(payload: bytes) -> list[Path]:

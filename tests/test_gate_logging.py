@@ -72,22 +72,27 @@ def test_block_is_recorded(tmp_path: Path) -> None:
     assert record["ts"].endswith("Z")
 
 
-def test_allow_is_recorded(tmp_path: Path) -> None:
-    """A gate that passes still produces evidence -- otherwise 'never fired' is unprovable."""
+def test_allow_is_recorded_at_debug(tmp_path: Path, monkeypatch) -> None:
+    """A gate that passes still produces evidence at debug -- otherwise 'never fired' is unprovable."""
     init_repo(tmp_path)
     stage(tmp_path, "app.py", "x = 1\n")
     gate = compiled_gate(tmp_path, "scan-secrets", SECRET_SPEC)
 
     assert run(gate, "pre-commit", None, tmp_path) == 0
+    assert read_log(tmp_path) == [], "at the default level, info, an allow is not written"
 
+    monkeypatch.setenv("CHOCK_LOG_LEVEL", "debug")
+    assert run(gate, "pre-commit", None, tmp_path) == 0
     records = read_log(tmp_path)
     assert len(records) == 1
     assert records[0]["verdict"] == "allow"
     assert records[0]["match_count"] == 0
     assert records[0]["matches"] == []
+    assert (records[0]["route"], records[0]["level"]) == ("sync", "debug")
 
 
-def test_runs_append_rather_than_overwrite(tmp_path: Path) -> None:
+def test_runs_append_rather_than_overwrite(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("CHOCK_LOG_LEVEL", "debug")
     init_repo(tmp_path)
     stage(tmp_path, "app.py", "x = 1\n")
     gate = compiled_gate(tmp_path, "scan-secrets", SECRET_SPEC)
@@ -160,7 +165,7 @@ def test_logging_failure_does_not_change_the_verdict(tmp_path: Path, monkeypatch
         def now(*args, **kwargs):
             raise OSError("log device on fire")
 
-    monkeypatch.setattr(gate_runner.log, "datetime", Exploding)
+    monkeypatch.setattr(gate_runner.journal, "datetime", Exploding)
 
     assert run(gate, "pre-commit", None, tmp_path) == 1
     assert read_log(tmp_path) == []
@@ -168,7 +173,7 @@ def test_logging_failure_does_not_change_the_verdict(tmp_path: Path, monkeypatch
 
 def test_oversized_log_rotates_once(tmp_path: Path) -> None:
     init_repo(tmp_path)
-    stage(tmp_path, "app.py", "x = 1\n")
+    stage(tmp_path, "app.py", f'KEY = "{AWS_KEY}"\n')
     gate = compiled_gate(tmp_path, "scan-secrets", SECRET_SPEC)
     path = log_path(tmp_path)
     path.parent.mkdir(parents=True, exist_ok=True)

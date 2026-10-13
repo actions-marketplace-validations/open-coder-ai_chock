@@ -9,6 +9,7 @@ import re
 
 from agentseam import bundler, contract
 
+from chock.gate.plugin_manifests import plugin_manifests
 from chock.gate.wire_shapes import EVENT_KEYS as _EVENT_KEYS
 from chock.gate.wire_shapes import wire_raw as _wire_raw
 from chock.resources import package_data_dir
@@ -16,6 +17,7 @@ from chock.vendors import entry, in_agent_vendors
 
 from . import (
     budget,
+    decision_log,
     edit_image,
     gate_outcome,
     guard_runner,
@@ -30,6 +32,7 @@ from . import (
     workspace_root,
     write_gate,
 )
+from .runner import journal
 
 BEGIN = "# >>> agentseam handler >>>"
 END = "# <<< agentseam handler <<<"
@@ -175,6 +178,7 @@ def _can_ask_tokens(agent: str) -> dict[str, str]:
         "__CAN_ASK__": repr(pre_tool_can_ask(agent)),
         "__EVENT_KEYS__": repr(tuple(dict.fromkeys((*vendor["claims"].get("event_key", ()), *_EVENT_KEYS)))),
         "__WIRE_NAME__": _WIRE_NAME_OF.get(vendor.get("family"), "_chock_wire_name(raw)"),
+        "__PLUGIN_MANIFESTS__": repr(plugin_manifests()),
     }
 
 
@@ -183,7 +187,11 @@ def _handler_source(agent: str) -> str:
     parts = [
         _extract(budget),
         "\n",
+        _extract(journal),
+        "\n",
         _extract(guard_runner),
+        "\n",
+        _extract(decision_log),
         "\n",
         _extract(edit_image),
         "\n",

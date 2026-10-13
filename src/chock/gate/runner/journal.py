@@ -1,0 +1,175 @@
+"""Gate runner: the decision log's level, settings, redaction and writer. Stdlib only; gate.py and every runtime carry it."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+
+# >>> gate.py 20
+#: The level a person set for this shell's hooks; an agent's tool input never reaches a hook's environment.
+LOG_LEVEL_ENV = "CHOCK_LOG_LEVEL"
+#: Deprecated: `CHOCK_GATE_LOG=0` reads as `CHOCK_LOG_LEVEL=off`.
+LOG_LEGACY_ENV = "CHOCK_GATE_LOG"
+LOG_OFF, LOG_INFO, LOG_DEBUG = "off", "info", "debug"
+LOG_LEVELS = (LOG_OFF, LOG_INFO, LOG_DEBUG)
+#: One settings file per scope: `<repo>/.chock/chock-log.json`, then `~/.chock/chock-log.json`. A person edits it.
+LOG_SETTINGS_PARTS = (".chock", "chock-log.json")
+LOG_SETTINGS_KEYS = ("level", "max_bytes")
+LOG_DEFAULT_MAX_BYTES = 1_048_576
+LOG_MIN_MAX_BYTES = 65_536
+LOG_MAX_MAX_BYTES = 1_073_741_824
+LOG_ALLOW = "allow"
+#: Fields that make an allow a decision worth an info line: something let a policy's finding through.
+LOG_LET_THROUGH = ("override", "would_action")
+#: A debug trace's command or path is cut to this many characters, after redaction.
+LOG_TRACE_CAP = 200
+LOG_REDACTED = "[redacted]"
+#: The scan-secrets policy's content_pattern, vendored: a debug trace never carries a value it would block.
+_LOG_SECRET_RE = re.compile(
+    r"""(?i)((AKIA|ASIA)[0-9A-Z]{16}|gh[oprsu]_[0-9A-Za-z]{36}|github_pat_[0-9A-Za-z_]{22,}|xox[bpas]-[0-9A-Za-z-]{10,}|(sk|rk)_live_[0-9A-Za-z]{16,}|sk-proj-[0-9A-Za-z_-]{20,}|sk-ant-[0-9A-Za-z_-]{20,}|sk-[0-9A-Za-z]{20,}|AIza[0-9A-Za-z_-]{35}|npm_[0-9A-Za-z]{36}|SG\.[0-9A-Za-z_-]{16,}\.[0-9A-Za-z_-]{16,}|eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*|-----BEGIN (RSA |OPENSSH |EC |DSA )?PRIVATE KEY-----|api[_-]?key\s*=\s*["'][A-Za-z0-9_\-]{20,}["']|secret[_-]?key\s*=\s*["'][A-Za-z0-9_\-]{20,}["']|auth[_-]?token\s*=\s*["'][A-Za-z0-9_\-]{20,}["']|password\s*=\s*["'][^"'\s]{12,}["']|(api|secret|auth)[_-]?(key|token)\s*[=:]\s*[A-Za-z0-9_\-]{20,}|password\s*[=:]\s*[^\s"'${}]{12,})"""
+)
+_LOG_BYTES_RANGE = "a whole number from 65536 (64 KiB) to 1073741824 (1 GiB)"
+
+
+def log_settings_read(path):
+    """(the valid settings in one scope's file, what is wrong with it); a missing file is ({}, [])."""
+    try:
+        doc = json.loads(Path(path).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}, []
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        return {}, [f"{path}: unreadable or not JSON ({exc})"]
+    if not isinstance(doc, dict):
+        return {}, [f"{path}: must be a JSON object with level and/or max_bytes"]
+    found, problems = {}, []
+    level, size = doc.get("level"), doc.get("max_bytes")
+    if level in LOG_LEVELS:
+        found["level"] = level
+    elif level is not None:
+        problems.append(f"{path}: level must be off, info or debug, not {level!r}")
+    if type(size) is int and LOG_MIN_MAX_BYTES <= size <= LOG_MAX_MAX_BYTES:
+        found["max_bytes"] = size
+    elif size is not None:
+        problems.append(f"{path}: max_bytes must be {_LOG_BYTES_RANGE}, not {size!r}; using the next scope or 1048576")
+    unknown = sorted(set(doc) - set(LOG_SETTINGS_KEYS))
+    if unknown:
+        problems.append(f"{path}: unknown key(s) {', '.join(map(str, unknown))}; only level and max_bytes are read")
+    return found, problems
+
+
+def log_settings_paths(repo_root):
+    """The settings files in precedence order: the repository's (when known), then the user's."""
+    repo = [Path(repo_root).joinpath(*LOG_SETTINGS_PARTS)] if repo_root is not None else []
+    return [*repo, Path(os.path.expanduser("~")).joinpath(*LOG_SETTINGS_PARTS)]
+
+
+def log_env_level():
+    """The level the hook's own environment sets, or None: the legacy switch, then `CHOCK_LOG_LEVEL`."""
+    if os.environ.get(LOG_LEGACY_ENV) == "0":
+        return LOG_OFF
+    named = os.environ.get(LOG_LEVEL_ENV, "").strip().lower()
+    return named if named in LOG_LEVELS else None
+
+
+def log_settings(repo_root):
+    """(level, max_bytes) in force: the environment, then the repository's file, the user's, then info and 1 MiB."""
+    scopes = [log_settings_read(path)[0] for path in log_settings_paths(repo_root)]
+    level = log_env_level() or next((s["level"] for s in scopes if "level" in s), LOG_INFO)
+    size = next((s["max_bytes"] for s in scopes if "max_bytes" in s), LOG_DEFAULT_MAX_BYTES)
+    return level, size
+
+
+def log_record_level(record):
+    """`debug` for a plain allow, `info` for every decision a policy made or something let through."""
+    plain = record.get("verdict") == LOG_ALLOW and not any(key in record for key in LOG_LET_THROUGH)
+    return LOG_DEBUG if plain else LOG_INFO
+
+
+def log_admits(level, record_level):
+    """Whether a record of `record_level` is written at `level`."""
+    return level == LOG_DEBUG or (level == LOG_INFO and record_level == LOG_INFO)
+
+
+def log_trace_text(text):
+    """`text` with every value scan-secrets would block replaced, then cut to `LOG_TRACE_CAP` characters."""
+    redacted = _LOG_SECRET_RE.sub(LOG_REDACTED, str(text))
+    return redacted if len(redacted) <= LOG_TRACE_CAP else redacted[:LOG_TRACE_CAP] + "..."
+
+
+def log_windows():
+    """Whether this is Windows, whose lock is msvcrt's rather than fcntl's."""
+    return os.name == "nt"
+
+
+def log_lock(fd):
+    """Take a non-blocking exclusive lock on `fd` (msvcrt on Windows, fcntl elsewhere); False when it is held."""
+    try:
+        if log_windows():
+            import msvcrt  # noqa: PLC0415 -- the platform's own lock, imported where it exists
+
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl  # noqa: PLC0415 -- the platform's own lock, imported where it exists
+
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (OSError, ImportError):
+        return False
+    return True
+
+
+def log_unlock(fd):
+    """Release `log_lock`'s lock; closing the descriptor releases an fcntl lock on its own."""
+    if log_windows():
+        try:
+            import msvcrt  # noqa: PLC0415 -- the platform's own lock, imported where it exists
+
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        except (OSError, ImportError):
+            return
+
+
+def log_rotate(path, max_bytes):
+    """Move a file past `max_bytes` to `<stem>.1<suffix>` under a lock; a busy lock or a failed move skips it this time."""
+    try:
+        if not path.exists() or path.stat().st_size <= max_bytes:
+            return
+        lock = os.open(str(path) + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError:
+        return
+    try:
+        if log_lock(lock):
+            try:
+                if path.stat().st_size > max_bytes:  # another writer may have rotated it first
+                    path.replace(path.with_name(path.stem + ".1" + path.suffix))
+            finally:
+                log_unlock(lock)
+    except OSError:
+        return
+    finally:
+        os.close(lock)
+
+
+def log_append(path, record, max_bytes=LOG_DEFAULT_MAX_BYTES):
+    """Append one stamped, complete line to `path` in a single write, so writers in parallel never interleave."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    log_rotate(path, max_bytes)
+    stamped = {"ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), **record}
+    line = (json.dumps(stamped, ensure_ascii=False) + "\n").encode("utf-8")
+    fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o600)
+    try:
+        os.write(fd, line)
+    finally:
+        os.close(fd)
+
+
+def log_write(path, record, repo_root):
+    """Write `record` to `path` when the level in force for `repo_root` admits it, stamped with its level. Raises on I/O."""
+    level, size = log_settings(repo_root)
+    record_level = log_record_level(record)
+    kept = "would_action" in record and os.environ.get(LOG_LEGACY_ENV) == "0"  # the legacy switch kept rollout evidence
+    if kept or log_admits(level, record_level):
+        log_append(path, {**record, "level": record_level}, size)

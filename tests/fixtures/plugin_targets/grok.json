@@ -6,6 +6,8 @@
     "scripts/chock-guardrails-protect/chock_guardrails_protect/__init__.py",
     "scripts/chock_bundle.json",
     "scripts/chock_bundle.py",
+    "scripts/chock_bundle_log.py",
+    "scripts/chock_journal.py",
     "scripts/demo-shell-guard/demo-shell-guard.py",
     "scripts/demo-shell-guard/tinyparse/__init__.py",
     "scripts/grok.py",

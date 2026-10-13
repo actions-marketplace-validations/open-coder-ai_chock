@@ -24,6 +24,8 @@ NAMES = (NAME, RECORD)
 FOLDER = ".chock"
 TOGGLE = f"{FOLDER}/{NAME}"
 PROTECTED = (TOGGLE, f"{FOLDER}/state/{RECORD}")
+#: The decision log's settings, one per scope: how much chock logs is a person's call, raised or lowered.
+LOG_SETTINGS = "chock-log.json"
 #: The install marker inside every chock-built plugin: it records the custom-policy hashes a person accepted.
 MARKER = "chock.selection.json"
 #: `chock install --trust-local <id>=<sha256>` accepts custom code without asking: only a person passes it.
@@ -41,6 +43,12 @@ INSTALL_REFUSED = (
     "to an install marker (chock.selection.json). Reading is fine. Show the person the exact "
     "`chock install --selection <file> --trust-local <id>=<sha256>` command to run in their own shell after they "
     "read the code, or let them run `chock install` in a terminal and answer its question; then wait."
+)
+
+LOG_REFUSED = (
+    "chock: an agent may not change .chock/chock-log.json or ~/.chock/chock-log.json, the files that set how much "
+    "chock logs (level, max_bytes), whether to raise or lower it. Reading is fine. Show the person the exact JSON "
+    "to put in the file from their own editor or shell, and wait."
 )
 
 #: Commands that only read the files they name (a write redirection is judged on its own).
@@ -125,6 +133,17 @@ def names_marker(token: str, cwd: Path) -> bool:
     """Whether a shell word can name an install marker: as written, folded, or through a link."""
     folded = fold(token)
     return MARKER in folded or _base_is(folded, MARKER) or _base_is(_real(token, cwd), MARKER)
+
+
+def names_log(token: str, cwd: Path) -> bool:
+    """Whether a shell word can name a log settings file: as written, folded, or through a link."""
+    folded = fold(token)
+    return LOG_SETTINGS in folded or _base_is(folded, LOG_SETTINGS) or _base_is(_real(token, cwd), LOG_SETTINGS)
+
+
+def is_log_path(path: str, root: Path) -> bool:
+    """Whether a written path is a log settings file (in any `.chock` folder), as written or through links."""
+    return any(("/" + folded).endswith(f"/{FOLDER}/{LOG_SETTINGS}") for folded in (fold(path), _real(path, root)))
 
 
 def is_marker_path(path: str, root: Path) -> bool:
@@ -265,8 +284,16 @@ def refuses(command: str, cwd: Path) -> bool:
     return "$(" in command or "`" in command or any(_command(s)[0] in EXECUTORS for s in segments)
 
 
+def log_refused(command: str, cwd: Path) -> bool:
+    """Whether an agent's shell command could write a log settings file."""
+    segments = _segments(_tokens(command))
+    return any(_writes(s, cwd, names_log) for s in segments) or _hidden(command, segments, [LOG_SETTINGS])
+
+
 def refusal(command: str, cwd: Path) -> str | None:
     """The refusal an agent's shell command gets, or None when it may run."""
     if refuses(command, cwd):
         return REFUSED
+    if log_refused(command, cwd):
+        return LOG_REFUSED
     return INSTALL_REFUSED if install_refused(command, cwd) else None

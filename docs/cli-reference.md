@@ -127,8 +127,8 @@ chock status [--repo .] [--only policies,registry,log]
 
 Read-only. Default prints the policy table: every installed policy, its resolved state
 (`enabled`, `overridden`, `disabled`), coverage level, and whether it is `mandatory`.
-`--only registry` lists the artifact registry; `--only log` reports recorded gate
-outcomes — including which policies have never fired.
+`--only registry` lists the artifact registry; `--only log` reports recorded gate outcomes on
+both routes, including policies that never fired ([Decision log](decision-log.md): levels, filters).
 
 ### `enable` / `disable` — policy toggles
 

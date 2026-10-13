@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import TextIO
 
-from chock.gatelog import FORMATS, GROUP_KEYS, positive_days
+from chock.gatelog import FORMATS, GROUP_KEYS, LEVELS, ROUTES, VERDICTS, positive_days
 
 
 def _run(label: str, fn, argv: list[str]) -> int:
@@ -201,8 +201,9 @@ def _run_baseline(args: argparse.Namespace) -> int:
 def _log_args(args: argparse.Namespace) -> list[str]:
     """The `status` flags that belong to the gate log, in `chock.gatelog`'s own spelling."""
     flags = [("--policy", args.policy), ("--since", args.since), ("--by", args.by), ("--format", args.format)]
+    flags += [("--route", args.route), ("--level", args.level), ("--verdict", args.verdict), ("--plugin", args.plugin)]
     given = [part for flag, value in flags if value is not None for part in (flag, str(value))]
-    return given + (["--json"] if args.json else [])
+    return given + [flag for flag, on in (("--json", args.json), ("--follow", args.follow)) if on]
 
 
 def _print_rollout(repo: Path, stream: TextIO = sys.stdout) -> None:
@@ -235,6 +236,11 @@ def status_main(argv: list[str] | None) -> int:
     log_flags.add_argument("--json", action="store_true", help="Log: machine-readable output")
     log_flags.add_argument("--by", choices=GROUP_KEYS, help="Log: group by policy, rule, agent or event")
     log_flags.add_argument("--format", choices=FORMATS, help="Log: md prints a markdown summary")
+    log_flags.add_argument("--route", choices=ROUTES, help="Log: only the sync route (this repo) or the plugin route")
+    log_flags.add_argument("--level", choices=LEVELS, help="Log: info shows policy decisions only; debug adds allows")
+    log_flags.add_argument("--verdict", choices=VERDICTS, help="Log: only records with this verdict")
+    log_flags.add_argument("--plugin", help="Log: only records from this plugin (plugin route)")
+    log_flags.add_argument("--follow", action="store_true", help="Log: print new records as they are written")
     args = parser.parse_args(argv)
 
     sections = ("policies", "registry", "log")
@@ -245,7 +251,10 @@ def status_main(argv: list[str] | None) -> int:
         return 2
 
     if "log" not in selected and _log_args(args):
-        print("--policy, --since, --json, --by and --format apply to `--only log`", file=sys.stderr)
+        print(
+            "--policy, --since, --json, --by, --format, --route, --level, --verdict, --plugin and --follow apply to `--only log`",
+            file=sys.stderr,
+        )
         return 2
 
     if (args.json or args.format == "md") and selected != ["log"]:
@@ -268,7 +277,7 @@ def status_main(argv: list[str] | None) -> int:
         from chock.gatelog import main as gatelog_main
 
         log_argv = ["--repo", args.repo, *_log_args(args)]
-        if args.json or args.format == "md":
+        if args.json or args.format == "md" or args.follow:
             rc = max(rc, int(gatelog_main(log_argv) or 0))
         else:
             rc = max(rc, _run("gate log", gatelog_main, log_argv))
