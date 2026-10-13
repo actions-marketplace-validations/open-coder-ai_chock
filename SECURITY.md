@@ -31,13 +31,13 @@ Sigstore build-provenance attestation generated in the same run. To verify that 
 distribution you downloaded was built by this repository's release workflow:
 
 ```bash
-gh attestation verify chock-0.4.0-py3-none-any.whl \
+gh attestation verify chock-X.Y.Z-py3-none-any.whl \
   --repo open-coder-ai/chock \
   --signer-workflow open-coder-ai/chock/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.4.0
+  --source-ref refs/tags/vX.Y.Z
 ```
 
-Substitute the version you downloaded in both places. `--repo` alone would accept an
+Substitute the version you downloaded for `X.Y.Z` in both places. `--repo` alone would accept an
 attestation minted by *any* workflow in this repository; `--signer-workflow` restricts
 it to the release workflow, and `--source-ref` requires it was built from that
 version's tag. The attestation binds the artifact's digest to the exact source commit
