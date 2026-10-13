@@ -4,7 +4,7 @@ name = "chock"
 # MINOR releases may change compiled output. 0.1.0 is the first public release; the
 # 0.0.1a0 pre-release exists only because PyPI names are claimed by uploading.
 version = "0.15.2"
-description = "Governance-as-code for AI coding agents: write a rule once, enforce it on git hooks, CI, and every agent"
+description = "A kill switch for your coding agent's wrong moves."
 readme = "README.md"
 # PEP 639 SPDX expression; needs setuptools >= 77 (pinned in build-system below).
 license = "Apache-2.0"

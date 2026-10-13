@@ -1,12 +1,12 @@
 <div align="center">
 
-<p><img src="https://raw.githubusercontent.com/open-coder-ai/chock/main/docs/assets/readme/cover-chock.png" alt="chock: open-source guardrails for AI coding agents. Rules the agent reads, checks that run as it writes, and gates at commit and in CI." width="100%"></p>
+<p><img src="https://raw.githubusercontent.com/open-coder-ai/chock/main/docs/assets/readme/cover-chock.png" alt="chock: a kill switch for your coding agent's wrong moves." width="100%"></p>
 
 </div>
 
 # Teach your AI agent what not to do.
 
-Open-source guardrails for AI coding agents: rules the agent reads, checks that run as it writes, and gates at commit and in CI.
+A kill switch for your coding agent's wrong moves.
 
 [chock](https://github.com/open-coder-ai/chock) · [chock-catalog](https://github.com/open-coder-ai/chock-catalog) · chock.sh (launching soon)
 

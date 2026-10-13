@@ -19,7 +19,7 @@ DEVIN_ROOT_MANIFEST_REL = Path(".devin-plugin/plugin.json")
 #: Kept apart from marketplace_core.DESCRIPTION: Devin's text must never claim "enforces"
 #: (the vendor's plugin hooks are fail-open by design).
 DEVIN_DESCRIPTION = (
-    "Chock policies packaged as installable plugins. Generated from the chock-catalog; "
+    "A best-effort kill switch for your Devin agent's wrong moves. Generated from the chock-catalog; "
     "each plugin states whether it is best-effort in this client or advisory."
 )
 
