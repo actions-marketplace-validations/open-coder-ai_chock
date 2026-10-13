@@ -1,7 +1,6 @@
 # chock
 
-> Open-source guardrails for AI coding agents: rules the agent reads, checks that run as it
-> writes, and gates at commit and in CI. Chock compiles one policy into each of those.
+> A kill switch for your coding agent's wrong moves.
 
 Chock compiles a policy you author once into the strongest enforcement surface each agent
 supports (git hook, CI gate, `AGENTS.md` rule, Claude Code / Cursor pre-tool-use hooks,
