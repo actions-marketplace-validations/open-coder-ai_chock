@@ -232,6 +232,12 @@ def status_main(argv: list[str] | None) -> int:
     parser.add_argument("--repo", default=".", help="Repo root")
     parser.add_argument("--only", default=None, help="Comma-separated subset of: policies, registry, log")
     parser.add_argument("--summary", action="store_true", help="Log summary: rates, latency vs timeout, faults")
+    parser.add_argument(
+        "--verify-log", action="store_true", help="Walk each decision log's hash chain; exit 1 at its first break"
+    )
+    parser.add_argument(
+        "--head", metavar="SEQ:SHA256", help="With --verify-log: confirm a head kept earlier is still there"
+    )
     log_flags = parser.add_argument_group("log section")
     log_flags.add_argument("--policy", help="Log: restrict to one policy id")
     log_flags.add_argument("--since", type=positive_days, metavar="DAYS", help="Log: only records from the last N days")
@@ -245,15 +251,10 @@ def status_main(argv: list[str] | None) -> int:
     log_flags.add_argument("--follow", action="store_true", help="Log: print new records as they are written")
     args = parser.parse_args(argv)
     print_stop(Path(args.repo).resolve(), sys.stderr if args.json or args.format == "md" else sys.stdout)
-    if args.summary:
-        from chock.gatelog_summary import main as summary_main
+    if args.verify_log or args.head or args.summary:
+        from chock.status_modes import summary, verify_log
 
-        if any((args.only, args.policy, args.by, args.format, args.level, args.verdict, args.plugin, args.follow)):
-            print("--summary takes --since, --route and --json only", file=sys.stderr)
-            return 2
-        flags = [("--since", args.since), ("--route", args.route)]
-        given = [part for flag, value in flags if value is not None for part in (flag, str(value))]
-        return int(summary_main(["--repo", args.repo, *given, *(["--json"] if args.json else [])]) or 0)
+        return verify_log(args) if args.verify_log or args.head else summary(args)
 
     sections = ("policies", "registry", "log")
     selected = [s.strip() for s in args.only.split(",")] if args.only else ["policies"]

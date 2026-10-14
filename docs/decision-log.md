@@ -12,9 +12,45 @@ no network, no telemetry. A file's contents are never logged.
 
 Every chock plugin in a client, the merged bundle and single catalog plugins alike, appends to that
 client's one file; each line names its `plugin`. A line is written in one append, so hooks running at
-once never interleave. One rotated file is kept beside each (`gate-events.1.jsonl`, `events.1.jsonl`);
-rotation takes a lock (fcntl, or msvcrt on Windows), and a writer that finds it busy skips rotating. The sync file is
-the same file earlier versions wrote, so older readers keep working.
+once never interleave. One rotated file is kept beside each (`gate-events.1.jsonl`, `events.1.jsonl`).
+Each write takes a lock beside the file (fcntl, or msvcrt on Windows) to rotate and chain the line (see
+[Hash chain](#hash-chain)). The sync file is the same file earlier versions wrote, so older readers keep working.
+
+## Hash chain
+
+Each line carries `seq`, its place in its file's chain, and `prev`, the sha256 of the line before it
+(that line's exact bytes, without the newline). A log's first line names 64 zeros. After a rotation the
+new file's first line names the rotated file's last, so the chain runs across both files. Every route
+writes through the same journal: runtime hooks, git hooks, the MCP gateway, `chock stop` and
+`chock resume`, and overrides.
+
+A writer waits up to one second for the lock. A line it cannot chain (the lock stayed held, or the last
+line could not be read) is still written, with `unchained` naming why. A chaining failure never
+changes a verdict.
+
+```bash
+chock status --verify-log [--route sync|plugin] [--json]   # exit 0 intact, 1 at a break
+chock status --verify-log --head <seq>:<sha256>            # confirm a head you kept is still there
+```
+
+It walks each log (rotated file first) and reports the first break: the file, the line, and the
+expected and found `prev` or `seq`. An edited, deleted, inserted or reordered line breaks the link of
+the line after it. History that is missing or rotated away is not a break: the walk reports
+`chain starts at <hash> (seq N)`. Lines written before chaining existed are counted, then the chain
+starts. A line written after that by a runtime that does not chain yet (until `chock sync` regenerates
+it, or the plugin is reinstalled) is a break of kind `unchained`.
+
+What it shows, and what it does not:
+
+- It shows a change made after the fact to someone who kept an earlier head (`seq` and `sha256`, as
+  `--verify-log` prints it and `chock witness export` carries it): `--head` fails once that record
+  changes, even when every later hash was recomputed.
+- It does not stop anyone who can write the file. A local admin, or any process running as you, can
+  rewrite the whole file and every hash, and the walk then passes. Without a kept head, the chain
+  shows only edits that left the later links alone.
+- Deleting the newest lines, or the oldest lines of the oldest file, leaves no break; only a kept head
+  shows the first.
+- It makes no claim about any regulation or standard.
 
 ## Levels
 
@@ -182,3 +218,8 @@ matrix row or chock's install warnings, otherwise a new evidence report. `--clie
 agentseam id (`gemini_cli`), a `chock install` client (`gemini-cli`) or a `chock sync` agent name
 (`gemini`). `--out` must name a new `.json` file: an existing file is refused, never overwritten, and the
 export is created readable by you only. Nothing is uploaded: you attach the file yourself, after reading it.
+
+The export also carries `chain`: each log's head (`seq`, `sha256` of its last line) and whether its
+walk was intact, so an attestation over the export binds the log as it stood. A person's override at a
+git hook (`CHOCK_ALLOW`, no agent on the line) is exported as evidence beside the client's records;
+`approver` and `who` stay in the local log only.

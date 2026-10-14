@@ -35,7 +35,7 @@ from . import (
     workspace_root,
     write_gate,
 )
-from .runner import halt, journal
+from .runner import chain, halt, journal
 
 BEGIN = "# >>> agentseam handler >>>"
 END = "# <<< agentseam handler <<<"
@@ -188,6 +188,7 @@ def _can_ask_tokens(agent: str) -> dict[str, str]:
 #: The modules every handler carries, in order: each may use the names of those before it.
 _HANDLER_MODULES = (
     budget,
+    chain,
     journal,
     halt,
     guard_runner,
