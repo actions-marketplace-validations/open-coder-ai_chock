@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from chock.display import inert, inert_all
+
 _COLUMNS = (
     ("events", "events"),
     ("block", "blocked"),
@@ -34,6 +36,7 @@ def headline(row: dict[str, Any]) -> str:
 
 
 def render_groups_text(rows: list[dict[str, Any]], by: str) -> str:
+    rows = inert_all(rows)
     if not rows:
         return "No gate outcomes recorded yet."
     columns = _columns(rows)
@@ -51,20 +54,16 @@ def _cell(value: Any) -> str:
 
     The log is writable by whatever runs in the repo, so a value cannot open a link or image either.
     """
-    text = _printable(" ".join(str(value).split()))
+    text = inert(value)
     for char in "\\|[]":
         text = text.replace(char, "\\" + char)
     return text.replace("`", "'").replace("<", "&lt;")
 
 
-def _printable(text: str) -> str:
-    """Drop control characters (terminal escape sequences) that a log line may carry."""
-    return "".join(c if c.isprintable() or c == "\n" else "?" for c in text)
-
-
 def render_groups_md(rows: list[dict[str, Any]], by: str, since: int | None = None) -> str:
     window = f" (last {since} days)" if since is not None else ""
     title = f"### Chock gate log by {by}{window}"
+    rows = inert_all(rows)
     if not rows:
         return f"{title}\n\nNo gate outcomes recorded yet."
     columns = _columns(rows)

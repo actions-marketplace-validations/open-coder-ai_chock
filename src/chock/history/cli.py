@@ -7,6 +7,7 @@ import json
 import sys
 from pathlib import Path
 
+from chock.display import inert
 from chock.history import gitlog
 from chock.history.gates import load_rules
 from chock.history.scan import DEFAULT_MAX_BLOB_BYTES, DEFAULT_MAX_COMMITS, DEFAULT_TIME_BUDGET, Limits, Report, scan
@@ -44,8 +45,8 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _plain(text: str) -> str:
-    """`text` with every non-printable character shown as `?`: a path comes from the repository."""
-    return "".join(ch if ch.isprintable() else "?" for ch in text)
+    """`text` with every control or invisible character shown escaped: a path comes from the repository."""
+    return inert(text)
 
 
 def _document(report: Report, applied: list[str], skipped: list[str]) -> dict[str, object]:
