@@ -13,6 +13,7 @@ from typing import Any, TextIO
 
 from chock.gateway import decision
 from chock.gateway.gates import FAULT, judge, load_gates, refusal
+from chock.gateway.stop import STOP_ACTION, STOP_POLICY, initialize_roots, stop_client, stop_refusal
 
 BLOCKED_CODE = -32000
 
@@ -38,6 +39,10 @@ class Gateway:
     client: str | None = None
     server: str | None = None
     _init_id: Any = None
+    # What a stop judges: the client as a stop scope names it, and the folders `initialize` names.
+    stop_client: str | None = None
+    roots: tuple[str, ...] = ()
+    repo_root: Path | None = None
 
     def __init__(self, repo_root: Path, downstream_argv: list[str]) -> None:
         self.repo_root = Path(repo_root)
@@ -91,7 +96,17 @@ class Gateway:
             params = item.get("params") if isinstance(item.get("params"), dict) else {}
             info = params.get("clientInfo") if isinstance(params.get("clientInfo"), dict) else {}
             self.client = decision.client_name(info.get("name"))
+            self.stop_client = stop_client(info.get("name"))
+            self.roots = (*self.roots, *initialize_roots(params))  # a later initialize never drops a root
             self._init_id = item.get("id")
+
+    def _stopped(self) -> list[tuple[str, str, str]]:
+        """The repo stop's finding for a tools/call, before any gate; a check that cannot run refuses."""
+        try:
+            halted = stop_refusal(self.repo_root, list(self.roots), self.stop_client)
+        except Exception as exc:  # noqa: BLE001 -- a stop that cannot be checked refuses the call, never allows it
+            return [(STOP_POLICY, FAULT, f"chock stop could not be checked ({type(exc).__name__}); refusing")]
+        return [(STOP_POLICY, STOP_ACTION, halted)] if halted else []
 
     def _judge(self, item: Any) -> tuple[list[tuple[str, str, str]], str] | None:
         """(findings, target) for a tools/call request; None for anything else."""
@@ -102,6 +117,9 @@ class Gateway:
         if not isinstance(params, dict):
             message = "tools/call params is not an object; refusing (fail closed)"
             return [(decision.GATEWAY_POLICY, FAULT, message)], decision.target(self.server, None)
+        halted = self._stopped()
+        if halted:
+            return halted, decision.target(self.server, params.get("name"))
         findings = judge(self.gates, str(params.get("name", "")), params.get("arguments"))
         return findings, decision.target(self.server, params.get("name"))
 

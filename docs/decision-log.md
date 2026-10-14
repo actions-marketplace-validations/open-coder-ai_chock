@@ -88,10 +88,11 @@ there is no `session_id`.
 | forwarded | one `allow` line, reason `no-rule`, no `policy_id`; plus one `warn` line per warning policy |
 | refused by a policy | one `block` line per refusing policy, reason `gate-block` (`gate-ask` for an ask: the gateway cannot prompt) |
 | a gate that cannot run, or malformed `params` | `block`, reason `fault`: the gate's policy, or `mcp-gateway` |
+| refused because a stop reaches it ([Stop](stop.md)) | `block`, reason `stopped`, policy `chock-stop` |
 | refused because another element of its batch was | `block`, reason `batch`, policy `mcp-gateway` |
 
 The line is written after the verdict is carried out; a log that cannot be written changes no
-verdict. The gateway does not check a repo stop (`chock stop`), so it writes no `stopped` line.
+verdict.
 
 ## Heartbeat
 

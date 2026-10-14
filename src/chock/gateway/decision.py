@@ -13,6 +13,7 @@ from chock.gate.decision_target import DLOG_AGENT_PREFIX
 from chock.gate.runner.journal import LOG_ALLOW, LOG_CALL, log_redact, log_write
 from chock.gatelog_read import LOG_DIR, LOG_NAME
 from chock.gateway.gates import FAULT
+from chock.gateway.stop import STOP_ACTION
 
 #: Written to the repo's sync-route file; `agent` and `surface` tell a gateway line from a hook's.
 GATEWAY_ROUTE = "sync"
@@ -30,6 +31,7 @@ _SPOKEN = {
     "warn": ("warn", "gate-warn"),
     "ask": ("block", "gate-ask"),
     FAULT: ("block", FAULT),
+    STOP_ACTION: ("block", STOP_ACTION),
 }
 _BLOCK = ("block", "gate-block")
 BATCH_REASON = "batch"

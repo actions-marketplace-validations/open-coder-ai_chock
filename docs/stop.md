@@ -32,6 +32,15 @@ the same entry, in every client format (Devin's included):
 | `chock install` bundle | one per bundle; member toggles never reach it |
 | `chock plugin build` package (the marketplace route) | one per package that ships hooks |
 | an advisory-only package (skill text, no hooks) | none, as `chock sync` wires none where it wires nothing |
+| `chock gateway run` (MCP) | in the gateway, before its gates: every `tools/call` |
+
+The gateway refuses each `tools/call` while a stop reaches it (an MCP error, `stopped: <reason>`); it
+forwards `initialize`, `tools/list` and every other method, so the client can still connect and list
+tools. It judges a stop in its `--repo`, its working directory, and every folder `initialize` names
+(`roots`, `workspaceFolders`), each resolved to its repository (the nearest folder holding `.git`) as the pre-tool hook does. The client is
+the MCP `clientInfo.name` read as a client id (`claude-code` is `claude_code`; `codex-mcp-client` is
+`codex`, reached by a stop on `codex_cli`); a name that is no client's is reached by every stop.
+`clientInfo.name` is the client's own claim. A stop file it cannot read, or a check that fails, refuses.
 
 With several packages installed, each runs its own check on every tool call. Unstopped it allows and
 logs nothing of its own beyond the call's one allow line. `chock status` shows a stop on its first line. Every refusal, the stop and
