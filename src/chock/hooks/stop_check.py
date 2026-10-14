@@ -15,10 +15,11 @@ from chock.compile.emitters.in_agent_hooks import (
     generic_pre_tool_config,
     hook_entry,
 )
+from chock.gate.runner.halt import HALT_HOOK_FLAG
 from chock.hooks.launch import hook_command
 from chock.hooks.runtime_vendor import runtime_rel
 
-STOP_CHECK_FLAG = "--stop-check"
+STOP_CHECK_FLAG = HALT_HOOK_FLAG
 
 
 def command(vendor: str) -> str:

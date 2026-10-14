@@ -12,8 +12,9 @@ import sys
 from pathlib import Path
 from typing import TextIO
 
-from chock.gate.runner.actor import actor_of, agent_signal, git_email
-from chock.gate.runner.halt import HALT_ALL, HALT_PARTS, HALT_POLICY, HALT_REASON, halt_read
+from chock.gate.runner.actor import _config_agent_env, actor_of, git_email
+from chock.gate.runner.constants import _HUMAN_ENV, AGENT_COMMIT_ENV, AI_AGENT_ENV, CLAUDECODE_ENV
+from chock.gate.runner.halt import HALT_ALL, HALT_PARTS, HALT_POLICY, HALT_REASON, halt_find, halt_read, halt_repos
 from chock.gate.runner.journal import log_now, log_trace_text, log_write
 
 _LOG = (".chock", "log", "gate-events.jsonl")
@@ -31,16 +32,30 @@ def _printable(text: object) -> str:
 def _log(repo: Path, event: str, fields: dict[str, object]) -> None:
     """One local line: who stopped or resumed, when, and the scope. Best effort: a log failure never undoes the act."""
     record = {"route": "sync", "policy_id": HALT_POLICY, "event": event, **fields}
-    record["actor"] = actor_of(agent_signal(repo))
+    record["actor"] = actor_of(_any_agent_signal(repo))
     try:
         log_write(repo.joinpath(*_LOG), record, repo)
     except OSError as exc:
         sys.stderr.write(f"chock: the stop is in place, but its log line was not written: {exc}\n")
 
 
+def _any_agent_signal(repo: Path) -> str | None:
+    """The first agent marker set, whatever else is: `CHOCK_AGENT_COMMIT=0`, the commit rule's escape hatch for a
+    person's git in an agent's terminal, clears nothing here, since an agent can set it too."""
+    env = os.environ
+    named = env.get(AGENT_COMMIT_ENV, "").strip().lower()
+    checks = (
+        (AGENT_COMMIT_ENV, bool(named) and named not in _HUMAN_ENV),
+        (f"{CLAUDECODE_ENV}=1", env.get(CLAUDECODE_ENV) == "1"),
+        (AI_AGENT_ENV, bool(env.get(AI_AGENT_ENV, "").strip())),
+        *((name, bool(env.get(name))) for name in _config_agent_env(repo)),
+    )
+    return next((signal for signal, present in checks if present), None)
+
+
 def _agent_refused(repo: Path, event: str) -> bool:
     """Only a person changes a stop (the actor rule): an agent's `chock stop` or `chock resume` is refused, logged."""
-    signal = agent_signal(repo)
+    signal = _any_agent_signal(repo)
     if signal is None:
         return False
     sys.stderr.write(
@@ -52,8 +67,8 @@ def _agent_refused(repo: Path, event: str) -> bool:
 
 
 def stop_line(repo: Path) -> str | None:
-    """The one line `chock status` leads with while a stop is in force, else None."""
-    stop = halt_read(repo)
+    """The one line `chock status` leads with while a stop is in force here, above, or in the main worktree."""
+    stop = halt_find(halt_repos(repo) or [repo], None)
     if stop is None:
         return None
     if stop.get("unreadable"):
@@ -112,7 +127,13 @@ def resume_main(argv: list[str] | None) -> int:
     path = repo.joinpath(*HALT_PARTS)
     stop = halt_read(repo)
     if stop is None:
-        sys.stdout.write("No stop is in force here; nothing to resume.\n")
+        elsewhere = halt_find(halt_repos(repo) or [repo], None)
+        where = (
+            "; the one in force is in a repository above this one or in the main worktree: resume it there"
+            if elsewhere
+            else ""
+        )
+        sys.stdout.write(f"No stop file here; nothing to resume{where}.\n")
         return 0
     try:
         path.unlink()
