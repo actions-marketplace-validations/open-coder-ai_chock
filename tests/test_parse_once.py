@@ -9,7 +9,7 @@ import os
 import yaml
 
 from chock import yamlio
-from chock.gate import edit_image, guard_runner, patch_image, runtime_bundle, sessionstart, write_gate
+from chock.gate import edit_image, guard_runner, patch_apply, patch_image, runtime_bundle, sessionstart, write_gate
 
 
 def test_the_libyaml_loader_is_used_when_present() -> None:
@@ -45,7 +45,7 @@ def test_a_file_rewritten_in_place_is_never_read_stale(tmp_path) -> None:
 
 def test_the_bundle_segments_match_ast_exactly() -> None:
     """The one-split slicer must return what ast.get_source_segment would, byte for byte."""
-    for module in (guard_runner, edit_image, patch_image, write_gate, sessionstart):
+    for module in (guard_runner, edit_image, patch_apply, patch_image, write_gate, sessionstart):
         source = inspect.getsource(module)
         lines = source.encode("utf-8").splitlines(keepends=True)
         for node in ast.parse(source).body:

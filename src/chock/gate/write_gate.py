@@ -267,17 +267,13 @@ def _gate_says(gate, event, name, deadline, root):
         return _missing_gate(gate), {}
     outside = outside_globs(gate)
     why = []
-    try:
-        listed = writes_for(event, gate, deadline, why, root)
-        patched = patch_added(event) if event.event == PRE_TOOL else {}
-    except ValueError as exc:  # an apply_patch text that does not parse: never judged, so refused
-        return gate_decision(GATE_ERRORED, str(exc), gate), {}
+    listed = writes_for(event, gate, deadline, why, root)
     if listed is None:  # never judged: refused, not read as a clean worktree
         return gate_decision(GATE_ERRORED, why[-1] if why else "git status gave no answer", gate), {}
     writes = judged_files(listed, root, outside, lambda path: repo_paths(path, root))
     if not writes:
         return None, writes
-    added = {**patched, **added_from_event(event)} if event.event == PRE_TOOL else {}
+    added = {**patch_added(event), **added_from_event(event)} if event.event == PRE_TOOL else {}
     added = judged_files(added, root, outside, lambda path: repo_paths(path, root))
     added = {path: text for path, text in added.items() if path in writes}
     extra = {

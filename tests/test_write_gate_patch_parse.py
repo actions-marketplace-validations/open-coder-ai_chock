@@ -218,10 +218,8 @@ def test_a_patch_codex_would_not_parse_is_refused(tmp_path: Path, patch: str) ->
     with pytest.raises(ValueError, match="does not parse"):
         patch_image.patched_files(_event(patch), tmp_path)
     gate = _gate(tmp_path, CONTENT)
-    decision = write_gate.evaluate_gate(["--gate", str(gate)], _event(patch))
-    assert decision is not None
-    assert decision[0] == write_gate.VERDICT_DENY
-    assert "does not parse" in decision[1]
+    with pytest.raises(ValueError, match="does not parse"):  # the runtime's dispatch refuses any exception
+        write_gate.evaluate_gate(["--gate", str(gate)], _event(patch))
 
 
 @pytest.mark.parametrize(
