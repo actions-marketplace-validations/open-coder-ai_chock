@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import sys
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -121,28 +122,42 @@ def _shown(label: str, path: Path) -> str:
     return str(PurePosixPath(label).parent / path.name)
 
 
-def verify(label: str, files: list[Path]) -> Chain:
-    """Walk `files` (rotated first) as one chain, stopping at its first break."""
-    chain = Chain(label, files)
+def walk(chain: Chain) -> Iterator[tuple[tuple[str, int], bytes | None, dict[str, Any] | None]]:
+    """Every line of `chain.files` (rotated first) as (where, line, its break or None), going on past a break.
+
+    An unreadable file is one item with no line. `chain` counts its records and seqs as the walk goes.
+    """
     before: bytes | None = None
-    for path in files:
+    for path in chain.files:
         try:
             text = path.read_bytes()
         except OSError as exc:
-            chain.breaks = _break((_shown(label, path), 0), "unreadable", "a readable file", str(exc))
-            return chain
+            where = (_shown(chain.label, path), 0)
+            yield where, None, _break(where, "unreadable", "a readable file", str(exc))
+            continue
         for number, line in enumerate(text.split(b"\n"), start=1):
             if not line:
                 continue
-            chain.breaks = _step(chain, (_shown(label, path), number), line, before)
-            if chain.breaks:
-                return chain
-            if chain.start is not None:
+            where = (_shown(chain.label, path), number)
+            found = _step(chain, where, line, before)
+            if found is None and chain.start is not None:
                 chain.records += 1
                 chain.seqs[log_chain.log_line_seq(line)] = log_chain.log_line_hash(line)
+            yield where, line, found
             before = line
-    if before is not None and chain.start is not None:
-        chain.head = {"seq": log_chain.log_line_seq(before), "sha256": log_chain.log_line_hash(before)}
+
+
+def verify(label: str, files: list[Path]) -> Chain:
+    """Walk `files` (rotated first) as one chain, stopping at its first break."""
+    chain = Chain(label, files)
+    last: bytes | None = None
+    for _where, line, found in walk(chain):
+        if found:
+            chain.breaks = found
+            return chain
+        last = line
+    if last is not None and chain.start is not None:
+        chain.head = {"seq": log_chain.log_line_seq(last), "sha256": log_chain.log_line_hash(last)}
     return chain
 
 
