@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -37,34 +38,77 @@ HALT_CLIENTS = (
     "vscode_copilot",
     "windsurf",
 )
+#: The machine-level registry under the person's home: one `<sha256 of the repository's realpath>.json` per stop,
+#: so a runtime that cannot tell which repository its session is rooted in still sees every stop on the machine.
+HALT_REGISTRY_PARTS = (".chock", "stops")
+_HALT_REGISTRY_SUFFIX = ".json"
+_HALT_REGISTRY_UNREADABLE = "~/.chock/stops exists but cannot be read, so every agent is refused"
 _HALT_GITDIR = "gitdir:"
 _HALT_REASON_CAP = 200
 _HALT_UNREADABLE = ".chock/stop.json exists but cannot be read, so every agent is refused"
 _HALT_NO_REASON = "no reason given"
 
 
-def halt_read(repo_root):
-    """The stop in force for `repo_root` as {scope, reason, ...}, or None. A file that exists but cannot be
-    read or parsed, or names no valid scope, stops every agent: fail closed."""
-    if repo_root is None:
-        return None
-    path = Path(repo_root).joinpath(*HALT_PARTS)
+def _halt_read_file(path, unreadable):
+    """The stop `path` holds as {scope, reason, ...}, or None when there is no file. A file that exists but
+    cannot be read or parsed, or names no valid scope, stops every agent: fail closed."""
+    stopped = {"scope": HALT_ALL, "reason": unreadable, "unreadable": True}
     try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
+        doc = json.loads(Path(path).read_text(encoding="utf-8"))
     except (FileNotFoundError, NotADirectoryError):
-        return {"scope": HALT_ALL, "reason": _HALT_UNREADABLE, "unreadable": True} if os.path.lexists(path) else None
+        return stopped if os.path.lexists(path) else None
     except (OSError, UnicodeError, ValueError):
-        return {"scope": HALT_ALL, "reason": _HALT_UNREADABLE, "unreadable": True}
+        return stopped
     scope = doc.get("scope") if isinstance(doc, dict) else None
     if not isinstance(scope, str) or not (scope == HALT_ALL or HALT_CLIENT_RE.match(scope)):
-        return {"scope": HALT_ALL, "reason": _HALT_UNREADABLE, "unreadable": True}
+        return stopped
     reason = doc.get("reason")
     return {**doc, "scope": scope, "reason": reason if isinstance(reason, str) else ""}
 
 
+def halt_read(repo_root):
+    """The stop in force for `repo_root`, or None; read fail-closed."""
+    if repo_root is None:
+        return None
+    return _halt_read_file(Path(repo_root).joinpath(*HALT_PARTS), _HALT_UNREADABLE)
+
+
+def halt_registry_dir():
+    """`~/.chock/stops`: the machine-level registry of every stop in force."""
+    return Path(os.path.expanduser("~")).joinpath(*HALT_REGISTRY_PARTS)
+
+
+def halt_registry_entry(repo_root):
+    """The registry entry for `repo_root`, named by the sha256 of its realpath."""
+    key = hashlib.sha256(os.path.realpath(str(repo_root)).encode("utf-8")).hexdigest()
+    return halt_registry_dir() / f"{key}{_HALT_REGISTRY_SUFFIX}"
+
+
+def halt_registry_find(client, repos=None):
+    """The first registry entry that reaches `client` (only those for `repos`, when given), or None.
+    A registry that exists but cannot be listed, or an entry that cannot be read, refuses: fail closed."""
+    folder = halt_registry_dir()
+    unreadable = {"scope": HALT_ALL, "reason": _HALT_REGISTRY_UNREADABLE, "unreadable": True}
+    try:
+        names = sorted(os.listdir(folder))
+    except (FileNotFoundError, NotADirectoryError):
+        return unreadable if os.path.lexists(folder) else None
+    except OSError:
+        return unreadable
+    wanted = None if repos is None else {halt_registry_entry(repo).name for repo in repos}
+    for name in names:
+        if not name.endswith(_HALT_REGISTRY_SUFFIX) or (wanted is not None and name not in wanted):
+            continue
+        stop = _halt_read_file(folder / name, _HALT_REGISTRY_UNREADABLE)
+        if stop is not None and halt_covers(stop, client):
+            return stop
+    return None
+
+
 def halt_main_root(repo_root):
     """The main worktree of the linked worktree at `repo_root` (its `.git` is a file naming a gitdir whose
-    `commondir` leads to the main `.git`), else None. Read from disk: the runtime cannot wait on git."""
+    `commondir` leads to the main `.git`), or the bare repository itself that holds it, else None. Read from
+    disk: the runtime cannot wait on git."""
     dot = Path(repo_root) / ".git"
     try:
         text = dot.read_text(encoding="utf-8").strip() if dot.is_file() else ""
@@ -75,16 +119,19 @@ def halt_main_root(repo_root):
     except (OSError, UnicodeError):
         return None  # a submodule's gitdir has no commondir: it is no linked worktree
     common_dir = Path(os.path.realpath(gitdir / common))
-    return common_dir.parent if common_dir.name == ".git" else None
+    return common_dir.parent if common_dir.name == ".git" else common_dir
 
 
 def halt_repos(path):
-    """Every repository holding `path`, nearest first: each folder up from it with a `.git`, nested ones included."""
+    """Every repository holding `path`, as spelled and with every symlink resolved, nearest first: each folder up
+    from it with a `.git`, nested ones included."""
     try:
-        here = Path(os.path.abspath(str(path)))
+        text = str(path)
+        heres = dict.fromkeys(Path(found) for found in (os.path.abspath(text), os.path.realpath(text)))
     except (OSError, ValueError):
         return []
-    return [folder for folder in (here, *here.parents) if os.path.lexists(folder / ".git")]
+    folders = (folder for here in heres for folder in (here, *here.parents))
+    return [folder for folder in dict.fromkeys(folders) if os.path.lexists(folder / ".git")]
 
 
 def halt_find(roots, client):

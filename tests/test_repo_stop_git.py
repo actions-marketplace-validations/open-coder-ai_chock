@@ -17,6 +17,9 @@ from chock.gate.runner import judge, script_verdict
 from chock.hooks.installers import get_hooks_dir, install_dispatcher, install_policy_hooks
 from chock.witness_export import bundle
 
+#: `chock stop` writes its machine registry entry under this test's own home, never the real one.
+pytestmark = pytest.mark.usefixtures("private_home")
+
 POLICY_ID = "word-check"
 AGENT = {"CHOCK_AGENT_COMMIT": "1"}
 PERSON = {"CHOCK_AGENT_COMMIT": "0"}

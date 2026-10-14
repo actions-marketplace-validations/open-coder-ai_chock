@@ -22,6 +22,9 @@ from chock.hooks import in_agent_install, stop_check
 from chock.hooks.in_agent_generic import STOP_CHECK_ID
 from chock.vendors import config_path
 
+#: `chock stop` writes its machine registry entry under this test's own home, never the real one.
+pytestmark = pytest.mark.usefixtures("private_home")
+
 READ = {"hook_event_name": "PreToolUse", "tool_name": "Read", "session_id": "e2e", "tool_use_id": "t1"}
 
 

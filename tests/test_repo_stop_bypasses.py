@@ -19,12 +19,17 @@ from chock.gate import runtime_bundle
 from chock.gate.runner.halt import HALT_CLIENTS
 from chock.vendors import in_agent_vendors
 
+#: `chock stop` writes its machine registry entry under this test's own home, never the real one.
+pytestmark = pytest.mark.usefixtures("private_home")
+
 
 def _deny(proc: subprocess.CompletedProcess) -> bool:
     return '"permissionDecision": "deny"' in proc.stdout
 
 
-def _hook(runtime: Path, cwd: Path, payload: object, home: Path, *flags: str) -> subprocess.CompletedProcess:
+def _hook(
+    runtime: Path, cwd: Path, payload: object, home: Path, *flags: str, env: dict | None = None
+) -> subprocess.CompletedProcess:
     text = payload if isinstance(payload, str) else json.dumps(payload)
     return subprocess.run(
         [sys.executable, str(runtime), *flags],
@@ -33,7 +38,7 @@ def _hook(runtime: Path, cwd: Path, payload: object, home: Path, *flags: str) ->
         text=True,
         encoding="utf-8",
         cwd=cwd,
-        env=hook_env(home),
+        env={**hook_env(home), **(env or {})},
         timeout=60,
         check=False,
     )
@@ -84,7 +89,7 @@ def plugin(tmp_path: Path) -> tuple[Path, Path, Path]:
     """(stopped repository A, plugin runtime outside any repository, a home)."""
     repo, runtime, _ = plugin_layout(tmp_path, CLEAN_GUARD)
     home = tmp_path / "home"
-    home.mkdir()
+    home.mkdir(exist_ok=True)
     _stop(repo, "--reason", "plugin")
     return repo, runtime, home
 
@@ -104,11 +109,13 @@ def test_a_call_from_a_nested_repo_inside_a_stopped_one_is_refused(plugin: tuple
 
 
 def test_an_unrelated_repo_is_not_stopped(plugin: tuple[Path, Path, Path], tmp_path: Path) -> None:
+    """A session its client roots in another repository: the machine registry reaches only a session it cannot place."""
     _, runtime, home = plugin
     other = tmp_path / "other"
     other.mkdir()
     init_repo(other)
-    assert not _deny(_hook(runtime, other, _call("Read", {"file_path": "x"}, other), home, "--stop-check"))
+    call = _call("Read", {"file_path": "x"}, other)
+    assert not _deny(_hook(runtime, other, call, home, "--stop-check", env={"CLAUDE_PROJECT_DIR": str(other)}))
 
 
 # --- 3. no opt-out variable makes an agent a person for stop or resume -------------------------------------
@@ -157,7 +164,7 @@ def test_an_unreadable_payload_is_refused_while_stopped_and_allowed_otherwise(tm
     runtime.parent.mkdir(parents=True)
     runtime.write_text(runtime_bundle.render("claude_code"), encoding="utf-8")
     home = tmp_path / "home"
-    home.mkdir()
+    home.mkdir(exist_ok=True)
     unstopped = _hook(runtime, repo, "not json {", home, "--stop-check")
     assert (unstopped.returncode, _deny(unstopped)) == (0, False)
     _stop(repo)

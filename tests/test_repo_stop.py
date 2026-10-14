@@ -14,6 +14,9 @@ from chock import stop as chock_stop
 from chock.lifecycle import status_main
 from chock.scaffold.gitrules import ensure_git_rules
 
+#: `chock stop` writes its machine registry entry under this test's own home, never the real one.
+pytestmark = pytest.mark.usefixtures("private_home")
+
 LAYOUTS = {
     "sync": (sync_layout, lambda repo, home: sync_log(repo)),
     "plugin": (plugin_layout, lambda repo, home: plugin_log(home)),
@@ -26,7 +29,7 @@ READ = ("Read", {"file_path": "notes.txt"})
 @pytest.fixture
 def home(tmp_path: Path) -> Path:
     folder = tmp_path / "home"
-    folder.mkdir()
+    folder.mkdir(exist_ok=True)
     return folder
 
 

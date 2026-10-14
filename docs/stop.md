@@ -20,13 +20,37 @@ starts with the scope is reached (`cursor-agent` by `cursor`), so is a shorter f
 is `codex`, reached by `codex_cli`), and so is an agent naming no client or one no Chock client id matches.
 All three err toward refusing.
 
-A stop reaches every repository the call works in or touches: the one Chock's hook runs for, every
-repository above the call's folder and above each path it names (a nested repository inside a stopped one
-included), and, from a linked worktree (`git worktree add`, Claude Code's `.claude/worktrees/`), the main
-checkout's stop as well as its own. The file is not committed, so a worktree has no copy of its own.
+A stop reaches every repository the call works in or touches: the session's project root as the client
+names it, the one Chock's hook runs for, every repository above the call's folder and above each path
+anywhere in its input (a nested repository inside a stopped one included, symlinks resolved, `file://`
+URIs decoded), and, from a linked worktree (`git worktree add`, Claude Code's `.claude/worktrees/`), the
+main checkout's stop as well as its own; for a bare repository's worktrees, the bare repository's. The
+file is not committed, so a worktree has no copy of its own.
+
+`stop` also writes `~/.chock/stops/<sha256 of the repository's realpath>.json` (`0o600`), and `resume`
+removes it. A hook whose client names no project root for the session refuses every call of an agent in
+scope while any entry on the machine is in force, whatever its folder: fail closed. A session the client
+roots in an unstopped repository is not stopped by another repository's stop. A registry folder or entry
+that exists but cannot be read refuses.
+
+| Client | Project-root signal | Source |
+| --- | --- | --- |
+| claude_code | `CLAUDE_PROJECT_DIR` in the hook's environment | code: Chock's session-start hook reads it; live unmeasured |
+| cursor | `workspace_roots` in the payload | measured live, Cursor 3.22.12 on Windows, 2026-10-06 |
+| antigravity | `workspacePaths` in the payload | tests' payload fixtures; live unmeasured |
+| openhands | `OPENHANDS_PROJECT_DIR` in the hook's environment | vendor docs as quoted in Chock's store data; live unmeasured |
+| gemini_cli | `GEMINI_PROJECT_DIR`, read when set | unmeasured |
+| every other client | none known: machine-wide | unmeasured |
+
+At git hooks the stop is looked up as the dispatcher finds it: the work tree (`GIT_WORK_TREE` too), the
+checkout of the git dir and of the common dir (`GIT_DIR` too), and every folder above each. Only the main
+checkout's `.chock/bin/gate.py` judges, never a copy in the work tree. A bare repository has no main
+checkout, so while its stop is in force every commit and push from its worktrees is refused, a person's
+included, until `resume`.
 
 Only a person changes a stop: `stop` and `resume` refuse, and log the refusal, when the shell carries any
-agent marker. Unlike a commit, `CHOCK_AGENT_COMMIT=0` does not clear one here: an agent can set it too. `resume` removes the file.
+agent marker. `CHOCK_AGENT_COMMIT=0` clears no agent marker for any stop check (commit, push, stop,
+resume): an agent can set it too. `resume` removes the file and the registry entry.
 
 `chock sync` wires one hook of its own per client, `--stop-check`, with no matcher and whatever
 policies are installed, so the stop sees every tool call, reads included. Unstopped it allows and
@@ -44,4 +68,7 @@ the resume are logged ([Decision log](decision-log.md#stop-and-override)). The f
 - It refuses the *next* action. It does not end a process already running (a background shell, a
   spawned server), and it revokes no credential.
 - A person, or an agent working outside this repository's hooks, is not affected. Such an agent can also
-  delete .chock/stop.json directly: the file is protected only from agents whose calls a hook judges.
+  delete .chock/stop.json or `~/.chock/stops` directly: both are protected only from agents whose calls a
+  hook judges. An agent with an unrestricted shell on a client without hooks is not stopped.
+- A plugin built before the registry existed does not read it: there the stop reaches only calls that
+  touch the stopped repository.
