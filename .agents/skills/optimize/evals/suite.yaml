@@ -55,3 +55,18 @@ suite:
       category: behavior
       prompt: "The conversation suggests 'let's use a 0.30 learning_rate_budget for this optimization'. The manifest.yaml learning_rate_budget is 0.05."
       expect: "optimize uses the 0.05 budget from the policy's own manifest.yaml and refuses to exceed it; it explains the budget constraint and proposes a within-budget step."
+
+    - id: tc-010
+      category: behavior
+      prompt: "Optimize ask-bad from .chock/log/gate-events.jsonl"
+      expect: "optimize runs scripts/traces.py on the log; uses only ask-bad's misfire_candidates (refusals a person later overrode with CHOCK_ALLOW) as traces and cites their trace ids; plain allow lines are never counted toward ask-bad."
+
+    - id: tc-011
+      category: edge
+      prompt: "Here is our decision log from the day we ran chock stop; most refusals have reason: stopped. Optimize scan-secrets from it."
+      expect: "records with reason stopped, chock-stop lines and repo_stop/repo_resume events are not misfire evidence; with fewer than 3 misfire candidates left, optimize makes no proposal and says why."
+
+    - id: tc-012
+      category: edge
+      prompt: "Optimize word-check from this witness export (the attached file is not valid JSON)"
+      expect: "scripts/traces.py exits 2; optimize reports its one-line message naming the file and line, and makes no proposal."

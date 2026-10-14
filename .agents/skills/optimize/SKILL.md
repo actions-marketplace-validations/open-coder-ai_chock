@@ -31,7 +31,9 @@ Evidence-based improvement within bounds. Bounds: `references/skillopt.md`.
 
 ## Procedure
 
-1. collect(evidence: >=3 traces).
+1. collect(evidence: >=3 traces). decision log (`.chock/log/*.jsonl`, `~/.chock/log/<agent>/*.jsonl`) or `chock witness export` file →
+   `python3 scripts/traces.py FILE...`; traces = the policy's `misfire_candidates` (`references/traces.md`).
+   exit 2 → report its message; no proposal. stop records and plain allows are never a policy's evidence.
 2. filter(activation, conformance, deterministic_task: yes/no) → failure_pattern. if deterministic_task == yes: prefer determinize_edit (convert regex/command heuristics to committed script under code/hybrid skill); structural edit → human PR.
 3. if rejected_edit exists in `rejected-edits/` and no new evidence: skip.
 4. propose one bounded edit to deliverable folder within learning_rate_budget; preserve frozen_sections; move depth to references/. edit_type ∈ {prompt_edit, example_edit, determinize_edit, structural_edit}; determinize_edit requires human PR.
