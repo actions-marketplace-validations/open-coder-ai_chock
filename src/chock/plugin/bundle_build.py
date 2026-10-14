@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from chock.guardrails import plugin as guardrails
-from chock.hooks import heartbeat
+from chock.hooks import heartbeat, stop_check
 from chock.plugin import bundle_grade, bundles, claude, hook_dir
 from chock.plugin.clients import CLIENTS, Client
 from chock.plugin.listing import LICENSE_REL, license_text
@@ -254,6 +254,8 @@ def merged_files(
     beat = heartbeat.plugin_doc(client.agent, hooks)
     if beat is not None:  # one session_start line per session, from the runtime the protection already ships
         hooks = _merge_into(hooks, hook_dir.store_timeout(client.own_layout, beat) if client.own_layout else beat)
+    stop = stop_check.plugin_doc(client.agent, hooks, generic=client.generic)  # `chock stop`: every tool, never toggled
+    hooks = _merge_into(hooks, hook_dir.store_timeout(client.own_layout, stop) if client.own_layout else stop)
     for rel, content in guardrails.files(bundle["id"], _rows(client, bundle, packages), skill_rel).items():
         _place(files, rel, content)
     if manifest_rel is not None:
