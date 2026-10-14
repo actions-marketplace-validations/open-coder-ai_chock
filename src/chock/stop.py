@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TextIO
 
 from chock.gate.runner.actor import actor_of, agent_signal, git_email
-from chock.gate.runner.halt import HALT_ALL, HALT_PARTS, HALT_POLICY, halt_read
+from chock.gate.runner.halt import HALT_ALL, HALT_PARTS, HALT_POLICY, HALT_REASON, halt_read
 from chock.gate.runner.journal import log_now, log_trace_text, log_write
 
 _LOG = (".chock", "log", "gate-events.jsonl")
@@ -36,6 +36,19 @@ def _log(repo: Path, event: str, fields: dict[str, object]) -> None:
         log_write(repo.joinpath(*_LOG), record, repo)
     except OSError as exc:
         sys.stderr.write(f"chock: the stop is in place, but its log line was not written: {exc}\n")
+
+
+def _agent_refused(repo: Path, event: str) -> bool:
+    """Only a person changes a stop (the actor rule): an agent's `chock stop` or `chock resume` is refused, logged."""
+    signal = agent_signal(repo)
+    if signal is None:
+        return False
+    sys.stderr.write(
+        f"chock: refused: this shell is marked as an agent's ({signal}). Only a person stops or resumes "
+        "agents; they run this from their own shell.\n"
+    )
+    _log(repo, event, {"verdict": "block", "reason": HALT_REASON})
+    return True
 
 
 def stop_line(repo: Path) -> str | None:
@@ -75,6 +88,8 @@ def stop_main(argv: list[str] | None) -> int:
     parser.add_argument("--reason", default="", help="Why: the agent is told `stopped: <reason>`")
     args = parser.parse_args(argv)
     repo = Path(args.repo).resolve()
+    if _agent_refused(repo, "repo_stop"):
+        return 1
     doc = {"scope": args.agent or HALT_ALL, "reason": args.reason, "who": git_email(repo) or _UNKNOWN}
     doc["when"] = log_now()
     path = repo.joinpath(*HALT_PARTS)
@@ -92,6 +107,8 @@ def resume_main(argv: list[str] | None) -> int:
     parser = argparse.ArgumentParser(prog="chock resume", description=resume_main.__doc__)
     _repo_arg(parser)
     repo = Path(parser.parse_args(argv).repo).resolve()
+    if _agent_refused(repo, "repo_resume"):
+        return 1
     path = repo.joinpath(*HALT_PARTS)
     stop = halt_read(repo)
     if stop is None:

@@ -5,8 +5,10 @@
   agent's commit or push is refused at the git hooks; a person's passes. Neither `CHOCK_ALLOW` nor the
   rollout level loosens it, and a file that exists but cannot be read refuses every agent. Each refusal is a
   decision-log line with reason `stopped`; the stop and the resume are logged with who and when. `chock
-  init` lists the file in `.gitignore`. Limits: it reaches only agents whose hooks Chock wires, and only the
-  tool calls a wired hook sees; Devin's hook is best-effort and fail-open per the vendor; it refuses the
+  init` lists the file in `.gitignore`. Sync wires one matcher-less `--stop-check` hook per client beside chock's
+  others, so a stop sees every tool call whatever the policies match. Only a person changes a stop: `chock
+  stop` and `chock resume` refuse in a shell with an agent marker. Limits: it reaches only agents whose hooks
+  Chock wires (a `chock install` plugin has no stop check); Devin's hook is best-effort and fail-open per the vendor; it refuses the
   next action, ends no running process and revokes no credential.
 - **A `CHOCK_ALLOW` override names its approver.** The override's log line carries `approver`, the git
   `user.email` of the person's shell, beside its `policy_id`. It stays in the local `0o600` log: `chock

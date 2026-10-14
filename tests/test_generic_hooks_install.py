@@ -14,7 +14,8 @@ from chock import vendors
 from chock.compile.compiler import compile_policy
 from chock.compile.emitters.in_agent import GENERIC_VENDORS
 from chock.compile.surfaces import Surface
-from chock.hooks import heartbeat
+from chock.hooks import heartbeat, stop_check
+from chock.hooks.in_agent_generic import _merge
 from chock.hooks.in_agent_install import install_hooks, installed_policy_ids
 from chock.hooks.launch import LAUNCHER_REL, hook_command
 
@@ -74,8 +75,17 @@ def test_install_writes_config_runtime_and_reports(tmp_path: Path, vendor: str) 
     assert any(f".chock/bin/{vendor}.py" in c for c in commands)
     compiled = repo / ".chock" / "compiled" / POLICY / "pre-tool-use" / f"{vendor}-hooks.json"
     beat = heartbeat.sync_doc(vendor)
-    expected = _commands(json.loads(compiled.read_text(encoding="utf-8"))) + (_commands(beat) if beat else [])
-    assert commands == expected, "installed == compiled, plus the heartbeat where session start is documented"
+    fragment = json.loads(compiled.read_text(encoding="utf-8"))
+    if isinstance(fragment, list):  # mistral_vibe: one flat list of rules
+        expected = _commands(fragment) + _commands(stop_check.generic_doc(vendor)) + _commands(beat or [])
+    else:
+        merged: dict = {}
+        for doc in (fragment, stop_check.generic_doc(vendor), beat or {}):
+            _merge(merged, doc)
+        expected = _commands(merged)
+    assert commands == expected, (
+        "installed == compiled, plus the repo stop check, plus the heartbeat where session start is documented"
+    )
     assert (repo / LAUNCHER_REL).is_file()
     # Compared on the parsed strings, not the JSON text: a Windows interpreter path is
     # backslash-escaped on disk and would never match its own `sys.executable`.
@@ -125,7 +135,7 @@ def test_foreign_settings_and_entries_survive_install_and_removal(tmp_path: Path
     settings = _config(repo, "gemini_cli")
     assert settings["theme"] == "dark"
     assert settings["hooks"]["BeforeTool"][0] == theirs_entry, "the adopter's entry stays first"
-    assert len(settings["hooks"]["BeforeTool"]) == 2
+    assert len(settings["hooks"]["BeforeTool"]) == 3, "theirs, the policy's, and the repo stop check"
 
     shutil.rmtree(repo / ".chock" / "compiled")
     install_hooks(repo, "gemini_cli")

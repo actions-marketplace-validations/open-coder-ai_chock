@@ -16,7 +16,7 @@ from typing import NamedTuple
 
 from chock import vendors
 from chock.emit import write_generated_json
-from chock.hooks import heartbeat
+from chock.hooks import heartbeat, stop_check
 from chock.hooks.in_agent_generic import load_config as _load_config
 from chock.hooks.runtime_vendor import owned_markers, runtime_rel, vendor_runtime
 
@@ -194,11 +194,12 @@ def install_merged(repo_root: Path, vendor: str, *, uninstall: bool = False) -> 
         settings.setdefault(key, value)
 
     reported: list[str] = []
-    installed_any = False
-    for wiring in vendor_wiring.wirings:
-        wanted = [] if uninstall else _compiled(repo_root, wiring)
-        installed_any = installed_any or bool(wanted)
-        reported.extend(_merge_event(hooks, wiring, wanted, markers))
+    wanted_by = [([] if uninstall else _compiled(repo_root, wiring)) for wiring in vendor_wiring.wirings]
+    installed_any = any(wanted_by)
+    stopping = _stop_check_entries(vendor) if installed_any else {}
+    for wiring, wanted in zip(vendor_wiring.wirings, wanted_by, strict=True):
+        stops = stopping.get(wiring.event, [])  # last, matching every tool, whatever the policies match
+        reported.extend(_merge_event(hooks, wiring, [*wanted, *stops], markers)[: len(wanted)])
     _merge_heartbeat(hooks, vendor, markers, wanted=installed_any)
 
     if installed_any or _runtime_referenced(hooks, vendor):
@@ -216,6 +217,13 @@ def install_merged(repo_root: Path, vendor: str, *, uninstall: bool = False) -> 
     config_path.parent.mkdir(parents=True, exist_ok=True)
     write_generated_json(config_path, settings)
     return reported
+
+
+def _stop_check_entries(vendor: str) -> dict[str, list[dict]]:
+    """The stop check's entries by event key: wired with any of chock's, whatever tools the policies match."""
+    if vendor == "claude_code":
+        return {vendors.pre_tool_event(vendor): [stop_check.claude_entry()]}
+    return stop_check.cursor_entries()
 
 
 def _merge_heartbeat(hooks: dict, vendor: str, markers: tuple[str, ...], *, wanted: bool) -> None:

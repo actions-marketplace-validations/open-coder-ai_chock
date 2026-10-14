@@ -17,7 +17,7 @@ from pathlib import Path
 
 from .decision_target import _dlog_client, dlog_fields, dlog_session
 from .guard_runner import GUARD_LAST
-from .runner.halt import HALT_REASON
+from .runner.halt import HALT_POLICY, HALT_REASON
 from .runner.journal import (
     LOG_DEBUG,
     LOG_SETTINGS_PARTS,
@@ -36,6 +36,8 @@ _DLOG_PLUGIN_LOG = ("log", "events.jsonl")
 #: The argv flags that name what a hook judges; the first present names the policy.
 _DLOG_TARGET_FLAGS = ("--guard", "--gate", "--tool-call", "--record")
 _DLOG_GATE_FLAG = "--gate"
+#: The repo stop's own hook (`chock stop`): its lines are filed under the stop, not a policy.
+_DLOG_STOP_FLAG = "--stop-check"
 _DLOG_COMPILED = "compiled"
 #: How far above the runtime a plugin's manifest may sit (`<root>/scripts/<agent>.py`, or deeper).
 _DLOG_MANIFEST_DEPTH = 3
@@ -172,7 +174,7 @@ def log_decision(argv, event, decision, judged, context):
             "route": route,
             "agent": agent,
             "event": _DLOG_EVENT_LOGGED.get(event.event, event.event),
-            "policy_id": _dlog_policy_id(target, route, plugin_name),
+            "policy_id": HALT_POLICY if _DLOG_STOP_FLAG in argv else _dlog_policy_id(target, route, plugin_name),
             "surface": _DLOG_SURFACE.get(event.event, str(event.event)),
             "verdict": _DLOG_SPOKEN.get(outcome, "allow"),
             "reason": _dlog_reason(source, outcome),
