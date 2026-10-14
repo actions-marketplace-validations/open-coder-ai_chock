@@ -1,14 +1,14 @@
 <div align="center">
 
-<p><img src="https://raw.githubusercontent.com/open-coder-ai/chock/main/docs/assets/readme/cover-chock.png" alt="chock: a kill switch for your coding agent's wrong moves." width="100%"></p>
+<p><img src="https://raw.githubusercontent.com/open-coder-ai/chock/main/docs/assets/readme/cover-chock.png" alt="chock: blocks your coding agent's wrong moves before they land." width="100%"></p>
 
 </div>
 
 # Teach your AI agent what not to do.
 
-A kill switch for your coding agent's wrong moves.
+Blocks your coding agent's wrong moves before they land.
 
-Chock kills that action, nothing else: no suggestions, no rewrites.
+Chock blocks that action, nothing else: no suggestions, no rewrites.
 
 [chock](https://github.com/open-coder-ai/chock) · [chock-catalog](https://github.com/open-coder-ai/chock-catalog) · chock.sh (launching soon)
 

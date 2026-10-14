@@ -62,10 +62,10 @@ function cover({ repo, title, sub, chips, right, hero = false }) {
 
 const COVERS = {
   'cover-chock': cover({ repo: 'chock', title: 'Teach your AI agent <span class="gold">what not to do.</span>',
-    sub: 'A kill switch for your coding agent\'s wrong moves.',
+    sub: 'Blocks your coding agent\'s wrong moves before they land.',
     chips: ['no LLM, no tokens', 'git hook + CI gate', 'Apache-2.0'], right: REFUSALS, hero: true }),
   'cover-org': cover({ repo: 'open-coder-ai', title: 'Teach your AI agent <span class="gold">what not to do.</span>',
-    sub: 'A kill switch for your coding agent\'s wrong moves.', chips: chipsCatalog, right: REFUSALS, hero: true }),
+    sub: 'Blocks your coding agent\'s wrong moves before they land.', chips: chipsCatalog, right: REFUSALS, hero: true }),
   'cover-chock-catalog': cover({ repo: 'chock-catalog', title: `${D.policies} policies <span class="gold">for AI-written code.</span>`,
     sub: 'Each one labelled by what it enforces: at commit, in the agent, or advice the agent reads.', chips: chipsCatalog,
     right: term([`<div class="c"># tiers, from registry.yaml</div>`, `<div><span class="d">${D.tiers.commit}</span> enforced at commit</div>`, `<div><span class="d">${D.tiers['in-agent']}</span> in the agent, best-effort</div>`, `<div><span class="d">${D.tiers.advisory}</span> advisory</div>`, `<div class="c" style="margin-top:10px">${fmt(D.eval_executed)} of ${fmt(D.eval_cases)} eval cases replay automatically</div>`]), hero: true }),

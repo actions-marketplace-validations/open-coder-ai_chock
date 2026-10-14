@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: If you use this software, please cite it as below.
 title: chock
 abstract: >-
-  A kill switch for your coding agent's wrong moves.
+  Blocks your coding agent's wrong moves before they land.
 type: software
 authors:
   - name: Open Coder AI
