@@ -132,14 +132,16 @@ def test_hook_records_without_a_heartbeat_warn(tmp_path, home):
     assert found["last fired"].detail == "stop 2026-10-13T00:00:01Z"
 
 
-@pytest.mark.parametrize(("level", "status"), [("debug", "WARN"), ("info", "INFO")])
-def test_heartbeats_with_no_hook_since_warn_only_where_debug_logs_allows(tmp_path, home, level, status):
+@pytest.mark.parametrize(("level", "status"), [("debug", "WARN"), ("info", "WARN"), ("off", "INFO")])
+def test_heartbeats_with_no_hook_since_warn_wherever_allows_are_logged(tmp_path, home, level, status):
     repo = _sync_repo(tmp_path)
     (repo / ".chock" / "chock-log.json").write_text(json.dumps({"level": level}), encoding="utf-8")
     beat = {"ts": "2026-10-13T00:00:02Z", "agent": AGENT, "event": "session_start", "route": "sync"}
     _log(repo / ".chock/log/gate-events.jsonl", {"ts": "2026-10-13T00:00:01Z", "agent": AGENT, "surface": "stop"}, beat)
     [target] = sync_targets(repo)
-    assert _by_name(checks.run(target, repo))["heartbeat"].status == status
+    beat = _by_name(checks.run(target, repo))["heartbeat"]
+    assert beat.status == status
+    assert "debug" not in f"{beat.detail} {beat.fix}"
 
 
 def test_a_hook_since_the_last_heartbeats_passes(tmp_path, home):

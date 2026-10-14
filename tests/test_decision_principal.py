@@ -99,7 +99,7 @@ def test_a_shell_target_is_the_program_and_a_hash_never_an_argument(
     command = f"FOO=bar /usr/local/bin/deploy --token {SECRET} --to prod.example.invalid"
     [record] = _call(tmp_path, home, route, "Bash", {"command": command}, session_id=SESSION, guard=guard)
 
-    assert record["target"] == f"deploy {_sha(command)}"
+    assert record["target"] == f"- {_sha(command)}"
     written = json.dumps(record)
     for argument in (SECRET, "--token", "prod.example.invalid", "/usr/local/bin", "FOO=bar"):
         assert argument not in written
@@ -235,8 +235,68 @@ def test_gate_py_keeps_only_short_string_fields_from_the_runtime() -> None:
         (f'TOKEN="{SECRET}" curl x', "-"),
         ("--version", "-"),
         ("", "-"),
-        (r"C:\Tools\deploy.exe --token x", "deploy.exe"),
+        (r"C:\Tools\deploy.exe --token x", "-"),
     ],
 )
 def test_the_program_is_a_bare_name_or_dash_never_an_argument(command: str, program: str) -> None:
     assert decision_target.dlog_command_print(command) == f"{program} {_sha(command)}"
+
+
+@pytest.mark.parametrize(
+    ("command", "program"),
+    [
+        ("./secret-abc123 --flag", "-"),
+        ('"/home/me/my tool" run', "-"),
+        (">out.txt echo hi", "-"),
+        ("/usr/local/bin/deploy --to prod", "-"),
+        ("/usr/bin/git status", "git"),
+        ("python3 -m pytest", "python3"),
+        ("mytool2 run", "-"),
+        ("mytool run", "mytool"),
+    ],
+)
+def test_the_program_is_an_allowlisted_name_or_a_plain_word_without_digits(command: str, program: str) -> None:
+    assert decision_target.dlog_command_print(command) == f"{program} {_sha(command)}"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="a Windows path read on a POSIX host")
+@pytest.mark.parametrize(
+    "path", [r"C:\Users\me\secret-notes.txt", "C:secret-notes.txt", r"\\server\share\secret-notes.txt"]
+)
+def test_a_windows_path_on_posix_is_outside_and_hashed(tmp_path: Path, path: str) -> None:
+    printed = decision_target.dlog_path_print(path, str(tmp_path), str(tmp_path))
+
+    assert printed == "outside:" + _sha(path)
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_an_unencodable_path_still_writes_its_line(tmp_path: Path, home: Path, route: str) -> None:
+    file_path = str(tmp_path / "repo" / "caf\udce9.txt")
+    [record] = _call(tmp_path, home, route, "Write", {"file_path": file_path, "content": "x"}, session_id=SESSION)
+
+    assert record["target"] == "caf\\udce9.txt"
+
+
+def test_an_mcp_target_is_redacted_and_capped() -> None:
+    class Call:
+        event, tool, command, path = "pre_tool", f"mcp__{SECRET}__{'t' * 300}", None, None
+
+    printed = decision_target.dlog_target(Call(), None)
+
+    assert SECRET not in printed
+    assert printed.startswith("[redacted]/t")
+    assert len(printed) == 128
+
+
+@pytest.mark.parametrize("route", ROUTES)
+@pytest.mark.parametrize(
+    ("client", "expected"),
+    [("Claude Code\x1b[31m/../x", "claudecode31mx"), ("c" * 40, "c" * 32), ("!!!", "claude_code")],
+)
+def test_client_type_is_sanitised_before_it_names_the_actor(
+    tmp_path: Path, home: Path, route: str, client: str, expected: str
+) -> None:
+    [record] = _call(tmp_path, home, route, "Bash", {"command": "ls"}, session_id=SESSION, client_type=client)
+
+    assert record["actor"] == f"agent:{expected}"
+    assert record.get("client", expected) == expected

@@ -146,19 +146,14 @@ def _heartbeat(target: Target, beats: list[dict], hooks: list[dict], sessions: i
     since = beats[-sessions:][0]["ts"]
     quiet = not any(r["ts"] >= since for r in hooks)
     last = f"last heartbeat {beats[-1]['ts']}"
-    if quiet and journal.log_settings(repo)[0] == journal.LOG_DEBUG:
+    if quiet and journal.log_settings(repo)[0] == journal.LOG_OFF:
+        return Check(INFO, "heartbeat", f"{last}; level off logs nothing since", "set level info to log every call")
+    if quiet:  # every allowed tool call is an info line: a session with none means no hook fired
         return Check(
             WARN,
             "heartbeat",
             f"{last}; no hook fired in the last {len(beats[-sessions:])} session(s)",
             "check the client loads the pre-tool hooks",
-        )
-    if quiet:
-        return Check(
-            INFO,
-            "heartbeat",
-            f"{last}; nothing logged since, which level info expects when nothing fired",
-            "set level debug to see allows",
         )
     return Check(PASS, "heartbeat", f"{last}; hooks fired since")
 

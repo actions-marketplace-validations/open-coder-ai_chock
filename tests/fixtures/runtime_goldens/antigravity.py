@@ -721,6 +721,18 @@ LOG_TRACE_CAP = 200
 
 LOG_REDACTED = '[redacted]'
 
+LOG_CALL = 'call'
+
+LOG_CLAIMS = '.calls'
+
+LOG_CLAIM_SECONDS = 600
+
+_LOG_CLAIM_PRUNER = '0'
+
+_LOG_CLAIM_NAME = 32
+
+_LOG_SURROGATE = _chock_re.compile('[\ud800-\udfff]')
+
 _LOG_SECRET_RE = _chock_re.compile('(?i)((AKIA|ASIA)[0-9A-Z]{16}|gh[oprsu]_[0-9A-Za-z]{36}|github_pat_[0-9A-Za-z_]{22,}|xox[bpas]-[0-9A-Za-z-]{10,}|(sk|rk)_live_[0-9A-Za-z]{16,}|sk-proj-[0-9A-Za-z_-]{20,}|sk-ant-[0-9A-Za-z_-]{20,}|sk-[0-9A-Za-z]{20,}|AIza[0-9A-Za-z_-]{35}|npm_[0-9A-Za-z]{36}|SG\\.[0-9A-Za-z_-]{16,}\\.[0-9A-Za-z_-]{16,}|eyJ[A-Za-z0-9_-]*\\.[A-Za-z0-9_-]*\\.[A-Za-z0-9_-]*|-----BEGIN (RSA |OPENSSH |EC |DSA )?PRIVATE KEY-----|api[_-]?key\\s*=\\s*["\'][A-Za-z0-9_\\-]{20,}["\']|secret[_-]?key\\s*=\\s*["\'][A-Za-z0-9_\\-]{20,}["\']|auth[_-]?token\\s*=\\s*["\'][A-Za-z0-9_\\-]{20,}["\']|password\\s*=\\s*["\'][^"\'\\s]{12,}["\']|(api|secret|auth)[_-]?(key|token)\\s*[=:]\\s*[A-Za-z0-9_\\-]{20,}|password\\s*[=:]\\s*[^\\s"\'${}]{12,})')
 
 _LOG_BYTES_RANGE = 'a whole number from 65536 (64 KiB) to 1073741824 (1 GiB)'
@@ -773,6 +785,40 @@ def log_record_level(record):
     """`debug` for a plain allow, `info` for every decision a policy made, something let through, or an agent's action."""
     plain = record.get('verdict') == LOG_ALLOW and (not any((key in record for key in LOG_LET_THROUGH)))
     return LOG_DEBUG if plain else LOG_INFO
+
+def log_plain_action(record):
+    """Whether `record` is an agent's action that every policy let through untouched: one line per tool call."""
+    untouched = not any((key in record for key in LOG_LET_THROUGH if key != 'target'))
+    return record.get('verdict') == LOG_ALLOW and 'target' in record and untouched
+
+def _log_prune_claims(folder):
+    cutoff = _chock_datetime.now(_chock_timezone.utc).timestamp() - LOG_CLAIM_SECONDS
+    for claim in folder.iterdir():
+        try:
+            if claim.stat().st_mtime < cutoff:
+                claim.unlink()
+        except OSError:
+            continue
+
+def log_claim(path, record, call):
+    """True for the first hook to log this tool call's plain allow; False for every later one. Fails open."""
+    key = '\x00'.join((str(record.get('session_id')), str(record.get('target')), call or log_now()))
+    name = _chock_hashlib.sha256(key.encode('utf-8', 'backslashreplace')).hexdigest()[:_LOG_CLAIM_NAME]
+    folder = _chock_Path(path).parent / LOG_CLAIMS
+    try:
+        folder.mkdir(mode=448, parents=True, exist_ok=True)
+        _chock_os.close(_chock_os.open(str(folder / name), _chock_os.O_WRONLY | _chock_os.O_CREAT | _chock_os.O_EXCL, 384))
+    except FileExistsError:
+        return False
+    except OSError:
+        return True
+    if name.startswith(_LOG_CLAIM_PRUNER):
+        _log_prune_claims(folder)
+    return True
+
+def log_now():
+    """The UTC time to the second, as every line is stamped."""
+    return _chock_datetime.now(_chock_timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 def log_admits(level, record_level):
     """Whether a record of `record_level` is written at `level`."""
@@ -838,8 +884,9 @@ def log_append(path, record, max_bytes=LOG_DEFAULT_MAX_BYTES):
     path = _chock_Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     log_rotate(path, max_bytes)
-    stamped = {'ts': _chock_datetime.now(_chock_timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), **record}
-    line = (json.dumps(stamped, ensure_ascii=False) + '\n').encode('utf-8')
+    stamped = {'ts': log_now(), **record}
+    text = _LOG_SURROGATE.sub(lambda found: f'\\\\u{ord(found[0]):04x}', json.dumps(stamped, ensure_ascii=False))
+    line = (text + '\n').encode('utf-8')
     fd = _chock_os.open(str(path), _chock_os.O_WRONLY | _chock_os.O_APPEND | _chock_os.O_CREAT | getattr(_chock_os, 'O_BINARY', 0), 384)
     try:
         _chock_os.write(fd, line)
@@ -847,12 +894,20 @@ def log_append(path, record, max_bytes=LOG_DEFAULT_MAX_BYTES):
         _chock_os.close(fd)
 
 def log_write(path, record, repo_root):
-    """Write `record` to `path` when the level in force for `repo_root` admits it, stamped with its level. Raises on I/O."""
+    """Write `record` to `path` when the level in force for `repo_root` admits it, stamped with its level. Raises on I/O.
+
+    At info a plain allowed action is written once per tool call (`call`, never itself written), by the first hook.
+    """
     level, size = log_settings(repo_root)
+    record = dict(record)
+    call = record.pop(LOG_CALL, None)
     record_level = log_record_level(record)
     kept = 'would_action' in record and _chock_os.environ.get(LOG_LEGACY_ENV) == '0'
-    if kept or log_admits(level, record_level):
-        log_append(path, {**record, 'level': record_level}, size)
+    if not (kept or log_admits(level, record_level)):
+        return
+    if level == LOG_INFO and log_plain_action(record) and (not log_claim(path, record, call)):
+        return
+    log_append(path, {**record, 'level': record_level}, size)
 
 GUARD_VIOLATION = 1
 
@@ -1073,9 +1128,19 @@ _DLOG_ASSIGNMENT = _chock_re.compile('^[A-Za-z_][A-Za-z0-9_]*=')
 
 _DLOG_OPAQUE_MARKS = ('$(', '`', "'", '"')
 
-_DLOG_PROGRAM_UNSAFE = _chock_re.compile('[^\\w.+-]')
+_DLOG_PLAIN_PROGRAM = _chock_re.compile('^[A-Za-z][A-Za-z._+-]{0,63}$')
+
+_DLOG_KNOWN_PROGRAMS = frozenset(['awk', 'bash', 'base64', 'cat', 'cd', 'chmod', 'cp', 'curl', 'diff', 'docker', 'echo', 'env', 'find', 'gh', 'git', 'go', 'gpg2', 'grep', 'head', 'jq', 'ls', 'make', 'md5sum', 'mkdir', 'mv', 'node', 'npm', 'npx', 'pip', 'pip3', 'pnpm', 'pwsh', 'pytest', 'python', 'python2', 'python3', 'rg', 'rm', 'ruff', 'sed', 'sh', 'sha1sum', 'sha256sum', 'sort', 'tail', 'tar', 'test', 'uv', 'wc', 'wget', 'xargs', 'yarn', 'zsh'])
 
 _DLOG_PROGRAM_CAP = 64
+
+_DLOG_MCP_CAP = 128
+
+_DLOG_CLIENT_UNSAFE = _chock_re.compile('[^a-z0-9_-]')
+
+_DLOG_CLIENT_CAP = 32
+
+_DLOG_WINDOWS_PATH = _chock_re.compile('^(?:[A-Za-z]:|\\\\\\\\)')
 
 _DLOG_UNNAMED = '-'
 
@@ -1087,8 +1152,11 @@ def dlog_session(event, record):
     return record
 
 def _dlog_client(raw):
+    """The payload's `client_type` as `[a-z0-9_-]{1,32}`, or None when nothing of it is left."""
     named = raw.get('client_type') if isinstance(raw, dict) else None
-    return named if isinstance(named, str) else None
+    if not isinstance(named, str):
+        return None
+    return _DLOG_CLIENT_UNSAFE.sub('', named.lower())[:_DLOG_CLIENT_CAP] or None
 
 def dlog_actor(event):
     """`agent:<client>`: an agent hook is always an agent's call; the client named in the payload, else the bundle's."""
@@ -1110,11 +1178,14 @@ def _dlog_program(command):
 def dlog_command_print(command):
     """`<program> sha256:<hex of the whole command>`: the program's bare name only, never an argument."""
     program = _dlog_program(command)
-    name = _DLOG_PROGRAM_UNSAFE.sub('', _chock_re.split('[\\\\/]', program)[-1])[:_DLOG_PROGRAM_CAP]
-    return f'{log_redact(name) or _DLOG_UNNAMED} {_dlog_sha256(command)}'
+    base = _chock_re.split('[\\\\/]', program)[-1]
+    known = base in _DLOG_KNOWN_PROGRAMS or _DLOG_PLAIN_PROGRAM.match(program)
+    return f'{(log_redact(base) if known else _DLOG_UNNAMED)} {_dlog_sha256(command)}'
 
 def dlog_path_print(path, cwd, repo):
     """The repository-relative path; any path outside `repo` (or with no repo) is `outside:sha256:<hex>`."""
+    if _chock_os.sep == '/' and _DLOG_WINDOWS_PATH.match(str(path)):
+        return _DLOG_OUTSIDE_PREFIX + _dlog_sha256(path)
     full = _chock_os.path.realpath(_chock_os.path.join(cwd or _chock_os.getcwd(), str(path)))
     if repo is not None:
         try:
@@ -1130,7 +1201,7 @@ def dlog_target(event, repo):
     tool = str(getattr(event, 'tool', None) or '')
     mcp = _DLOG_MCP_TOOL.match(tool)
     if mcp:
-        return f"{mcp['server']}/{mcp['tool']}"
+        return log_redact(f"{mcp['server']}/{mcp['tool']}")[:_DLOG_MCP_CAP]
     command, path = (getattr(event, 'command', None), getattr(event, 'path', None))
     if command:
         return dlog_command_print(command)
@@ -1147,6 +1218,9 @@ def dlog_fields(event, repo):
         return {}
     if target:
         fields['target'] = target
+    call = getattr(event, 'tool_use_id', None)
+    if target and isinstance(call, str) and call:
+        fields[LOG_CALL] = call
     return fields
 
 DLOG_ROUTE_SYNC, DLOG_ROUTE_PLUGIN = ('sync', 'plugin')
