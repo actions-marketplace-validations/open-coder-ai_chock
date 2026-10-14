@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -68,7 +69,7 @@ def _stop_command(package: Path) -> str:
     (command,) = [
         c
         for c in hook_commands(json.loads(next(package.rglob("hooks.json")).read_text("utf-8")))
-        if " --stop" in c and PROTECT_ID not in c
+        if re.search(r" --stop(?![\w-])", c) and PROTECT_ID not in c
     ]
     return command
 
