@@ -10,6 +10,7 @@ import yaml
 from conftest import guarded_launch
 
 from chock.gate import runtime_bundle
+from chock.plugin import posture
 from chock.plugin.cli import main as plugin_main
 from chock.plugin.devin import (
     _BESTEFFORT_NOTE_DEVIN,
@@ -139,9 +140,13 @@ def test_devin_package_claims_match_the_package(policy, tmp_path: Path) -> None:
 
 
 def test_devin_posture_never_claims_enforcement(policy, tmp_path: Path) -> None:
-    """The vendor's own fail-open caveat, and no 'enforced'/'block' anywhere in the emitted text."""
+    """The vendor's own fail-open caveat, and no 'enforced'/'block' outside the ledger-rendered witness clause."""
+    clause = posture.witness_clause("devin")
+    assert f"({clause})" in POSTURE_BESTEFFORT_DEVIN
+    prose = POSTURE_BESTEFFORT_DEVIN.replace(f"({clause})", "")
     for forbidden in ("enforced", "block"):
-        assert forbidden not in POSTURE_BESTEFFORT_DEVIN
+        assert forbidden not in prose
+    assert "enforced" not in clause
 
     assert "best effort and fail open" in POSTURE_BESTEFFORT_DEVIN
     assert "don't rely on them for crucial guardrails yet" in POSTURE_BESTEFFORT_DEVIN
