@@ -74,6 +74,25 @@ A person's `CHOCK_ALLOW` override is an `allow` line with `"override": "CHOCK_AL
 `approver` and `who` name a person. They stay in this local log (created `0o600`): Chock sends
 nothing over the network, and `chock witness export` leaves both out.
 
+## MCP gateway
+
+`chock gateway run` writes to the sync route's file (`<repo>/.chock/log/gate-events.jsonl`, the
+`--repo` it serves) with the fields above: `agent` and `surface` are `mcp-gateway`, `actor` and
+`client` come from the MCP client's `initialize` (`clientInfo.name`, same character rule), and
+`target` is `<server>/<tool>`: the server's `serverInfo.name` (`-` before it answers), redacted, cut
+to 128 characters. A tool call's arguments are never written. stdio MCP carries no session id, so
+there is no `session_id`.
+
+| Call | Lines |
+| :--- | :--- |
+| forwarded | one `allow` line, reason `no-rule`, no `policy_id`; plus one `warn` line per warning policy |
+| refused by a policy | one `block` line per refusing policy, reason `gate-block` (`gate-ask` for an ask: the gateway cannot prompt) |
+| a gate that cannot run, or malformed `params` | `block`, reason `fault`: the gate's policy, or `mcp-gateway` |
+| refused because another element of its batch was | `block`, reason `batch`, policy `mcp-gateway` |
+
+The line is written after the verdict is carried out; a log that cannot be written changes no
+verdict. The gateway does not check a repo stop (`chock stop`), so it writes no `stopped` line.
+
 ## Heartbeat
 
 Where the client documents a session-start event, chock wires one more hook there (the runtime,
