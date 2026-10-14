@@ -20,6 +20,7 @@ from chock.gate.runner.halt import (
     HALT_POLICY,
     HALT_REASON,
     halt_find,
+    halt_norm,
     halt_read,
     halt_registry_entry,
     halt_repos,
@@ -59,6 +60,23 @@ def _agent_refused(repo: Path, event: str) -> bool:
     )
     _log(repo, event, {"verdict": "block", "reason": HALT_REASON})
     return True
+
+
+def _person_confirms(repo: Path) -> bool:
+    """Only a person at their own terminal resumes: stdin and stdout are TTYs and they type the repository's name."""
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        sys.stderr.write(
+            "chock resume: refused: it needs a person at a terminal (stdin and stdout are not a TTY). "
+            "Run `chock resume` yourself, in your own terminal.\n"
+        )
+        return False
+    sys.stdout.write(f"Type the repository name ({repo.name}) to resume agents in {repo}: ")
+    sys.stdout.flush()
+    typed = sys.stdin.readline().strip()
+    if typed and not {"/", os.sep} & set(typed) and halt_norm(repo.parent / typed) == halt_norm(repo):
+        return True
+    sys.stderr.write("chock resume: the name typed does not match; the stop is still in force.\n")
+    return False
 
 
 def stop_line(repo: Path) -> str | None:
@@ -135,7 +153,7 @@ def resume_main(argv: list[str] | None) -> int:
     parser = argparse.ArgumentParser(prog="chock resume", description=resume_main.__doc__)
     _repo_arg(parser)
     repo = Path(parser.parse_args(argv).repo).resolve()
-    if _agent_refused(repo, "repo_resume"):
+    if _agent_refused(repo, "repo_resume") or not _person_confirms(repo):
         return 1
     path, entry = repo.joinpath(*HALT_PARTS), halt_registry_entry(repo)
     stop = halt_read(repo)

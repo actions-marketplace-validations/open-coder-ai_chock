@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from stop_person_support import person_resume
 
 from chock import stop as chock_stop
 from chock.compile.compiler import compile_policy
@@ -87,7 +88,7 @@ def test_an_agents_commit_is_refused_while_stopped_and_a_persons_passes(repo: Pa
     assert (record["verdict"], record["event"], record["actor"]) == ("block", "agent-commit", "agent:unknown")
 
     assert _commit(repo, PERSON).returncode == 0
-    chock_stop.resume_main(["--repo", str(repo)])
+    person_resume(repo)
     assert _commit(repo, AGENT).returncode == 0
 
 

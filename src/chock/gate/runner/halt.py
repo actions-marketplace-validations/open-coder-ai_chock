@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 from pathlib import Path
 
 # >>> gate.py 21
@@ -47,6 +48,8 @@ _HALT_GITDIR = "gitdir:"
 _HALT_REASON_CAP = 200
 _HALT_UNREADABLE = ".chock/stop.json exists but cannot be read, so every agent is refused"
 _HALT_NO_REASON = "no reason given"
+#: Platforms whose default filesystem ignores case: a path typed in another case names the same repository.
+_HALT_CASELESS = ("darwin", "win32", "cygwin")
 
 
 def _halt_read_file(path, unreadable):
@@ -78,9 +81,15 @@ def halt_registry_dir():
     return Path(os.path.expanduser("~")).joinpath(*HALT_REGISTRY_PARTS)
 
 
+def halt_norm(path):
+    """`path`'s realpath, casefolded where the filesystem ignores case (realpath keeps the case it was typed in)."""
+    real = os.path.realpath(str(path))
+    return real.casefold() if sys.platform in _HALT_CASELESS else real
+
+
 def halt_registry_entry(repo_root):
-    """The registry entry for `repo_root`, named by the sha256 of its realpath."""
-    key = hashlib.sha256(os.path.realpath(str(repo_root)).encode("utf-8")).hexdigest()
+    """The registry entry for `repo_root`, named by the sha256 of its normalised realpath."""
+    key = hashlib.sha256(halt_norm(repo_root).encode("utf-8")).hexdigest()
     return halt_registry_dir() / f"{key}{_HALT_REGISTRY_SUFFIX}"
 
 

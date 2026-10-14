@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from conftest import init_repo
 from decision_log_support import CLEAN_GUARD, hook_env, plugin_layout, sync_layout
+from stop_person_support import person_resume
 from test_repo_stop_git import AGENT, PERSON, _commit, _git
 from test_repo_stop_git import repo as git_repo  # noqa: F401 -- the fixture, under the name the tests use
 
@@ -95,7 +96,7 @@ def test_a_session_no_client_places_is_refused_while_any_stop_is_in_force(
     stopped, other, runtime, outside = two_repos
     call = _call("Bash", {"command": RESUME_A.format(repo=stopped)}, outside)
     assert _deny(_hook(runtime, other, call, private_home))
-    assert chock_stop.resume_main(["--repo", str(stopped)]) == 0
+    assert person_resume(stopped) == 0
     assert not _deny(_hook(runtime, other, call, private_home))
 
 
@@ -119,7 +120,7 @@ def test_stop_writes_a_private_registry_entry_and_resume_removes_it(plugin: tupl
     assert json.loads(entry.read_text(encoding="utf-8"))["repo"] == os.path.realpath(repo)
     if os.name == "posix":
         assert stat.S_IMODE(entry.stat().st_mode) == 0o600
-    assert chock_stop.resume_main(["--repo", str(repo)]) == 0
+    assert person_resume(repo) == 0
     assert not entry.exists()
 
 
@@ -145,7 +146,7 @@ def test_a_stop_file_removed_by_hand_still_refuses_until_resume(
     (repo / ".chock" / "stop.json").unlink()
     call = _call("mcp__db__query", {}, outside)
     assert _deny(_hook(runtime, outside, call, private_home))
-    assert chock_stop.resume_main(["--repo", str(repo)]) == 0
+    assert person_resume(repo) == 0
     assert not _deny(_hook(runtime, outside, call, private_home))
 
 

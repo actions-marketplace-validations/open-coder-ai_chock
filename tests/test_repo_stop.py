@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 from decision_log_support import CLEAN_GUARD, hook_env, plugin_layout, plugin_log, records, sync_layout, sync_log
+from stop_person_support import person_resume
 
 from chock import stop as chock_stop
 from chock.lifecycle import status_main
@@ -73,7 +74,7 @@ def test_a_read_is_refused_while_stopped_and_allowed_after_resume(tmp_path: Path
     assert _denied(refused), refused.stderr
     assert f"stopped: {REASON}" in refused.stdout
 
-    assert chock_stop.resume_main(["--repo", str(repo)]) == 0
+    assert person_resume(repo) == 0
     assert not (repo / ".chock" / "stop.json").exists()
     assert not _denied(_call(repo, runtime, guard, home, READ))
     stopped = [r for r in logged() if r.get("reason") == "stopped"]
@@ -141,7 +142,7 @@ def test_stop_writes_scope_reason_who_and_when_and_both_ends_are_logged(
     assert (doc["scope"], doc["reason"], doc["who"]) == ("codex_cli", REASON, "t@example.com")
     assert doc["when"].endswith("Z")
 
-    assert chock_stop.resume_main(["--repo", str(repo)]) == 0
+    assert person_resume(repo) == 0
     stop, resume = records(sync_log(repo))
     assert (stop["event"], stop["scope"], stop["who"], stop["actor"]) == (
         "repo_stop",

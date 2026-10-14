@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 from conftest import baseline_policy, init_repo
+from stop_person_support import person_resume
 
 from chock import stop as chock_stop
 from chock.compile.compiler import compile_policy
@@ -85,7 +86,7 @@ def test_a_read_no_policy_matches_is_refused_while_stopped(
     assert chock_stop.stop_main(["--repo", str(repo), "--reason", "e2e incident"]) == 0
     refused = _hook(repo, command)
     assert '"permissionDecision": "deny"' in refused.stdout, refused.stderr
-    assert chock_stop.resume_main(["--repo", str(repo)]) == 0
+    assert person_resume(repo) == 0
     allowed = _hook(repo, command)
     assert "deny" not in allowed.stdout, allowed.stdout
     lines = (repo / ".chock" / "log" / "gate-events.jsonl").read_text(encoding="utf-8").splitlines()

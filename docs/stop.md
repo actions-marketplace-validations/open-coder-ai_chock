@@ -22,16 +22,22 @@ All three err toward refusing.
 
 A stop reaches every repository the call works in or touches: the session's project root as the client
 names it, the one Chock's hook runs for, every repository above the call's folder and above each path
-anywhere in its input (a nested repository inside a stopped one included, symlinks resolved, `file://`
-URIs decoded), and, from a linked worktree (`git worktree add`, Claude Code's `.claude/worktrees/`), the
+anywhere in its input or named by a word of its shell command (a nested repository inside a stopped one
+included, symlinks resolved, `file://` URIs decoded), and, from a linked worktree (`git worktree add`, Claude Code's `.claude/worktrees/`), the
 main checkout's stop as well as its own; for a bare repository's worktrees, the bare repository's. The
 file is not committed, so a worktree has no copy of its own.
 
 `stop` also writes `~/.chock/stops/<sha256 of the repository's realpath>.json` (`0o600`), and `resume`
 removes it. A hook whose client names no project root for the session refuses every call of an agent in
 scope while any entry on the machine is in force, whatever its folder: fail closed. A session the client
-roots in an unstopped repository is not stopped by another repository's stop. A registry folder or entry
-that exists but cannot be read refuses.
+roots in an unstopped repository is not stopped by another repository's stop, unless the call names a path
+in it: `rm <A>/.chock/stop.json` or `chock resume --repo <A>` from a session in B is refused. A registry
+folder or entry that exists but cannot be read refuses. On macOS and Windows the entry is named by the
+case-folded realpath, so a `resume` typed in another case clears it.
+
+While no stop is in force in the call's own repositories and no registry entry reaches its agent, the hook
+reads nothing of the call's input. Otherwise it reads at most 256 distinct strings, 64 KiB of them, for 2
+seconds; a call past that cap is refused.
 
 | Client | Project-root signal | Source |
 | --- | --- | --- |
@@ -49,7 +55,9 @@ checkout, so while its stop is in force every commit and push from its worktrees
 included, until `resume`.
 
 Only a person changes a stop: `stop` and `resume` refuse, and log the refusal, when the shell carries any
-agent marker. `CHOCK_AGENT_COMMIT=0` clears no agent marker for any stop check (commit, push, stop,
+agent marker. `resume` also needs a person at their own terminal: it refuses unless stdin and stdout are
+both a TTY, and it asks for the repository's folder name to be typed before it removes the stop. `stop`
+needs no terminal. `CHOCK_AGENT_COMMIT=0` clears no agent marker for any stop check (commit, push, stop,
 resume): an agent can set it too. `resume` removes the file and the registry entry.
 
 `chock sync` wires one hook of its own per client, `--stop-check`, with no matcher and whatever
@@ -70,5 +78,13 @@ the resume are logged ([Decision log](decision-log.md#stop-and-override)). The f
 - A person, or an agent working outside this repository's hooks, is not affected. Such an agent can also
   delete .chock/stop.json or `~/.chock/stops` directly: both are protected only from agents whose calls a
   hook judges. An agent with an unrestricted shell on a client without hooks is not stopped.
+- The terminal check is best-effort: an agent that can run a shell may give `resume` a pseudo-terminal
+  (`script`, `expect`) and type the name. The hook refuses a call naming a stopped repository, and
+  protect-agent-config refuses `chock resume` and writes to any `.chock/` folder or `~/.chock/stops`, but
+  an agent whose command hides the path (built at run time) is stopped only by those hooks' reach.
+- The registry lives under the home folder. An agent whose hook runs with another `HOME`, or that deletes
+  `~/.chock/stops` from a session no hook-judged stop reaches, skips the machine-wide registry: hooks that
+  cannot place their session then see no stop, and a stop elsewhere is found only through the paths a call
+  names.
 - A plugin built before the registry existed does not read it: there the stop reaches only calls that
   touch the stopped repository.

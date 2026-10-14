@@ -13,7 +13,11 @@
   registry entry under `~/.chock/stops/`: a hook whose client names no project root refuses while any entry is
   in force. Paths are resolved through symlinks and read from anywhere in a call's input; git hooks find the
   stop through `GIT_DIR`, `GIT_WORK_TREE` and the common dir and run only the main checkout's gate.py; a bare
-  repository's stop reaches its worktrees; `CHOCK_AGENT_COMMIT=0` clears no agent marker for a stop.
+  repository's stop reaches its worktrees; `CHOCK_AGENT_COMMIT=0` clears no agent marker for a stop. `chock
+  resume` needs a person at a terminal (stdin and stdout TTYs) who types the repository's name. The hook reads
+  each word of a shell command as a path too; it reads no input while no stop is near or registered, and caps
+  its read otherwise (past the cap it refuses). Registry entries use the case-folded realpath on macOS and
+  Windows.
 - **A `CHOCK_ALLOW` override names its approver.** The override's log line carries `approver`, the git
   `user.email` of the person's shell, beside its `policy_id`. It stays in the local `0o600` log: `chock
   witness export` leaves it out, and Chock sends nothing.

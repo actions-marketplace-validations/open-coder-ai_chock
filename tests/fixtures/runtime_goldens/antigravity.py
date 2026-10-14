@@ -946,6 +946,8 @@ _HALT_UNREADABLE = '.chock/stop.json exists but cannot be read, so every agent i
 
 _HALT_NO_REASON = 'no reason given'
 
+_HALT_CASELESS = ('darwin', 'win32', 'cygwin')
+
 def _halt_read_file(path, unreadable):
     """The stop `path` holds as {scope, reason, ...}, or None when there is no file. A file that exists but
     cannot be read or parsed, or names no valid scope, stops every agent: fail closed."""
@@ -972,9 +974,14 @@ def halt_registry_dir():
     """`~/.chock/stops`: the machine-level registry of every stop in force."""
     return _chock_Path(_chock_os.path.expanduser('~')).joinpath(*HALT_REGISTRY_PARTS)
 
+def halt_norm(path):
+    """`path`'s realpath, casefolded where the filesystem ignores case (realpath keeps the case it was typed in)."""
+    real = _chock_os.path.realpath(str(path))
+    return real.casefold() if sys.platform in _HALT_CASELESS else real
+
 def halt_registry_entry(repo_root):
-    """The registry entry for `repo_root`, named by the sha256 of its realpath."""
-    key = _chock_hashlib.sha256(_chock_os.path.realpath(str(repo_root)).encode('utf-8')).hexdigest()
+    """The registry entry for `repo_root`, named by the sha256 of its normalised realpath."""
+    key = _chock_hashlib.sha256(halt_norm(repo_root).encode('utf-8')).hexdigest()
     return halt_registry_dir() / f'{key}{_HALT_REGISTRY_SUFFIX}'
 
 def halt_registry_find(client, repos=None):
@@ -2344,6 +2351,14 @@ _REPO_STOP_PATH_MAX = 4096
 
 _REPO_STOP_ESCAPE_RE = _chock_re.compile('(?:%[0-9A-Fa-f]{2})+')
 
+_REPO_STOP_CAP_STRINGS = 256
+
+_REPO_STOP_CAP_CHARS = 64 * 1024
+
+_REPO_STOP_CAP_SECONDS = 2.0
+
+_REPO_STOP_OVER_CAP = f'{HALT_REASON}: a person stopped agents in a repository on this machine (`chock stop`), and this call names more paths than the stop check reads, so it cannot tell the call stays out of it. Split the call; `chock resume` lifts the stop.'
+
 def _repo_stop_unquote(text):
     """`text` with each run of `%XX` escapes decoded as UTF-8, as a `file://` URI spells a path."""
     return _REPO_STOP_ESCAPE_RE.sub(lambda found: bytes.fromhex(found.group(0).replace('%', '')).decode('utf-8', 'replace'), text)
@@ -2354,6 +2369,16 @@ def _repo_stop_path(text):
         rest = text[len(_REPO_STOP_URI):]
         text = _repo_stop_unquote(rest[rest.find('/'):] if '/' in rest else '')
     return text if 0 < len(text) <= _REPO_STOP_PATH_MAX and '\x00' not in text else None
+
+def _repo_stop_words(command):
+    """Each word of a shell command, and the value of each `--flag=value` word: best effort, never raises."""
+    lexer = _chock_shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        words = list(lexer)
+    except ValueError:
+        words = command.split()
+    return words + [word.split('=', 1)[1] for word in words if '=' in word]
 
 def _repo_stop_named(raw):
     """Every string anywhere in a payload that may name a path (`file://` URIs decoded): each client nests and
@@ -2377,25 +2402,53 @@ def repo_stop_projects(event):
     named += [root for roots in listed if isinstance(roots, list) for root in roots]
     return [root for root in named if isinstance(root, str) and root]
 
-def repo_stop_roots(event, projects=()):
-    """Every repository whose stop applies to this call."""
+def _repo_stop_cwd(event):
+    return getattr(event, 'cwd', None) or _chock_os.getcwd()
+
+def repo_stop_near(event, projects=()):
+    """The repositories the call works in, read without its payload: the runtime's own, the cwd's, the project's."""
     runtime = globals().get('__file__') or sys.argv[0]
     own = [_chock_Path(runtime).resolve().parent.parent.parent] if runtime_route(runtime) == DLOG_ROUTE_SYNC else []
-    cwd = getattr(event, 'cwd', None) or _chock_os.getcwd()
+    return own + [repo for place in [_repo_stop_cwd(event), *projects] for repo in halt_repos(place)]
+
+def repo_stop_paths(event):
+    """Every distinct string the call's input may name a path with, the shell command's words included."""
+    command = getattr(event, 'command', None)
+    words = _repo_stop_words(command) if isinstance(command, str) else []
     named = [getattr(event, 'path', None), *_repo_stop_named(getattr(event, 'raw', None))]
-    places = [cwd, *projects, *(_chock_os.path.join(cwd, path) for path in named if path)]
-    return own + [repo for place in places for repo in halt_repos(place)]
+    named += [_repo_stop_path(word) for word in words]
+    return list(dict.fromkeys((path for path in named if isinstance(path, str) and path)))
+
+def repo_stop_named_roots(event):
+    """The repositories above every path the call names, or None past the cap (too many, too long, too slow)."""
+    paths = repo_stop_paths(event)
+    if len(paths) > _REPO_STOP_CAP_STRINGS or sum(map(len, paths)) > _REPO_STOP_CAP_CHARS:
+        return None
+    cwd, deadline, roots = (_repo_stop_cwd(event), _chock_time.monotonic() + _REPO_STOP_CAP_SECONDS, [])
+    for path in paths:
+        if _chock_time.monotonic() > deadline:
+            return None
+        roots += halt_repos(_chock_os.path.join(cwd, path))
+    return roots
 
 def repo_stop_refusal(event):
     """`stopped: <reason>` when a stop reaches this pre-tool call's agent, else None. An unreadable stop refuses."""
     if getattr(event, 'event', None) != 'pre_tool':
         return None
     agent, projects = (getattr(event, 'agent', None), repo_stop_projects(event))
-    roots = repo_stop_roots(event, projects)
-    stop = halt_find(roots, agent)
-    if stop is None:
-        mains = [halt_main_root(root) for root in roots]
-        stop = halt_registry_find(agent, [*roots, *filter(None, mains)] if projects else None)
+    near = repo_stop_near(event, projects)
+    stop = halt_find(near, agent)
+    if stop is not None:
+        return halt_message(stop)
+    registered = halt_registry_find(agent)
+    if registered is None or not projects:
+        return None if registered is None else halt_message(registered)
+    named = repo_stop_named_roots(event)
+    if named is None:
+        return _REPO_STOP_OVER_CAP
+    roots = near + named
+    mains = [halt_main_root(root) for root in roots]
+    stop = halt_find(named, agent) or halt_registry_find(agent, [*roots, *filter(None, mains)])
     return None if stop is None else halt_message(stop)
 
 _SEVERITY = (VERDICT_DENY, VERDICT_ESCALATE, VERDICT_WARN)
