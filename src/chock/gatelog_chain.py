@@ -16,6 +16,8 @@ from chock.gatelog_read import LOG_DIR, LOG_NAME, PLUGIN_LOG_NAME, ROUTES
 #: A kept head: `<seq>:<sha256>`, as `--verify-log` prints it and `witness export` carries it.
 _HEAD_SEP = ":"
 _HASH_LEN = 64
+#: Why a line after the chain began carries no link; the writer's own reason follows in brackets.
+_UNCHAINED_WHY = "unchained line (a runtime without chaining wrote it — run the regen) or lock timeout"
 
 
 @dataclass
@@ -104,7 +106,7 @@ def _step(chain: Chain, where: tuple[str, int], line: bytes, before: bytes | Non
             chain.legacy += 1  # written before chaining (or by a writer that does not chain): the chain starts later
             return None
         why = record.get(log_chain.LOG_CHAIN_UNCHAINED, "no prev/seq") if isinstance(record, dict) else "not an object"
-        return _break(where, "unchained", "prev and seq", why)
+        return _break(where, "unchained", "prev and seq", f"{_UNCHAINED_WHY} [{why}]")
     if chain.start is None:
         prev, seq = record[log_chain.LOG_CHAIN_PREV], record[log_chain.LOG_CHAIN_SEQ]
         chain.start = "genesis" if (prev, seq) == (log_chain.LOG_CHAIN_GENESIS, 0) else f"{prev} (seq {seq})"

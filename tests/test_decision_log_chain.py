@@ -170,7 +170,11 @@ def test_an_unchained_line_after_the_chain_began_is_a_break(repo: Path, home: Pa
     code, doc = _verify(repo, capsys)
 
     assert code == 1
-    assert doc["chains"][0]["first_break"]["kind"] == "unchained"
+    first = doc["chains"][0]["first_break"]
+    assert (first["kind"], first["line"]) == ("unchained", 3)
+    assert first["found"] == (
+        "unchained line (a runtime without chaining wrote it — run the regen) or lock timeout [no prev/seq]"
+    )
 
 
 def test_a_kept_head_is_confirmed_until_its_record_changes(repo: Path, home: Path, capsys) -> None:

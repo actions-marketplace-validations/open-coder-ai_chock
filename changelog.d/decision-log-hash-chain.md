@@ -3,6 +3,9 @@
   Writers take the log's lock, so hooks running at once never fork the chain; a line that cannot be
   chained is still written, marked `unchained`, and no verdict changes. `chock status --verify-log`
   reports the first break (file, line, expected and found) and exits 1; `--head <seq>:<sha256>`
-  confirms a head kept earlier. `chock witness export` carries each log's head, and a person's
+  confirms a head kept earlier. `chock witness export` carries each log's head (`chain`, an
+  additive optional key; the format stays `chock-witness-export/1`), and a person's
   git-hook overrides without the approver. It shows tampering to someone who kept a head; it does not
   stop a local admin from rewriting the whole file.
+  An intact chain needs every runtime regenerated (`chock sync`); until then, an older runtime's line
+  after the chain began is reported as an `unchained` break.

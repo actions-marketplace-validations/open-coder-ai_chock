@@ -38,7 +38,9 @@ expected and found `prev` or `seq`. An edited, deleted, inserted or reordered li
 the line after it. History that is missing or rotated away is not a break: the walk reports
 `chain starts at <hash> (seq N)`. Lines written before chaining existed are counted, then the chain
 starts. A line written after that by a runtime that does not chain yet (until `chock sync` regenerates
-it, or the plugin is reinstalled) is a break of kind `unchained`.
+it, or the plugin is reinstalled) is a break of kind `unchained`. The break names the line and says why: a runtime without chaining wrote it, or a writer timed out on the
+lock. **An intact chain needs every runtime regenerated** (`chock sync`, or reinstalling the plugin) once this
+version is installed; until then, lines from older runtimes break it.
 
 What it shows, and what it does not:
 
@@ -219,7 +221,8 @@ agentseam id (`gemini_cli`), a `chock install` client (`gemini-cli`) or a `chock
 (`gemini`). `--out` must name a new `.json` file: an existing file is refused, never overwritten, and the
 export is created readable by you only. Nothing is uploaded: you attach the file yourself, after reading it.
 
-The export also carries `chain`: each log's head (`seq`, `sha256` of its last line) and whether its
+The export also carries `chain`, an additive optional key: `chock-witness-export/1` readers ignore keys
+they do not know, so the format stays `/1`. It holds each log's head (`seq`, `sha256` of its last line) and whether its
 walk was intact, so an attestation over the export binds the log as it stood. A person's override at a
 git hook (`CHOCK_ALLOW`, no agent on the line) is exported as evidence beside the client's records;
 `approver` and `who` stay in the local log only.
