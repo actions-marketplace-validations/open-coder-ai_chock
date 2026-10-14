@@ -1,6 +1,6 @@
 # chock
 
-> A kill switch for your coding agent's wrong moves.
+> Blocks your coding agent's wrong moves before they land.
 
 Chock compiles a policy you author once into the strongest enforcement surface each agent
 supports (git hook, CI gate, `AGENTS.md` rule, Claude Code / Cursor pre-tool-use hooks,

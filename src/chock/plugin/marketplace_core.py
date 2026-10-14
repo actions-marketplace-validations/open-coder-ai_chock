@@ -67,7 +67,7 @@ def collect_entries(dist_root: Path, tree: str = CLAUDE_TREE) -> list[dict[str, 
 
 
 DESCRIPTION = (
-    "A kill switch for your coding agent's wrong moves. Generated from the chock-catalog; "
+    "Blocks your coding agent's wrong moves before they land. Generated from the chock-catalog; "
     "each plugin states whether it enforces in this client or is advisory."
 )
 
