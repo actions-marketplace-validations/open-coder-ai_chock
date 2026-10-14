@@ -195,7 +195,7 @@ def evaluate(
     try:
         result = kind(ctx, _params(gate_path, spec), judged)
     except ListingError as exc:
-        print(f"gate: {inert(str(exc))} -- refusing rather than judging a change it cannot list.", file=sys.stderr)
+        print(f"gate: {inert(str(exc))} -- refusing rather than judging a change it cannot read.", file=sys.stderr)
         return 2, VERDICT_ERROR
     return Evaluation(spec, result, rollout(repo_root, event, signal, base), signal, judged)
 

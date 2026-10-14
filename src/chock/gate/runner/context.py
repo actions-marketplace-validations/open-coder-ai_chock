@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .constants import _PUSH_LINE_MIN_PARTS
+from .gitparse import DiffError, ListingError, _diff_sides, _nul_paths
 
 # >>> gate.py 01
 _GIT = shutil.which("git") or "git"
@@ -30,25 +31,6 @@ class GateResult:
     rules: dict[str, int] = field(default_factory=dict)
     #: The new findings themselves (a script gate's), for the GitHub annotations; never read for a verdict.
     findings: list[dict] = field(default_factory=list)
-
-
-class ListingError(Exception):
-    """A git path listing the runner could not read: the gate refuses rather than judge a change it cannot see."""
-
-
-def _nul_paths(out: bytes) -> list[str]:
-    """Paths from a `-z` listing, verbatim. Raises ListingError on anything but NUL-terminated UTF-8 entries."""
-    if not out:
-        return []
-    entries = out.split(b"\0")
-    if entries.pop() or not all(entries):
-        msg = "git listed paths that are not NUL-terminated"
-        raise ListingError(msg)
-    try:
-        return [entry.decode("utf-8") for entry in entries]
-    except UnicodeDecodeError as exc:
-        msg = f"git listed a path that is not UTF-8 ({exc.reason})"
-        raise ListingError(msg) from exc
 
 
 def _is_outside(path: str) -> bool:
@@ -139,18 +121,31 @@ class GateContext:
         paths = self._listing("diff", *self._range(), "--name-only", f"--diff-filter={diff_filter}")
         return [path for path in paths if self.in_scope(path)]
 
+    def _diff_text(self, path: str) -> str:
+        """`path`'s `-U0` diff as git writes it, unconverted; raises DiffError when git fails."""
+        args = ("diff", *self._range(), "-U0", "--no-color", "--no-ext-diff", "--no-textconv", "--", path)
+        try:
+            proc = subprocess.run(  # noqa: S603 -- reading repo facts via git is this class's whole job
+                [_GIT, "--literal-pathspecs", *args],
+                cwd=str(self.repo_root),
+                capture_output=True,
+                check=False,
+            )
+        except OSError as exc:
+            msg = f"git could not run ({exc})"
+            raise DiffError(msg) from exc
+        if proc.returncode:
+            first = (proc.stderr.decode("utf-8", "replace").strip().splitlines() or [""])[0]
+            msg = f"git diff failed (exit {proc.returncode}): {first}"
+            raise DiffError(msg)
+        return proc.stdout.decode("utf-8", "replace")
+
     def added_lines(self, path: str) -> list[str]:
-        out = self._git("diff", *self._range(), "-U0", "--", path)
-        lines: list[str] = []
-        for line in out.splitlines():
-            if line.startswith("+") and not line.startswith("+++"):
-                lines.append(line[1:])
-        return lines
+        return _diff_sides(self._diff_text(path))[0]
 
     def removed_lines(self, path: str) -> list[str]:
         """The deleted side of the diff -- what a test-weakening change takes away."""
-        out = self._git("diff", *self._range(), "-U0", "--", path)
-        return [line[1:] for line in out.splitlines() if line.startswith("-") and not line.startswith("---")]
+        return _diff_sides(self._diff_text(path))[1]
 
     def staged_blob(self, path: str) -> str:
         """The proposed content: staged in index mode, committed at HEAD in range mode."""

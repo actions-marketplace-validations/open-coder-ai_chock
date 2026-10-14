@@ -17,6 +17,7 @@ MODULES = (
     "cli",
     "constants",
     "context",
+    "gitparse",
     "halt",
     "journal",
     "kinds",
