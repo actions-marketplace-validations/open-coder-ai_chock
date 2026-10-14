@@ -78,6 +78,7 @@ the resume are logged ([Decision log](decision-log.md#stop-and-override)). The f
 - A person, or an agent working outside this repository's hooks, is not affected. Such an agent can also
   delete .chock/stop.json or `~/.chock/stops` directly: both are protected only from agents whose calls a
   hook judges. An agent with an unrestricted shell on a client without hooks is not stopped.
+- A stop holds against agents in the stopped scope. An agent running unstopped elsewhere on the same machine, with a shell, can remove the stop (for example by deleting the files); the hook and protect-agent-config refuse the common forms, not every one.
 - The terminal check is best-effort: an agent that can run a shell may give `resume` a pseudo-terminal
   (`script`, `expect`) and type the name. The hook refuses a call naming a stopped repository, and
   protect-agent-config refuses `chock resume` and writes to any `.chock/` folder or `~/.chock/stops`, but

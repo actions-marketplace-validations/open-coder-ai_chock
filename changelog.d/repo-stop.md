@@ -17,7 +17,8 @@
   resume` needs a person at a terminal (stdin and stdout TTYs) who types the repository's name. The hook reads
   each word of a shell command as a path too; it reads no input while no stop is near or registered, and caps
   its read otherwise (past the cap it refuses). Registry entries use the case-folded realpath on macOS and
-  Windows.
+  Windows. A stop holds against agents in the stopped scope. An agent running unstopped elsewhere on the same machine, with a shell, can remove the stop (for example by deleting the files); the hook and protect-agent-config refuse the common forms, not every one. Installing the git hooks writes `.chock/bin/gate.py` when it is
+  missing, so a person's commit passes while a stop is in force in a repository with no policy.
 - **A `CHOCK_ALLOW` override names its approver.** The override's log line carries `approver`, the git
   `user.email` of the person's shell, beside its `policy_id`. It stays in the local `0o600` log: `chock
   witness export` leaves it out, and Chock sends nothing.

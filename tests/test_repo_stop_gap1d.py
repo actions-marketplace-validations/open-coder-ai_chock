@@ -13,9 +13,11 @@ import pytest
 from decision_log_support import CLEAN_GUARD, sync_layout
 from stop_person_support import person_resume
 from test_repo_stop_gap1c import _call, _deny, _hook, _repo, _stop
+from test_repo_stop_git import AGENT, PERSON, _commit, _git
 
 from chock.gate import repo_stop
 from chock.gate.runner.halt import halt_registry_entry
+from chock.hooks.installers import get_hooks_dir, install_policy_hooks
 
 #: `chock stop` writes its machine registry entry under this test's own home, never the real one.
 pytestmark = pytest.mark.usefixtures("private_home")
@@ -200,3 +202,23 @@ def test_a_resume_in_another_case_clears_the_entry_on_a_caseless_platform(
     assert halt_registry_entry(tmp_path / "REPO") == entry
     assert person_resume(tmp_path / "REPO") == 0
     assert not entry.exists()
+
+
+# --- the dispatcher's runner: a repository chock installed with no policy still tells a person from an agent --
+
+
+def test_a_persons_commit_passes_in_a_repo_with_no_policy_while_stopped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("CHOCK_GATE_LOG", raising=False)
+    root = tmp_path / "bare-policy"
+    root.mkdir()
+    for args in (("init", "-q"), ("config", "user.email", "person@example.invalid"), ("config", "user.name", "t")):
+        _git(root, *args)
+    install_policy_hooks(root, get_hooks_dir(root))
+    assert (root / ".chock" / "bin" / "gate.py").is_file()
+    _stop(root, "--reason", "no policy")
+    assert _commit(root, PERSON).returncode == 0
+    refused = _commit(root, AGENT)
+    assert refused.returncode != 0
+    assert "stopped: no policy" in refused.stderr
