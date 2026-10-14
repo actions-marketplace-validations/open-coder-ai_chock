@@ -31,17 +31,13 @@ LOG_TRACE_CAP = 200
 LOG_REDACTED = "[redacted]"
 #: The client's id for one tool call (`tool_use_id`): what lets every hook judging it log its plain allow once.
 LOG_CALL = "call"
-#: Beside the log, one file per tool call whose plain allow is pending: each hook that let it through adds its record.
+#: Beside the log, one empty file per tool call already logged: whichever hook creates it writes the line.
 LOG_CLAIMS = ".calls"
-#: A pending call is written once no hook has added to it for this long (each ends within its client's timeout),
-#: or as soon as its session's turn ends.
-LOG_SETTLE_SECONDS = 60
-#: The one line of a settled call names every policy that let it through, never one hook's own fields.
-LOG_POLICIES = "policies"
-_LOG_PER_HOOK = ("policy_id", "plugin", "plugin_version", "kind", "match_count", "matches", "rules")
-#: A claim's name: its session's hash, then its call's, so a turn's end finds its own calls by name alone.
-_LOG_SESSION_NAME, _LOG_CALL_NAME = 12, 24
-_LOG_TAKEN = ".taken"
+#: A claim outlives every hook of its call (each runs within its client's timeout), then is pruned.
+LOG_CLAIM_SECONDS = 600
+#: A claim whose name starts with this prunes the old ones: about one claim in 16.
+_LOG_CLAIM_PRUNER = "0"
+_LOG_CLAIM_NAME = 32
 #: A lone surrogate (a path that was not UTF-8) cannot be encoded: it is written as the text `\uXXXX`.
 _LOG_SURROGATE = re.compile("[\ud800-\udfff]")
 #: The scan-secrets policy's content_pattern, vendored: a debug trace never carries a value it would block.
@@ -111,83 +107,31 @@ def log_plain_action(record):
     return record.get("verdict") == LOG_ALLOW and "target" in record and untouched
 
 
-def _log_hash(text, size):
-    return hashlib.sha256(str(text).encode("utf-8", "backslashreplace")).hexdigest()[:size]
-
-
-def _log_claim(path, record, call):
-    """The pending file of this tool call: the client's call id, else the session, target and second."""
-    session = record.get("session_id")
-    key = "\0".join((str(session), str(record.get("target")), call or log_now()))
-    name = f"{_log_hash(session, _LOG_SESSION_NAME)}-{_log_hash(key, _LOG_CALL_NAME)}"
-    return Path(path).parent / LOG_CLAIMS / name
-
-
-def _log_line(record):
-    """`record` as one JSON line; a lone surrogate is written as the text `\\uXXXX`."""
-    text = _LOG_SURROGATE.sub(lambda found: f"\\\\u{ord(found[0]):04x}", json.dumps(record, ensure_ascii=False))
-    return (text + "\n").encode("utf-8")
-
-
-def _log_add(path, line):
-    fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o600)
-    try:
-        os.write(fd, line)
-    finally:
-        os.close(fd)
-
-
-def log_hold(path, record, call):
-    """Add this hook's plain allow to its tool call's pending line; False when it cannot, so it is written now."""
-    claim = _log_claim(path, record, call)
-    try:
-        claim.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        _log_add(claim, _log_line({"ts": log_now(), **record}))
-    except OSError:
-        return False
-    return True
-
-
-def log_merged(lines):
-    """A settled call's one line: its first hook's record, less each hook's own fields, plus every policy that let it through."""
-    held = []
-    for line in lines:
+def _log_prune_claims(folder):
+    cutoff = datetime.now(timezone.utc).timestamp() - LOG_CLAIM_SECONDS
+    for claim in folder.iterdir():
         try:
-            found = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(found, dict):
-            held.append(found)
-    if not held:
-        return None
-    merged = {key: value for key, value in held[0].items() if key not in _LOG_PER_HOOK}
-    named = {str(r.get("policy_id") or r.get("plugin") or "") for r in held}
-    merged[LOG_POLICIES] = sorted(named - {""})
-    return merged
-
-
-def log_settle(path, max_bytes=LOG_DEFAULT_MAX_BYTES, *, ended=False, session=None):
-    """Write each pending call that has settled, or, when a turn `ended`, every one `session` made. Best effort."""
-    folder = Path(path).parent / LOG_CLAIMS
-    try:
-        claims = sorted(folder.iterdir())
-    except OSError:
-        return
-    cutoff = datetime.now(timezone.utc).timestamp() - LOG_SETTLE_SECONDS
-    own = _log_hash(session, _LOG_SESSION_NAME) + "-" if ended else None
-    for claim in claims:
-        try:
-            quiet = claim.stat().st_mtime < cutoff
-            if not (quiet or (own and claim.name.startswith(own) and not claim.name.endswith(_LOG_TAKEN))):
-                continue
-            taken = claim.with_name(f"{claim.name}.{os.getpid()}{_LOG_TAKEN}")
-            os.rename(claim, taken)  # one writer wins the call; the others find it gone
-            merged = log_merged(taken.read_text(encoding="utf-8", errors="replace").splitlines())
-            if merged:
-                log_append(path, merged, max_bytes)
-            taken.unlink()
+            if claim.stat().st_mtime < cutoff:
+                claim.unlink()
         except OSError:
             continue
+
+
+def log_claim(path, record, call):
+    """True for the first hook to log this tool call's plain allow; False for every later one. Fails open."""
+    key = "\0".join((str(record.get("session_id")), str(record.get("target")), call or log_now()))
+    name = hashlib.sha256(key.encode("utf-8", "backslashreplace")).hexdigest()[:_LOG_CLAIM_NAME]
+    folder = Path(path).parent / LOG_CLAIMS
+    try:
+        folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.close(os.open(str(folder / name), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+    except FileExistsError:
+        return False
+    except OSError:
+        return True  # no claim to be had: a duplicate line beats a lost one
+    if name.startswith(_LOG_CLAIM_PRUNER):
+        _log_prune_claims(folder)
+    return True
 
 
 def log_now():
@@ -269,23 +213,28 @@ def log_append(path, record, max_bytes=LOG_DEFAULT_MAX_BYTES):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     log_rotate(path, max_bytes)
-    _log_add(path, _log_line({"ts": log_now(), **record}))
+    stamped = {"ts": log_now(), **record}
+    text = _LOG_SURROGATE.sub(lambda found: f"\\\\u{ord(found[0]):04x}", json.dumps(stamped, ensure_ascii=False))
+    line = (text + "\n").encode("utf-8")
+    fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o600)
+    try:
+        os.write(fd, line)
+    finally:
+        os.close(fd)
 
 
 def log_write(path, record, repo_root):
     """Write `record` to `path` when the level in force for `repo_root` admits it, stamped with its level. Raises on I/O.
 
-    At info a plain allowed action is held until its tool call settles (`call`, never itself written), then
-    written once for every policy that let it through.
+    At info a plain allowed action is written once per tool call (`call`, never itself written), by the first hook.
     """
     level, size = log_settings(repo_root)
-    log_settle(path, size)
     record = dict(record)
     call = record.pop(LOG_CALL, None)
     record_level = log_record_level(record)
     kept = "would_action" in record and os.environ.get(LOG_LEGACY_ENV) == "0"  # the legacy switch kept rollout evidence
     if not (kept or log_admits(level, record_level)):
         return
-    if level == LOG_INFO and log_plain_action(record) and log_hold(path, {**record, "level": record_level}, call):
+    if level == LOG_INFO and log_plain_action(record) and not log_claim(path, record, call):
         return
     log_append(path, {**record, "level": record_level}, size)

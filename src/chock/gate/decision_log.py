@@ -23,7 +23,6 @@ from .runner.journal import (
     log_admits,
     log_record_level,
     log_settings,
-    log_settle,
     log_trace_text,
     log_write,
 )
@@ -44,7 +43,6 @@ _DLOG_SPOKEN = {"deny": "block", "escalate": "ask", "warn": "warn"}
 _DLOG_EVENT_LOGGED = {"pre_tool": "tool_use"}
 _DLOG_SURFACE = {"pre_tool": "pre-tool-use", "stop": "stop"}
 _DLOG_NO_RULE = "no rule matched"
-_DLOG_STOP = "stop"
 _DLOG_DIST_INFO = re.compile(r"^chock-([^-]+)\.dist-info$")
 #: The pre-tool exit codes of a gate.py run that wrote its own line (allow, block, ask, warn); 2 wrote none.
 _DLOG_GATE_LOGGED_CODES = (0, 1, 3, 4)
@@ -153,13 +151,11 @@ def log_decision(argv, event, decision, judged, context):
         runtime = globals().get("__file__") or sys.argv[0]
         route = runtime_route(runtime)
         source, rule, started, stages = judged
-        agent = str(getattr(event, "agent", None) or "unknown")
-        log_path, repo = _dlog_paths(route, runtime, agent, event)
-        if event.event == _DLOG_STOP:  # the turn is over: every tool call it held is settled
-            log_settle(log_path, log_settings(repo)[1], ended=True, session=dlog_session(event, {}).get("session_id"))
         gate_wrote = event.event != "pre_tool" or GATE_LAST.get("code") in _DLOG_GATE_LOGGED_CODES
         if route == DLOG_ROUTE_SYNC and _DLOG_GATE_FLAG in argv and source in (None, "gate") and gate_wrote:
             return  # gate.py and the stop re-entry ledger write this call's line on the sync route
+        agent = str(getattr(event, "agent", None) or "unknown")
+        log_path, repo = _dlog_paths(route, runtime, agent, event)
         outcome = getattr(decision, "outcome", None) if decision is not None else None
         level = log_settings(repo)[0]
         fields = dlog_fields(event, repo)

@@ -752,15 +752,11 @@ LOG_CALL = 'call'
 
 LOG_CLAIMS = '.calls'
 
-LOG_SETTLE_SECONDS = 60
+LOG_CLAIM_SECONDS = 600
 
-LOG_POLICIES = 'policies'
+_LOG_CLAIM_PRUNER = '0'
 
-_LOG_PER_HOOK = ('policy_id', 'plugin', 'plugin_version', 'kind', 'match_count', 'matches', 'rules')
-
-_LOG_SESSION_NAME, _LOG_CALL_NAME = (12, 24)
-
-_LOG_TAKEN = '.taken'
+_LOG_CLAIM_NAME = 32
 
 _LOG_SURROGATE = _chock_re.compile('[\ud800-\udfff]')
 
@@ -822,77 +818,30 @@ def log_plain_action(record):
     untouched = not any((key in record for key in LOG_LET_THROUGH if key != 'target'))
     return record.get('verdict') == LOG_ALLOW and 'target' in record and untouched
 
-def _log_hash(text, size):
-    return _chock_hashlib.sha256(str(text).encode('utf-8', 'backslashreplace')).hexdigest()[:size]
-
-def _log_claim(path, record, call):
-    """The pending file of this tool call: the client's call id, else the session, target and second."""
-    session = record.get('session_id')
-    key = '\x00'.join((str(session), str(record.get('target')), call or log_now()))
-    name = f'{_log_hash(session, _LOG_SESSION_NAME)}-{_log_hash(key, _LOG_CALL_NAME)}'
-    return _chock_Path(path).parent / LOG_CLAIMS / name
-
-def _log_line(record):
-    """`record` as one JSON line; a lone surrogate is written as the text `\\uXXXX`."""
-    text = _LOG_SURROGATE.sub(lambda found: f'\\\\u{ord(found[0]):04x}', json.dumps(record, ensure_ascii=False))
-    return (text + '\n').encode('utf-8')
-
-def _log_add(path, line):
-    fd = _chock_os.open(str(path), _chock_os.O_WRONLY | _chock_os.O_APPEND | _chock_os.O_CREAT | getattr(_chock_os, 'O_BINARY', 0), 384)
-    try:
-        _chock_os.write(fd, line)
-    finally:
-        _chock_os.close(fd)
-
-def log_hold(path, record, call):
-    """Add this hook's plain allow to its tool call's pending line; False when it cannot, so it is written now."""
-    claim = _log_claim(path, record, call)
-    try:
-        claim.parent.mkdir(mode=448, parents=True, exist_ok=True)
-        _log_add(claim, _log_line({'ts': log_now(), **record}))
-    except OSError:
-        return False
-    return True
-
-def log_merged(lines):
-    """A settled call's one line: its first hook's record, less each hook's own fields, plus every policy that let it through."""
-    held = []
-    for line in lines:
+def _log_prune_claims(folder):
+    cutoff = _chock_datetime.now(_chock_timezone.utc).timestamp() - LOG_CLAIM_SECONDS
+    for claim in folder.iterdir():
         try:
-            found = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(found, dict):
-            held.append(found)
-    if not held:
-        return None
-    merged = {key: value for key, value in held[0].items() if key not in _LOG_PER_HOOK}
-    named = {str(r.get('policy_id') or r.get('plugin') or '') for r in held}
-    merged[LOG_POLICIES] = sorted(named - {''})
-    return merged
-
-def log_settle(path, max_bytes=LOG_DEFAULT_MAX_BYTES, *, ended=False, session=None):
-    """Write each pending call that has settled, or, when a turn `ended`, every one `session` made. Best effort."""
-    folder = _chock_Path(path).parent / LOG_CLAIMS
-    try:
-        claims = sorted(folder.iterdir())
-    except OSError:
-        return
-    cutoff = _chock_datetime.now(_chock_timezone.utc).timestamp() - LOG_SETTLE_SECONDS
-    own = _log_hash(session, _LOG_SESSION_NAME) + '-' if ended else None
-    for claim in claims:
-        try:
-            quiet = claim.stat().st_mtime < cutoff
-            if not (quiet or (own and claim.name.startswith(own) and (not claim.name.endswith(_LOG_TAKEN)))):
-                continue
-            taken = claim.with_name(f'{claim.name}.{_chock_os.getpid()}{_LOG_TAKEN}')
-            _chock_os.rename(claim, taken)
-            merged = log_merged(taken.read_text(encoding='utf-8', errors='replace').splitlines())
-            if merged:
-                log_append(path, merged, max_bytes)
-            taken.unlink()
+            if claim.stat().st_mtime < cutoff:
+                claim.unlink()
         except OSError:
             continue
+
+def log_claim(path, record, call):
+    """True for the first hook to log this tool call's plain allow; False for every later one. Fails open."""
+    key = '\x00'.join((str(record.get('session_id')), str(record.get('target')), call or log_now()))
+    name = _chock_hashlib.sha256(key.encode('utf-8', 'backslashreplace')).hexdigest()[:_LOG_CLAIM_NAME]
+    folder = _chock_Path(path).parent / LOG_CLAIMS
+    try:
+        folder.mkdir(mode=448, parents=True, exist_ok=True)
+        _chock_os.close(_chock_os.open(str(folder / name), _chock_os.O_WRONLY | _chock_os.O_CREAT | _chock_os.O_EXCL, 384))
+    except FileExistsError:
+        return False
+    except OSError:
+        return True
+    if name.startswith(_LOG_CLAIM_PRUNER):
+        _log_prune_claims(folder)
+    return True
 
 def log_now():
     """The UTC time to the second, as every line is stamped."""
@@ -962,23 +911,28 @@ def log_append(path, record, max_bytes=LOG_DEFAULT_MAX_BYTES):
     path = _chock_Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     log_rotate(path, max_bytes)
-    _log_add(path, _log_line({'ts': log_now(), **record}))
+    stamped = {'ts': log_now(), **record}
+    text = _LOG_SURROGATE.sub(lambda found: f'\\\\u{ord(found[0]):04x}', json.dumps(stamped, ensure_ascii=False))
+    line = (text + '\n').encode('utf-8')
+    fd = _chock_os.open(str(path), _chock_os.O_WRONLY | _chock_os.O_APPEND | _chock_os.O_CREAT | getattr(_chock_os, 'O_BINARY', 0), 384)
+    try:
+        _chock_os.write(fd, line)
+    finally:
+        _chock_os.close(fd)
 
 def log_write(path, record, repo_root):
     """Write `record` to `path` when the level in force for `repo_root` admits it, stamped with its level. Raises on I/O.
 
-    At info a plain allowed action is held until its tool call settles (`call`, never itself written), then
-    written once for every policy that let it through.
+    At info a plain allowed action is written once per tool call (`call`, never itself written), by the first hook.
     """
     level, size = log_settings(repo_root)
-    log_settle(path, size)
     record = dict(record)
     call = record.pop(LOG_CALL, None)
     record_level = log_record_level(record)
     kept = 'would_action' in record and _chock_os.environ.get(LOG_LEGACY_ENV) == '0'
     if not (kept or log_admits(level, record_level)):
         return
-    if level == LOG_INFO and log_plain_action(record) and log_hold(path, {**record, 'level': record_level}, call):
+    if level == LOG_INFO and log_plain_action(record) and (not log_claim(path, record, call)):
         return
     log_append(path, {**record, 'level': record_level}, size)
 
@@ -1320,8 +1274,6 @@ _DLOG_SURFACE = {'pre_tool': 'pre-tool-use', 'stop': 'stop'}
 
 _DLOG_NO_RULE = 'no rule matched'
 
-_DLOG_STOP = 'stop'
-
 _DLOG_DIST_INFO = _chock_re.compile('^chock-([^-]+)\\.dist-info$')
 
 _DLOG_GATE_LOGGED_CODES = (0, 1, 3, 4)
@@ -1420,13 +1372,11 @@ def log_decision(argv, event, decision, judged, context):
         runtime = globals().get('__file__') or sys.argv[0]
         route = runtime_route(runtime)
         source, rule, started, stages = judged
-        agent = str(getattr(event, 'agent', None) or 'unknown')
-        log_path, repo = _dlog_paths(route, runtime, agent, event)
-        if event.event == _DLOG_STOP:
-            log_settle(log_path, log_settings(repo)[1], ended=True, session=dlog_session(event, {}).get('session_id'))
         gate_wrote = event.event != 'pre_tool' or GATE_LAST.get('code') in _DLOG_GATE_LOGGED_CODES
         if route == DLOG_ROUTE_SYNC and _DLOG_GATE_FLAG in argv and (source in (None, 'gate')) and gate_wrote:
             return
+        agent = str(getattr(event, 'agent', None) or 'unknown')
+        log_path, repo = _dlog_paths(route, runtime, agent, event)
         outcome = getattr(decision, 'outcome', None) if decision is not None else None
         level = log_settings(repo)[0]
         fields = dlog_fields(event, repo)

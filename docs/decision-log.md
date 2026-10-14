@@ -21,7 +21,7 @@ the same file earlier versions wrote, so older readers keep working.
 | Level | Writes |
 | :--- | :--- |
 | `off` | nothing |
-| `info` (default) | one line each time a policy fires: block, ask, warn, a guard fault, or an override or rollout level that let a finding through; and one line per allowed agent tool call, carrying only its `target` fingerprint. However many policy hooks judge that call, its allow is one line, written when the call settles (the turn ends, or no hook has added to it for 60 s) and listing every policy that let it through in `policies` instead of `policy_id`; `chock status` counts it once for each. A call is known by the client's `tool_use_id`, else by session, second and `target`, so with no id two identical calls in one second are one line. Every block, ask, warn, fault and override keeps its own line per policy, written at once |
+| `info` (default) | one line each time a policy fires: block, ask, warn, a guard fault, or an override or rollout level that let a finding through; and one line per allowed agent tool call, carrying only its `target` fingerprint. However many policy hooks judge that call, its allow is written once: by the first hook to finish, whose `policy_id` the line names. Every block, ask, warn, fault and override keeps its own line per policy |
 | `debug` | every hook call (one allow line per policy hook), the turn's end included, plus a `trace`: wire event, tool, matched rule (or "no rule matched"), the guard's exit code, per-stage timings, and the command or path cut to 200 characters with every value the scan-secrets policy would block replaced by `[redacted]` |
 
 Each line carries `ts`, `route`, `level`, `agent`, `client` (when the payload names one), `event`,

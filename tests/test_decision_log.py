@@ -71,8 +71,7 @@ def test_each_level_on_each_route_writes_exactly_its_records(
     assert [(r["verdict"], r["level"]) for r in written] == EXPECTED[(level, guard_body)]
     for record in written:
         assert record["route"] == route
-        held = journal.LOG_POLICIES in record  # a settled allow lists every policy that let it through
-        assert record[journal.LOG_POLICIES] == [POLICY] if held else record["policy_id"] == POLICY
+        assert record["policy_id"] == POLICY
         assert {"ts", "agent", "event", "surface", "reason", "duration_ms", "can_ask"} <= set(record)
         if route == "sync":
             assert record["chock_version"], "the suite's Python has chock installed: the sync line names it"
@@ -81,7 +80,7 @@ def test_each_level_on_each_route_writes_exactly_its_records(
                 "a plugin runs its own Python, not chock: even a findable chock is not named"
             )
         assert ("trace" in record) == (level == "debug")
-        assert ("plugin_version" in record) == (route == "plugin" and not held)
+        assert ("plugin_version" in record) == (route == "plugin")
 
 
 def test_the_plugin_route_names_its_package_version_and_writes_nothing_into_the_repo(

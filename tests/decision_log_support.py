@@ -6,13 +6,11 @@ import json
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 from conftest import init_repo
 
 from chock.gate import runtime_bundle
-from chock.gate.runner import journal
 
 AGENT = "claude_code"
 POLICY = "p-log"
@@ -96,25 +94,7 @@ def plugin_log(home: Path) -> Path:
     return home / ".chock" / "log" / AGENT / "events.jsonl"
 
 
-def settle(path: Path) -> None:
-    """Write every tool call still held beside `path`, as the settle window passing would."""
-    claims = path.parent / journal.LOG_CLAIMS
-    if claims.is_dir():
-        past = time.time() - journal.LOG_SETTLE_SECONDS - 1
-        for claim in claims.iterdir():
-            os.utime(claim, (past, past))
-        journal.log_settle(path)
-
-
-def raw_records(path: Path) -> list[dict]:
-    """The lines written so far, held calls left held."""
-    if not path.exists():
-        return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-
-
 def records(path: Path) -> list[dict]:
-    settle(path)
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
