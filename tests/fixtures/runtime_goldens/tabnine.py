@@ -742,7 +742,7 @@ LOG_MAX_MAX_BYTES = 1073741824
 
 LOG_ALLOW = 'allow'
 
-LOG_LET_THROUGH = ('override', 'would_action')
+LOG_LET_THROUGH = ('override', 'would_action', 'target')
 
 LOG_TRACE_CAP = 200
 
@@ -797,7 +797,7 @@ def log_settings(repo_root):
     return (level, size)
 
 def log_record_level(record):
-    """`debug` for a plain allow, `info` for every decision a policy made or something let through."""
+    """`debug` for a plain allow, `info` for every decision a policy made, something let through, or an agent's action."""
     plain = record.get('verdict') == LOG_ALLOW and (not any((key in record for key in LOG_LET_THROUGH)))
     return LOG_DEBUG if plain else LOG_INFO
 
@@ -805,9 +805,13 @@ def log_admits(level, record_level):
     """Whether a record of `record_level` is written at `level`."""
     return level == LOG_DEBUG or (level == LOG_INFO and record_level == LOG_INFO)
 
+def log_redact(text):
+    """`text` with every value scan-secrets would block replaced."""
+    return _LOG_SECRET_RE.sub(LOG_REDACTED, str(text))
+
 def log_trace_text(text):
     """`text` with every value scan-secrets would block replaced, then cut to `LOG_TRACE_CAP` characters."""
-    redacted = _LOG_SECRET_RE.sub(LOG_REDACTED, str(text))
+    redacted = log_redact(text)
     return redacted if len(redacted) <= LOG_TRACE_CAP else redacted[:LOG_TRACE_CAP] + '...'
 
 def log_windows():
@@ -1086,6 +1090,92 @@ def evaluate(argv: list[str], command: str, tool: str='', *, can_ask: bool | Non
         return (VERDICT_ESCALATE, f'chock could not check this command against {guard.stem}: {why}. Approving runs it unchecked.')
     return None
 
+DLOG_AGENT_PREFIX = 'agent:'
+
+_DLOG_HASH_PREFIX, _DLOG_OUTSIDE_PREFIX = ('sha256:', 'outside:')
+
+_DLOG_MCP_TOOL = _chock_re.compile('^mcp__(?P<server>.+?)__(?P<tool>.+)$')
+
+_DLOG_ASSIGNMENT = _chock_re.compile('^[A-Za-z_][A-Za-z0-9_]*=')
+
+_DLOG_OPAQUE_MARKS = ('$(', '`', "'", '"')
+
+_DLOG_PROGRAM_UNSAFE = _chock_re.compile('[^\\w.+-]')
+
+_DLOG_PROGRAM_CAP = 64
+
+_DLOG_UNNAMED = '-'
+
+def dlog_session(event, record):
+    """`record` with the client's session id, where the payload carries one: what groups a session's lines."""
+    session = getattr(event, 'session_id', None)
+    if isinstance(session, str) and session:
+        record['session_id'] = session
+    return record
+
+def _dlog_client(raw):
+    named = raw.get('client_type') if isinstance(raw, dict) else None
+    return named if isinstance(named, str) else None
+
+def dlog_actor(event):
+    """`agent:<client>`: an agent hook is always an agent's call; the client named in the payload, else the bundle's."""
+    named = _dlog_client(getattr(event, 'raw', None)) or getattr(event, 'agent', None)
+    return DLOG_AGENT_PREFIX + str(named or 'unknown')
+
+def _dlog_sha256(text):
+    return _DLOG_HASH_PREFIX + _chock_hashlib.sha256(str(text).encode('utf-8', 'surrogatepass')).hexdigest()
+
+def _dlog_program(command):
+    """The program's bare name: after plain `NAME=value` words; `-` when a shell parser would be needed to tell."""
+    for word in str(command).split():
+        if not _DLOG_ASSIGNMENT.match(word):
+            return '' if word.startswith('-') else word
+        if any((mark in word for mark in _DLOG_OPAQUE_MARKS)):
+            return ''
+    return ''
+
+def dlog_command_print(command):
+    """`<program> sha256:<hex of the whole command>`: the program's bare name only, never an argument."""
+    program = _dlog_program(command)
+    name = _DLOG_PROGRAM_UNSAFE.sub('', _chock_re.split('[\\\\/]', program)[-1])[:_DLOG_PROGRAM_CAP]
+    return f'{log_redact(name) or _DLOG_UNNAMED} {_dlog_sha256(command)}'
+
+def dlog_path_print(path, cwd, repo):
+    """The repository-relative path; any path outside `repo` (or with no repo) is `outside:sha256:<hex>`."""
+    full = _chock_os.path.realpath(_chock_os.path.join(cwd or _chock_os.getcwd(), str(path)))
+    if repo is not None:
+        try:
+            return log_redact(_chock_Path(full).relative_to(_chock_os.path.realpath(repo)).as_posix())
+        except ValueError:
+            pass
+    return _DLOG_OUTSIDE_PREFIX + _dlog_sha256(full)
+
+def dlog_target(event, repo):
+    """What a tool call touched, as a fingerprint: `server/tool`, a command's print, a path's; None off a tool call."""
+    if getattr(event, 'event', None) != 'pre_tool':
+        return None
+    tool = str(getattr(event, 'tool', None) or '')
+    mcp = _DLOG_MCP_TOOL.match(tool)
+    if mcp:
+        return f"{mcp['server']}/{mcp['tool']}"
+    command, path = (getattr(event, 'command', None), getattr(event, 'path', None))
+    if command:
+        return dlog_command_print(command)
+    if path:
+        return dlog_path_print(path, getattr(event, 'cwd', None), repo)
+    return log_redact(tool)[:_DLOG_PROGRAM_CAP] or None
+
+def dlog_fields(event, repo):
+    """Who did what, for a decision line: session_id, actor, and target on a tool call. Never raises: {} instead."""
+    try:
+        fields = dlog_session(event, {'actor': dlog_actor(event)})
+        target = dlog_target(event, repo)
+    except Exception:
+        return {}
+    if target:
+        fields['target'] = target
+    return fields
+
 DLOG_ROUTE_SYNC, DLOG_ROUTE_PLUGIN = ('sync', 'plugin')
 
 _DLOG_SYNC_BIN = ('.chock', 'bin')
@@ -1111,6 +1201,10 @@ _DLOG_SURFACE = {'pre_tool': 'pre-tool-use', 'stop': 'stop'}
 _DLOG_NO_RULE = 'no rule matched'
 
 _DLOG_DIST_INFO = _chock_re.compile('^chock-([^-]+)\\.dist-info$')
+
+_DLOG_GATE_LOGGED_CODES = (0, 1, 3, 4)
+
+GATE_LAST = {}
 
 def _dlog_flag_value(argv, flag):
     if flag in argv:
@@ -1168,17 +1262,6 @@ def _dlog_repo_root(start):
         return None
     return next((folder for folder in (here, *here.parents) if (folder / '.git').exists()), None)
 
-def dlog_session(event, record):
-    """`record` with the client's session id, where the payload carries one: what groups a session's lines."""
-    session = getattr(event, 'session_id', None)
-    if isinstance(session, str) and session:
-        record['session_id'] = session
-    return record
-
-def _dlog_client(raw):
-    named = raw.get('client_type') if isinstance(raw, dict) else None
-    return named if isinstance(named, str) else None
-
 def _dlog_trace(event, wire, rule, stages):
     """The debug-only fields: what was detected and matched, and how long each stage took. Never file contents."""
     trace = {'wire_event': wire, 'tool': event.tool, 'rule': rule or _DLOG_NO_RULE, 'stages_ms': stages}
@@ -1215,13 +1298,15 @@ def log_decision(argv, event, decision, judged, context):
         runtime = globals().get('__file__') or sys.argv[0]
         route = runtime_route(runtime)
         source, rule, started, stages = judged
-        if route == DLOG_ROUTE_SYNC and _DLOG_GATE_FLAG in argv and (source in (None, 'gate')):
+        gate_wrote = event.event != 'pre_tool' or GATE_LAST.get('code') in _DLOG_GATE_LOGGED_CODES
+        if route == DLOG_ROUTE_SYNC and _DLOG_GATE_FLAG in argv and (source in (None, 'gate')) and gate_wrote:
             return
         agent = str(getattr(event, 'agent', None) or 'unknown')
         log_path, repo = _dlog_paths(route, runtime, agent, event)
         outcome = getattr(decision, 'outcome', None) if decision is not None else None
         level = log_settings(repo)[0]
-        if not log_admits(level, log_record_level({'verdict': _DLOG_SPOKEN.get(outcome, 'allow')})):
+        fields = dlog_fields(event, repo)
+        if not log_admits(level, log_record_level({'verdict': _DLOG_SPOKEN.get(outcome, 'allow'), **fields})):
             return
         plugin_name, plugin_version = dlog_plugin_manifest(runtime, context.get('manifests', ())) if route == DLOG_ROUTE_PLUGIN else ('', '')
         target = next((v for v in (_dlog_flag_value(argv, f) for f in _DLOG_TARGET_FLAGS) if v), None)
@@ -1229,7 +1314,7 @@ def log_decision(argv, event, decision, judged, context):
         version = _dlog_chock_version() if route == DLOG_ROUTE_SYNC else ''
         if version:
             record['chock_version'] = version
-        dlog_session(event, record)
+        record.update(fields)
         client = _dlog_client(event.raw)
         if client:
             record['client'] = client
@@ -2226,7 +2311,8 @@ def run_gate(gate, writes, event, run_in, deadline):
 
     `run_in` is (root, extra): the working directory, and the stdin keys `extra` adds: `added` (per
     edited path, only the text the edit introduces; a runner that predates it judges the whole file,
-    which only ever refuses more) and the script `session`. The runner gets what is left of `deadline`.
+    which only ever refuses more), the script `session`, and the decision line's `log` fields (session_id,
+    actor, target). The runner gets what is left of `deadline`.
     """
     root, extra = run_in
     runner = runner_for(gate)
@@ -2239,6 +2325,7 @@ def run_gate(gate, writes, event, run_in, deadline):
         return (GATE_ERRORED, f'the gate runner gave no verdict within {allowed_seconds(exc)}')
     except (OSError, _chock_subprocess.SubprocessError) as exc:
         return (GATE_ERRORED, str(exc))
+    GATE_LAST['code'] = proc.returncode
     return runner_outcome(proc.returncode, proc.stderr)
 
 _EVENT_ARG = {'pre_tool': 'pre-tool-use', 'stop': 'stop'}
@@ -2291,12 +2378,13 @@ def _gate_says(gate, event, name, deadline, root):
     added = {**patch_added(event), **added_from_event(event)} if event.event == PRE_TOOL else {}
     added = judged_files(added, root, outside, lambda path: repo_paths(path, root))
     added = {path: text for path, text in added.items() if path in writes}
-    extra = {**({'added': added} if added else {}), 'session': session_for(event, root)}
+    extra = {**({'added': added} if added else {}), 'session': session_for(event, root), 'log': dlog_fields(event, root)}
     outcome, message = run_gate(gate, writes, name, (root, extra), deadline)
     return (gate_decision(outcome, message, gate), writes)
 
 def evaluate_gate(argv, event):
     """The decision this event earns from a compiled gate, or None when it has nothing to say."""
+    GATE_LAST.clear()
     gate = gate_path_from_argv(argv)
     name = _EVENT_ARG.get(getattr(event, 'event', ''))
     if gate is None or name is None:

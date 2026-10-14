@@ -34,14 +34,15 @@ LAYOUTS = {
     "sync": (sync_layout, lambda repo, home: sync_log(repo)),
     "plugin": (plugin_layout, lambda repo, home: plugin_log(home)),
 }
-#: (level, guard) -> the (verdict, record level) lines one hook call writes.
+#: (level, guard) -> the (verdict, record level) lines one hook call writes. An allowed tool call is an
+#: info line too: its fingerprint says what the agent did (GAP-2, option B).
 EXPECTED = {
     ("off", BLOCKING_GUARD): [],
     ("off", CLEAN_GUARD): [],
     ("info", BLOCKING_GUARD): [("block", "info")],
-    ("info", CLEAN_GUARD): [],
+    ("info", CLEAN_GUARD): [("allow", "info")],
     ("debug", BLOCKING_GUARD): [("block", "info")],
-    ("debug", CLEAN_GUARD): [("allow", "debug")],
+    ("debug", CLEAN_GUARD): [("allow", "info")],
 }
 IMPL = protect_dir() / "implementations"
 

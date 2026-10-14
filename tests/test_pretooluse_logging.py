@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -47,15 +48,18 @@ def test_block_is_recorded(tmp_path: Path, home: Path) -> None:
     assert record["level"] == "info"
 
 
-def test_allow_is_recorded_at_debug_only(tmp_path: Path, home: Path) -> None:
+def test_an_allow_is_an_info_line_with_only_a_fingerprint(tmp_path: Path, home: Path) -> None:
+    """GAP-2 option B: every allowed tool call is logged at info, naming what was run, never its arguments."""
     repo, runtime, guard = sync_layout(tmp_path, CLEAN_GUARD)
 
     run_hook(repo, runtime, guard, "ls -la", hook_env(home))
-    assert records(sync_log(repo)) == []
-
-    run_hook(repo, runtime, guard, "ls -la", hook_env(home, CHOCK_LOG_LEVEL="debug"))
     [record] = records(sync_log(repo))
-    assert (record["verdict"], record["level"], record["reason"]) == ("allow", "debug", "no-rule")
+    assert (record["verdict"], record["level"], record["reason"]) == ("allow", "info", "no-rule")
+    assert record["target"] == "ls sha256:" + hashlib.sha256(b"ls -la").hexdigest()
+    assert "trace" not in record
+
+    run_hook(repo, runtime, guard, "ls -la", hook_env(home, CHOCK_LOG_LEVEL="off"))
+    assert len(records(sync_log(repo))) == 1
 
 
 def test_ask_is_recorded(tmp_path: Path, home: Path) -> None:
@@ -87,7 +91,10 @@ def test_command_never_reaches_the_info_log(tmp_path: Path, home: Path) -> None:
 
     written = sync_log(repo).read_text(encoding="utf-8")
     assert "sk-live-abcdef1234567890" not in written
-    assert "curl" not in written
+    for argument in ("Authorization", "Bearer", "example.invalid"):
+        assert argument not in written
+    [record] = records(sync_log(repo))
+    assert record["target"] == "curl sha256:" + hashlib.sha256(SECRET_COMMAND.encode()).hexdigest()
 
 
 @pytest.mark.parametrize("levels", [{"CHOCK_GATE_LOG": "0"}, {"CHOCK_LOG_LEVEL": "off"}], ids=["legacy", "level"])

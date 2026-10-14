@@ -22,8 +22,9 @@ LOG_DEFAULT_MAX_BYTES = 1_048_576
 LOG_MIN_MAX_BYTES = 65_536
 LOG_MAX_MAX_BYTES = 1_073_741_824
 LOG_ALLOW = "allow"
-#: Fields that make an allow a decision worth an info line: something let a policy's finding through.
-LOG_LET_THROUGH = ("override", "would_action")
+#: Fields that make an allow a decision worth an info line: something let a policy's finding through,
+#: or an agent's action, kept as its fingerprint (`target`) so the log can say what the agent touched.
+LOG_LET_THROUGH = ("override", "would_action", "target")
 #: A debug trace's command or path is cut to this many characters, after redaction.
 LOG_TRACE_CAP = 200
 LOG_REDACTED = "[redacted]"
@@ -83,7 +84,7 @@ def log_settings(repo_root):
 
 
 def log_record_level(record):
-    """`debug` for a plain allow, `info` for every decision a policy made or something let through."""
+    """`debug` for a plain allow, `info` for every decision a policy made, something let through, or an agent's action."""
     plain = record.get("verdict") == LOG_ALLOW and not any(key in record for key in LOG_LET_THROUGH)
     return LOG_DEBUG if plain else LOG_INFO
 
@@ -93,9 +94,14 @@ def log_admits(level, record_level):
     return level == LOG_DEBUG or (level == LOG_INFO and record_level == LOG_INFO)
 
 
+def log_redact(text):
+    """`text` with every value scan-secrets would block replaced."""
+    return _LOG_SECRET_RE.sub(LOG_REDACTED, str(text))
+
+
 def log_trace_text(text):
     """`text` with every value scan-secrets would block replaced, then cut to `LOG_TRACE_CAP` characters."""
-    redacted = _LOG_SECRET_RE.sub(LOG_REDACTED, str(text))
+    redacted = log_redact(text)
     return redacted if len(redacted) <= LOG_TRACE_CAP else redacted[:LOG_TRACE_CAP] + "..."
 
 

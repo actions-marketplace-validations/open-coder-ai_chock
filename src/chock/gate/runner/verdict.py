@@ -176,8 +176,12 @@ def judge(
     writes: Mapping[str, str] | None = None,
     added: Mapping[str, str] | None = None,
     session: Mapping[str, object] | None = None,
+    fields: Mapping[str, object] | None = None,
 ) -> tuple[int, str]:
-    """Run a compiled gate: (exit code, verdict), the verdict being allow, block, ask, warn or error."""
+    """Run a compiled gate: (exit code, verdict), the verdict being allow, block, ask, warn or error.
+
+    `fields` is what an agent hook's runtime gives the decision line: session_id, actor, target.
+    """
     outcome = evaluate(gate_path, event, push_stdin, repo_root, base, head_ref, writes, added, session)
     if isinstance(outcome, tuple):
         return outcome
@@ -185,7 +189,9 @@ def judge(
         declared = outcome.spec.get("action", ACTION_BLOCK)
         verdict = _verdict(outcome.result, declared, outcome.level)
         _annotate_safely(outcome.result, verdict, _policy_id(gate_path), repo_root)
-    return _conclude(gate_path, outcome.spec, event, outcome.judged, outcome.result, (outcome.signal, outcome.level))
+    return _conclude(
+        gate_path, outcome.spec, event, outcome.judged, outcome.result, (outcome.signal, outcome.level, fields)
+    )
 
 
 def run(gate_path: Path, event: str, push_stdin: str | None, repo_root: Path, **options: Any) -> int:
@@ -194,19 +200,25 @@ def run(gate_path: Path, event: str, push_stdin: str | None, repo_root: Path, **
 
 
 def _conclude(
-    gate_path: Path, spec: dict, event: str, judged: str, result: GateResult, actor: tuple[str | None, str]
+    gate_path: Path,
+    spec: dict,
+    event: str,
+    judged: str,
+    result: GateResult,
+    actor: tuple[str | None, str, Mapping[str, object] | None],
 ) -> tuple[int, str]:
     """Log the outcome and act on it: (exit code, verdict), and the words in the channel this event has.
 
-    `actor` is the agent marker (or None) and the rollout level in force.
+    `actor` is the agent marker (or None), the rollout level in force, and the runtime's log fields (or None).
     """
-    signal, level = actor
+    signal, level, fields = actor
     declared = spec.get("action", ACTION_BLOCK)
     verdict = _verdict(result, declared, level)
     held = _verdict(result, declared)
     policy_id = _policy_id(gate_path)
     answered = verdict == ACTION_ASK and event in _GIT_EVENTS and _ask_answered(policy_id, signal)
-    extra = {**(_held_record(held, level) if held != verdict else {}), **_actor(signal)}
+    who = _actor(signal, fields, hook=event in AGENT_EVENTS)
+    extra = {**(_held_record(held, level) if held != verdict else {}), **who}
     if answered:
         extra["override"] = ALLOW_ENV
     _log_outcome(gate_path, judged, spec, result, "allow" if answered else verdict, extra)

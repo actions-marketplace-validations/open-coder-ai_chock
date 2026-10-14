@@ -18,6 +18,7 @@ from chock.vendors import entry, in_agent_vendors
 from . import (
     budget,
     decision_log,
+    decision_target,
     edit_image,
     gate_outcome,
     guard_runner,
@@ -182,39 +183,30 @@ def _can_ask_tokens(agent: str) -> dict[str, str]:
     }
 
 
+#: The modules every handler carries, in order: each may use the names of those before it.
+_HANDLER_MODULES = (
+    budget,
+    journal,
+    guard_runner,
+    decision_target,
+    decision_log,
+    edit_image,
+    patch_image,
+    gate_outcome,
+    outside_repo,
+    session_log,
+    stop_reentry,
+    unreadable_stop,
+    workspace_root,
+    stop_roots,
+    write_gate,
+    tool_call_gate,
+)
+
+
 def _handler_source(agent: str) -> str:
     """The full handler-block body for `agent`: extracted guard logic, optionally extracted"""
-    parts = [
-        _extract(budget),
-        "\n",
-        _extract(journal),
-        "\n",
-        _extract(guard_runner),
-        "\n",
-        _extract(decision_log),
-        "\n",
-        _extract(edit_image),
-        "\n",
-        _extract(patch_image),
-        "\n",
-        _extract(gate_outcome),
-        "\n",
-        _extract(outside_repo),
-        "\n",
-        _extract(session_log),
-        "\n",
-        _extract(stop_reentry),
-        "\n",
-        _extract(unreadable_stop),
-        "\n",
-        _extract(workspace_root),
-        "\n",
-        _extract(stop_roots),
-        "\n",
-        _extract(write_gate),
-        "\n",
-        _extract(tool_call_gate),
-    ]
+    parts = ["\n".join(_extract(module) for module in _HANDLER_MODULES)]
     if agent in _SESSION_START_AGENTS:
         parts.append("\n")
         parts.append(_extract(sessionstart))

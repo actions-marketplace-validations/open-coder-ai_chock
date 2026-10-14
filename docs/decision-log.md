@@ -21,15 +21,35 @@ the same file earlier versions wrote, so older readers keep working.
 | Level | Writes |
 | :--- | :--- |
 | `off` | nothing |
-| `info` (default) | one line each time a policy fires: block, ask, warn, a guard fault, or an override or rollout level that let a finding through |
-| `debug` | every hook call, allows included, plus a `trace`: wire event, tool, matched rule (or "no rule matched"), the guard's exit code, per-stage timings, and the command or path cut to 200 characters with every value the scan-secrets policy would block replaced by `[redacted]` |
+| `info` (default) | one line each time a policy fires: block, ask, warn, a guard fault, or an override or rollout level that let a finding through; and one line per allowed agent tool call, carrying only its `target` fingerprint |
+| `debug` | every hook call, the turn's end included, plus a `trace`: wire event, tool, matched rule (or "no rule matched"), the guard's exit code, per-stage timings, and the command or path cut to 200 characters with every value the scan-secrets policy would block replaced by `[redacted]` |
 
 Each line carries `ts`, `route`, `level`, `agent`, `client` (when the payload names one), `event`,
-`policy_id`, `surface`, `verdict`, `reason`, `duration_ms`, `can_ask` and `session_id` (the client's
-session id, when the payload carries one). The sync route adds
+`policy_id`, `surface`, `verdict`, `reason`, `duration_ms`, `can_ask`, `actor`, `session_id` (the
+client's session id, when the payload carries one) and, on a tool call, `target`. The sync route adds
 `chock_version` (left out when the hook's Python has no chock installed). The plugin route adds
 `plugin` and `plugin_version` instead, never `chock_version`: a plugin runs its own bundled Python, not chock. On the sync route a compiled gate's line is written by `gate.py`
-and keeps its own fields (`kind`, `match_count`, `matches`, `rules`).
+and keeps its own fields (`kind`, `match_count`, `matches`, `rules`), plus `actor`, and `session_id`
+and `target` from the hook that ran it. A git hook's line carries `actor` only: a commit is no tool call.
+
+## Who did what
+
+| Field | Value |
+| :--- | :--- |
+| `actor` | `agent:<client>` for an agent hook (the payload's client, else the bundle's agent). On a git hook, the agent rule a commit is judged by: `CLAUDECODE=1` or `AI_AGENT` names the client, any other marker is `agent:unknown`, none (or `CHOCK_AGENT_COMMIT=0`) is `person` |
+| `session_id` | the client's session id, when the payload carries one |
+| `target` | a fingerprint of what one tool call touched, never its content (below) |
+
+| A tool call on | `target` |
+| :--- | :--- |
+| a file in the repository | its repository-relative path, e.g. `src/app.py` |
+| a file outside it (or with no repository) | `outside:sha256:<hex of the absolute path>`: a home path names the user |
+| a shell command | `<program> sha256:<hex of the whole command line, UTF-8>`, e.g. `git sha256:9f2c...`. Leading `NAME=value` words and the program's folder are dropped; no argument is ever written. To confirm a suspected command: `printf %s '<command>' \| sha256sum` |
+| an MCP tool | `<server>/<tool>` |
+| any other tool | the tool's name |
+
+Redaction runs on every `target` first, the same scan-secrets pattern as a trace. A stop, a session
+start and an unreadable payload have no `target`.
 
 ## Heartbeat
 
@@ -91,8 +111,8 @@ chock status --summary [--since DAYS] [--route sync|plugin] [--json]
 
 - Fires per policy and per client, with block, ask, warn and fault counts and rates. A fault is a hook
   that could not judge the call: reason `guard-errored`, `guard-missing` or `fault`.
-- p50 and p95 `duration_ms` per hook (client and surface), nearest rank. At `info` only the calls a
-  policy fired on are logged, so the latencies cover those; set `debug` to time every call.
+- p50 and p95 `duration_ms` per hook (client and surface), nearest rank. At `info` every tool call is
+  logged, but a turn's end only when a policy fired on it; set `debug` to time every call.
 - **WARN when a hook's p95 is within 25% of its client's hook timeout.** A client timeout fails
   open, so a call slower than that goes through unchecked. The timeout is the one chock writes on
   every hook entry; where a vendor's hook schema has no timeout field (`src/chock/data/hook_timeouts.json`),

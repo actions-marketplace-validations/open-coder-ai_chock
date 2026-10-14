@@ -5,12 +5,16 @@ from __future__ import annotations
 from collections.abc import Mapping
 from pathlib import Path
 
+from .actor import actor_of
 from .constants import (
     _CONFIG_PATH,
     _EVENT_NAME,
+    _LOG_FIELD_CAP,
+    _LOG_FIELDS,
     _LOG_MATCH_CAP,
     _MIN_COMPILED_PATH_DEPTH,
     ACTION_BLOCK,
+    ACTOR_AGENT_PREFIX,
 )
 from .context import GateResult
 from .journal import log_write
@@ -54,9 +58,19 @@ def _log_outcome(
 
 
 # >>> gate.py 18
-def _actor(signal: str | None) -> dict[str, object]:
-    """The agent marker a log record carries, when an agent acted."""
-    return {"agent": signal} if signal else {}
+def _actor(signal: str | None, fields: Mapping[str, object] | None = None, *, hook: bool = False) -> dict[str, object]:
+    """Who acted: the agent marker, when there is one, and `actor`; plus what an agent hook's runtime gave.
+
+    `fields` is the runtime's `log` stdin key (session_id, actor, target), kept only as short strings. An
+    agent `hook` with no marker and no runtime actor is still an agent's call: `agent:unknown`, never a person.
+    """
+    record: dict[str, object] = {"agent": signal} if signal else {}
+    record["actor"] = actor_of(signal) if signal or not hook else ACTOR_AGENT_PREFIX + "unknown"
+    for key in _LOG_FIELDS:
+        value = (fields or {}).get(key)
+        if isinstance(value, str) and 0 < len(value) <= _LOG_FIELD_CAP:
+            record[key] = value
+    return record
 
 
 def _held_record(held: str, level: str) -> dict[str, object]:

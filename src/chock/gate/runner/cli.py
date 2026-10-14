@@ -46,6 +46,16 @@ def _session(raw: str) -> dict | None:
     return session if isinstance(session, dict) else None
 
 
+def _log_fields(raw: str) -> dict | None:
+    """What the hook handler gives this call's decision line (session_id, actor, target), if any."""
+    try:
+        payload = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return None
+    fields = payload.get("log") if isinstance(payload, dict) else None
+    return fields if isinstance(fields, dict) else None
+
+
 def _writes(raw: str) -> dict[str, str]:
     """The files this event puts under judgement, whole."""
     return _texts(raw, "writes")
@@ -93,6 +103,7 @@ def main(argv: list[str] | None = None) -> int:
             writes=_writes(raw),
             added=_texts(raw, "added"),
             session=_session(raw),
+            fields=_log_fields(raw),
         )
 
     push_stdin = sys.stdin.read() if args.event == "pre-push" and not sys.stdin.isatty() else None
