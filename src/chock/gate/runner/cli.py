@@ -10,10 +10,13 @@ from pathlib import Path
 
 from .constants import _GIT_EVENTS, AGENT_EVENTS, EXIT_ASK, EXIT_WARN
 from .context import _GIT
-from .verdict import run, script_verdict
+from .verdict import halt_git, run, script_verdict
+
+# >>> gate.py 22
+#: The git hook a merge's own commit runs: judged as a commit.
+_MERGE_COMMIT = "pre-merge-commit"
 
 
-# >>> gate.py 21
 def _repo_root() -> Path:
     try:
         out = subprocess.check_output(  # noqa: S603 -- finding the repo root via git is this fallback's job
@@ -81,7 +84,13 @@ def main(argv: list[str] | None = None) -> int:
     verdict_p.add_argument("--policy", required=True, help="Policy id the script belongs to")
     verdict_p.add_argument("--event", required=True, choices=_GIT_EVENTS)
     verdict_p.add_argument("--exit", required=True, type=int, choices=[EXIT_ASK, EXIT_WARN], dest="code")
+    stop_p = sub.add_parser("stop-check", help="Refuse an agent's commit or push while `chock stop` is in force")
+    stop_p.add_argument("--event", required=True, choices=[*_GIT_EVENTS, _MERGE_COMMIT])
     args = parser.parse_args(argv)
+
+    if args.command == "stop-check":
+        halted = halt_git(_repo_root(), "pre-commit" if args.event == _MERGE_COMMIT else args.event)
+        return 0 if halted is None else halted[0]
 
     if args.command == "script-verdict":
         return script_verdict(args.policy, args.event, args.code, _repo_root())

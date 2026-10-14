@@ -31,6 +31,16 @@
       "fn": "status_main",
       "help": "Policy states and coverage (--only registry,log for more)"
     },
+    "stop": {
+      "module": "chock.stop",
+      "fn": "stop_main",
+      "help": "Refuse every agent tool call, commit and push here until resume (--agent C for one client)"
+    },
+    "resume": {
+      "module": "chock.stop",
+      "fn": "resume_main",
+      "help": "Lift a stop: agents are judged by the policies again"
+    },
     "doctor": {
       "module": "chock.doctor.cli",
       "help": "Check each client's hooks on each route: present, current, and seen running (--client X)"

@@ -29,6 +29,8 @@ rejected-edits/
 .tmp_gate_baseline/
 # Gate outcome evidence: local to the machine that ran the hook, never shared state.
 .chock/log/
+# A person's `chock stop`: local to this machine, never committed.
+.chock/stop.json
 
 # Skill schemas are injected by `chock install-skills`
 .agents/skills/**/assets/manifest*.json

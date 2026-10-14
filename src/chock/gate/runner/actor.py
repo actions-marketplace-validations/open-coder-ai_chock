@@ -184,6 +184,28 @@ def allowed_ids() -> set[str]:
     return {name.strip() for name in os.environ.get(ALLOW_ENV, "").split(",") if name.strip()}
 
 
+def git_email(repo_root: Path | None = None) -> str:
+    """The person's git `user.email`, as their shell's git reads it; empty when git names none."""
+    where = ["-C", str(repo_root)] if repo_root is not None else []
+    try:
+        shown = subprocess.run(  # noqa: S603 -- reading one git setting
+            ["git", *where, "config", "user.email"],  # noqa: S607
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
+        return ""
+    return shown.stdout.strip() if shown.returncode == 0 else ""
+
+
+def approval(repo_root: Path | None = None) -> dict[str, str]:
+    """What an override's record keeps of who approved it: `CHOCK_ALLOW` and the person's git email. Local log only."""
+    return {"override": ALLOW_ENV, "approver": git_email(repo_root) or "unknown"}
+
+
 def _ask_refusal(policy_id: str | None, signal: str | None) -> str:
     """Why a hook refuses an `ask`, and the one way through: a person's explicit override."""
     if policy_id is None:

@@ -17,6 +17,7 @@ from pathlib import Path
 
 from .decision_target import _dlog_client, dlog_fields, dlog_session
 from .guard_runner import GUARD_LAST
+from .runner.halt import HALT_REASON
 from .runner.journal import (
     LOG_DEBUG,
     LOG_SETTINGS_PARTS,
@@ -125,9 +126,11 @@ def _dlog_trace(event, wire, rule, stages):
 
 
 def _dlog_reason(source, outcome):
-    """A short code for why: `guard-blocked`, `guard-errored`, `gate-block`, `fault`, or `no-rule` for an allow."""
+    """A short code for why: `stopped`, `guard-blocked`, `guard-errored`, `gate-block`, `fault`, or `no-rule` (allow)."""
     if source is None:
         return "no-rule"
+    if source == HALT_REASON:
+        return HALT_REASON
     if source == "guard" and "outcome" in GUARD_LAST:
         return f"guard-{GUARD_LAST['outcome']}"
     return source if source == "fault" else f"{source}-{_DLOG_SPOKEN.get(outcome, 'allow')}"

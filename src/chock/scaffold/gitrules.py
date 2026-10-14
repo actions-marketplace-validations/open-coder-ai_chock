@@ -20,6 +20,8 @@ from chock.emit import write_generated
 GATE_LOG_IGNORE = ".chock/log/"
 #: The per-session tool-call log: per machine, a record per tool call, pruned after a week.
 SESSION_STATE_IGNORE = ".chock/state/"
+#: A person's `chock stop`: local state for one machine's agents, never committed (CI would read nothing from it).
+STOP_FILE_IGNORE = ".chock/stop.json"
 #: Re-included whatever a global excludes file says: the directories (against a `bin/` rule) and
 #: everything under them (against a rule that names the files, a `*.json`, say).
 TRACKED_RUNTIME = ("!.chock/bin/", "!.chock/bin/**", "!.chock/compiled/", "!.chock/compiled/**")
@@ -41,6 +43,7 @@ RUNTIME_BYTECODE_IGNORE = (
 _BLOCKS = (
     ((GATE_LOG_IGNORE,), "# chock: the gate outcome log is per machine and grows on every commit"),
     ((SESSION_STATE_IGNORE,), "# chock: the per-session tool-call log is per machine and never shared"),
+    ((STOP_FILE_IGNORE,), "# chock: a stop (`chock stop`) is local to this machine and never committed"),
     (
         TRACKED_RUNTIME,
         "# chock: the gate runtime and compiled gates are what every hook runs -- tracked even where\n"

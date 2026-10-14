@@ -945,6 +945,53 @@ def log_write(path, record, repo_root):
             return
     log_append(path, {**record, 'level': record_level}, size)
 
+HALT_PARTS = ('.chock', 'stop.json')
+
+HALT_ALL = 'all'
+
+HALT_REASON = 'stopped'
+
+HALT_POLICY = 'chock-stop'
+
+HALT_CLIENT_RE = _chock_re.compile('^[a-z0-9_]{1,32}$')
+
+_HALT_REASON_CAP = 200
+
+_HALT_UNREADABLE = '.chock/stop.json exists but cannot be read, so every agent is refused'
+
+_HALT_NO_REASON = 'no reason given'
+
+def halt_read(repo_root):
+    """The stop in force for `repo_root` as {scope, reason, ...}, or None. A file that exists but cannot be
+    read or parsed, or names no valid scope, stops every agent: fail closed."""
+    if repo_root is None:
+        return None
+    path = _chock_Path(repo_root).joinpath(*HALT_PARTS)
+    try:
+        doc = json.loads(path.read_text(encoding='utf-8'))
+    except (FileNotFoundError, NotADirectoryError):
+        return {'scope': HALT_ALL, 'reason': _HALT_UNREADABLE, 'unreadable': True} if _chock_os.path.lexists(path) else None
+    except (OSError, UnicodeError, ValueError):
+        return {'scope': HALT_ALL, 'reason': _HALT_UNREADABLE, 'unreadable': True}
+    scope = doc.get('scope') if isinstance(doc, dict) else None
+    if not isinstance(scope, str) or not (scope == HALT_ALL or HALT_CLIENT_RE.match(scope)):
+        return {'scope': HALT_ALL, 'reason': _HALT_UNREADABLE, 'unreadable': True}
+    reason = doc.get('reason')
+    return {**doc, 'scope': scope, 'reason': reason if isinstance(reason, str) else ''}
+
+def halt_covers(stop, client):
+    """Whether `stop` reaches `client`: every agent, or the one named. An agent naming no client is reached."""
+    scope = stop.get('scope')
+    if scope == HALT_ALL or not client or client == 'unknown':
+        return True
+    return client == scope or scope.startswith(str(client) + '_')
+
+def halt_message(stop):
+    """`stopped: <reason>`, the reason printable and capped, and the one way to lift it."""
+    reason = ''.join((ch for ch in str(stop.get('reason') or '') if ch.isprintable())).strip()
+    reason = (reason or _HALT_NO_REASON)[:_HALT_REASON_CAP]
+    return f'{HALT_REASON}: {reason}. A person stopped agents in this repository (`chock stop`); every tool call is refused until they run `chock resume`.'
+
 GUARD_VIOLATION = 1
 
 GUARD_ASK_EXIT = 3
@@ -1357,9 +1404,11 @@ def _dlog_trace(event, wire, rule, stages):
     return trace
 
 def _dlog_reason(source, outcome):
-    """A short code for why: `guard-blocked`, `guard-errored`, `gate-block`, `fault`, or `no-rule` for an allow."""
+    """A short code for why: `stopped`, `guard-blocked`, `guard-errored`, `gate-block`, `fault`, or `no-rule` (allow)."""
     if source is None:
         return 'no-rule'
+    if source == HALT_REASON:
+        return HALT_REASON
     if source == 'guard' and 'outcome' in GUARD_LAST:
         return f"guard-{GUARD_LAST['outcome']}"
     return source if source == 'fault' else f"{source}-{_DLOG_SPOKEN.get(outcome, 'allow')}"
@@ -2219,6 +2268,22 @@ def workspace_root(event):
     path = getattr(event, 'path', None)
     return next((root for root in roots if path and _holds(root, path)), roots[0] if roots else None)
 
+def repo_stop_root(event):
+    """The repository whose stop applies: the runtime's own on the sync route, else the one the call works in."""
+    runtime = globals().get('__file__') or sys.argv[0]
+    if runtime_route(runtime) == DLOG_ROUTE_SYNC:
+        return _chock_Path(runtime).resolve().parent.parent.parent
+    return _dlog_repo_root(getattr(event, 'cwd', None) or workspace_root(event) or '.')
+
+def repo_stop_refusal(event):
+    """`stopped: <reason>` when a stop reaches this pre-tool call's agent, else None. An unreadable stop refuses."""
+    if getattr(event, 'event', None) != 'pre_tool':
+        return None
+    stop = halt_read(repo_stop_root(event))
+    if stop is None or not halt_covers(stop, getattr(event, 'agent', None)):
+        return None
+    return halt_message(stop)
+
 _SEVERITY = (VERDICT_DENY, VERDICT_ESCALATE, VERDICT_WARN)
 
 _GIT_DIR = '.git'
@@ -2713,6 +2778,10 @@ def _chock_timed(judged, stage, ask):
 
 
 def _judge(event, judged):
+    halted = repo_stop_refusal(event)
+    if halted is not None:
+        judged[0:2] = [HALT_REASON, ".chock/stop.json"]
+        return Decision.deny(halted)
     if event.event == "pre_tool" and event.command:
         verdict = _chock_timed(judged, "guard", lambda: evaluate(
             sys.argv[1:], event.command, event.tool or "", can_ask=_chock_can_ask(event.raw)

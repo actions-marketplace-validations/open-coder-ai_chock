@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .actor import _ask_answered, _ask_refusal, _judged_event, agent_signal, rollout
+from .actor import _ask_answered, _ask_refusal, _judged_event, agent_signal, approval, rollout
 from .constants import (
     _ACTION_RANK,
     _EVENT_NAME,
@@ -20,6 +20,7 @@ from .constants import (
     ACTION_ASK,
     ACTION_BLOCK,
     ACTION_WARN,
+    ACTOR_AGENT_PREFIX,
     AGENT_EVENTS,
     ALLOW_ENV,
     EXIT_ASK,
@@ -31,8 +32,9 @@ from .constants import (
     VERDICT_ERROR,
 )
 from .context import GateResult
+from .halt import HALT_POLICY, HALT_REASON, halt_covers, halt_message, halt_read
 from .kinds import KINDS
-from .log import _actor, _held_record, _log_outcome, _log_script_hook
+from .log import _actor, _held_record, _log_halt, _log_outcome, _log_script_hook
 from .material import _context, _params, own_paths
 from .report import _annotate_safely, _annotation, _encodable, _github_actions, _reason, _report_refusal, ci_inert
 
@@ -79,6 +81,9 @@ def script_verdict(policy_id: str, event: str, code: int, repo_root: Path) -> in
     The script already printed its own words. A warn is allowed; an ask is refused unless a person
     named the policy in `CHOCK_ALLOW` and no agent marker is on the command.
     """
+    halted = halt_git(repo_root, event, policy_id)
+    if halted is not None:
+        return halted[0]
     signal = agent_signal(repo_root)
     level = rollout(repo_root, event, signal)
     if code == EXIT_WARN:
@@ -92,11 +97,27 @@ def script_verdict(policy_id: str, event: str, code: int, repo_root: Path) -> in
         return 0
     if _ask_answered(policy_id, signal):
         print(f"gate: {policy_id} asked; allowed by {ALLOW_ENV}.", file=sys.stderr)
-        _log_script_hook(policy_id, event, "allow", repo_root, {"override": ALLOW_ENV, **_actor(signal)})
+        _log_script_hook(policy_id, event, "allow", repo_root, {**approval(repo_root), **_actor(signal)})
         return 0
     print(_ask_refusal(policy_id, signal), file=sys.stderr)
     _log_script_hook(policy_id, event, ACTION_ASK, repo_root, _actor(signal))
     return 1
+
+
+def halt_git(repo_root: Path, event: str, policy_id: str | None = None) -> tuple[int, str] | None:
+    """An agent's commit or push while a stop reaches it: refused and logged with reason `stopped`, whatever
+    `CHOCK_ALLOW` or the rollout level say. A person's own commit or push is not the stop's: None."""
+    signal = agent_signal(repo_root)
+    stop = halt_read(repo_root) if signal is not None else None
+    who = _actor(signal)
+    if stop is None or not halt_covers(stop, str(who["actor"]).removeprefix(ACTOR_AGENT_PREFIX)):
+        return None
+    print(f"gate: {halt_message(stop)}", file=sys.stderr)
+    judged = _judged_event(_EVENT_NAME.get(event, event), agent=True)
+    record = {"policy_id": policy_id or HALT_POLICY, "surface": "git-hook", "event": judged, "verdict": ACTION_BLOCK}
+    record.update(reason=HALT_REASON, **who)
+    _log_halt(repo_root, record)
+    return 1, ACTION_BLOCK
 
 
 @dataclass(frozen=True)
@@ -182,6 +203,9 @@ def judge(
 
     `fields` is what an agent hook's runtime gives the decision line: session_id, actor, target.
     """
+    halted = halt_git(Path(repo_root), event, _policy_id(Path(gate_path))) if event in _GIT_EVENTS else None
+    if halted is not None:
+        return halted
     outcome = evaluate(gate_path, event, push_stdin, repo_root, base, head_ref, writes, added, session)
     if isinstance(outcome, tuple):
         return outcome
@@ -220,7 +244,7 @@ def _conclude(
     who = _actor(signal, fields, hook=event in AGENT_EVENTS)
     extra = {**(_held_record(held, level) if held != verdict else {}), **who}
     if answered:
-        extra["override"] = ALLOW_ENV
+        extra.update(approval())
     _log_outcome(gate_path, judged, spec, result, "allow" if answered else verdict, extra)
     if held != verdict:
         print(_OBSERVE_NOTE.format(policy=policy_id or "gate", held=held), file=sys.stderr)
