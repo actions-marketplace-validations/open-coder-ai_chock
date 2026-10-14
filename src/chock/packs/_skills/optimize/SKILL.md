@@ -5,7 +5,7 @@ description: Improve Chock policy from usage evidence. args(policy_path, >=3
   tuning) exclude(policy_init, one_off_edit)
 metadata:
   owner: chock-core
-  version: 0.0.1
+  version: 0.0.2
   status: draft
   chock.version: 0.0.1
   chock.artifact: skill
