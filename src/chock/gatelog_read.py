@@ -58,11 +58,19 @@ def _records(lines: Iterable[str], *, heartbeats: bool = False) -> list[dict[str
             record = json.loads(line) if line.strip() else None
         except json.JSONDecodeError:
             continue
-        if isinstance(record, dict) and (
+        if isinstance(record, dict) and isinstance(record.get(journal.LOG_POLICIES), list):
+            found += per_policy(record)
+        elif isinstance(record, dict) and (
             record.get("policy_id") or (heartbeats and record.get("event") == HEARTBEAT_EVENT)
         ):
             found.append(record)
     return found
+
+
+def per_policy(record: dict[str, Any]) -> list[dict[str, Any]]:
+    """A settled tool call's one line as one record per policy it lists, so per-policy counts count it for each."""
+    shared = {key: value for key, value in record.items() if key != journal.LOG_POLICIES}
+    return [{**shared, "policy_id": str(policy)} for policy in record[journal.LOG_POLICIES] if policy]
 
 
 def record_route(record: dict[str, Any]) -> str:

@@ -1,4 +1,4 @@
-"""GAP-2b: a plain allowed tool call is one info line, however many policy hooks judge it; refusals stay per policy."""
+"""GAP-2b: a plain allowed tool call is one info line listing every policy that let it through; refusals stay per policy."""
 
 from __future__ import annotations
 
@@ -14,18 +14,22 @@ from decision_log_support import (
     hook_env,
     plugin_layout,
     plugin_log,
+    raw_records,
     records,
     sync_layout,
     sync_log,
 )
 
+from chock import gatelog
 from chock.gate.runner import journal
+from chock.gatelog_read import read_events
 
 LAYOUTS = {
     "sync": (sync_layout, lambda repo, home: sync_log(repo)),
     "plugin": (plugin_layout, lambda repo, home: plugin_log(home)),
 }
 ROUTES = sorted(LAYOUTS)
+SESSION = "s"
 
 
 @pytest.fixture
@@ -35,74 +39,108 @@ def home(tmp_path: Path) -> Path:
     return folder
 
 
-def _hooks(tmp_path: Path, home: Path, route: str, guards: list[str], calls: list[str], **levels: str) -> list[dict]:
-    """Each call (by tool_use_id) judged by one hook per guard, as a client runs every matching hook; the lines."""
-    layout, log_of = LAYOUTS[route]
-    repo, runtime, first = layout(tmp_path, guards[0])
-    paths = [first]
-    for at, body in enumerate(guards[1:], start=2):
-        extra = first.with_name(f"guard{at}.sh")
-        extra.write_text(body, encoding="utf-8", newline="\n")
-        paths.append(extra)
-    for call in calls:
-        payload = {
-            "hook_event_name": "PreToolUse",
-            "tool_name": "Bash",
-            "tool_input": {"command": "ls"},
-            "session_id": "s",
-            "tool_use_id": call,
-            "cwd": str(repo),
-        }
-        for guard in paths:
-            subprocess.run(
-                [sys.executable, str(runtime), "--guard", str(guard)],
-                input=json.dumps(payload),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                cwd=repo,
-                env=hook_env(home, **levels),
-                timeout=60,
-                check=False,
-            )
-    return records(log_of(repo, home))
+def _run(repo: Path, runtime: Path, guard: Path, payload: dict, env: dict[str, str]) -> None:
+    subprocess.run(
+        [sys.executable, str(runtime), "--guard", str(guard)],
+        input=json.dumps({"session_id": SESSION, "cwd": str(repo), **payload}),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=repo,
+        env=env,
+        timeout=60,
+        check=False,
+    )
+
+
+class Session:
+    """One layout's runtime, a guard per policy hook, and a clean guard for the turn's end."""
+
+    def __init__(self, tmp_path: Path, home: Path, route: str, guards: list[str], **levels: str) -> None:
+        layout, log_of = LAYOUTS[route]
+        self.repo, self.runtime, first = layout(tmp_path, guards[0])
+        self.log, self.env, self.guards = log_of(self.repo, home), hook_env(home, **levels), [first]
+        for at, body in enumerate(guards[1:], start=2):
+            # sync: another policy's guard (`.agents/policies/<id>/implementations/`); plugin: the same package's
+            folder = first.parent.parent.with_name(f"p-{at}") / "implementations" if route == "sync" else first.parent
+            folder.mkdir(parents=True, exist_ok=True)
+            self.guards.append(folder / f"guard{at}.sh")
+            self.guards[-1].write_text(body, encoding="utf-8", newline="\n")
+        self.stop_guard = first.with_name("stop.sh")
+        self.stop_guard.write_text(CLEAN_GUARD, encoding="utf-8", newline="\n")
+
+    def call(self, call: str, command: str = "ls") -> None:
+        payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": command}}
+        for guard in self.guards:
+            _run(self.repo, self.runtime, guard, {**payload, "tool_use_id": call}, self.env)
+
+    def stop(self) -> None:
+        _run(self.repo, self.runtime, self.stop_guard, {"hook_event_name": "Stop", "stop_hook_active": False}, self.env)
 
 
 @pytest.mark.parametrize("route", ROUTES)
-def test_a_plain_allow_is_one_line_per_tool_call_not_per_hook(tmp_path: Path, home: Path, route: str) -> None:
-    found = _hooks(tmp_path, home, route, [CLEAN_GUARD] * 3, ["toolu_1", "toolu_2"])
+def test_a_plain_allow_is_held_then_one_line_per_tool_call(tmp_path: Path, home: Path, route: str) -> None:
+    session = Session(tmp_path, home, route, [CLEAN_GUARD] * 3)
+    session.call("toolu_1")
+    session.call("toolu_2")
 
-    assert [(r["verdict"], r["level"]) for r in found] == [("allow", "info")] * 2
-    assert all("call" not in r for r in found)
+    assert raw_records(session.log) == []  # held until the call settles
+    session.stop()
+    written = raw_records(session.log)
+    assert [(r["verdict"], r["level"]) for r in written] == [("allow", "info")] * 2
+    assert all("call" not in r and "policy_id" not in r for r in written)
+
+
+def test_one_call_two_policies_is_one_line_counted_once_for_each(tmp_path: Path, home: Path) -> None:
+    session = Session(tmp_path, home, "sync", [CLEAN_GUARD, CLEAN_GUARD])
+    session.call("toolu_1")
+    session.stop()
+
+    [line] = raw_records(session.log)
+    assert line[journal.LOG_POLICIES] == ["p-2", "p-log"]
+    counts = {e["policy_id"]: e["allow"] for e in gatelog.summarize(read_events(session.repo))}
+    assert counts == {"p-2": 1, "p-log": 1}
 
 
 @pytest.mark.parametrize("route", ROUTES)
 def test_every_refusal_keeps_its_own_line(tmp_path: Path, home: Path, route: str) -> None:
-    found = _hooks(tmp_path, home, route, [BLOCKING_GUARD, CLEAN_GUARD, BLOCKING_GUARD, CLEAN_GUARD], ["toolu_1"])
+    session = Session(tmp_path, home, route, [BLOCKING_GUARD, CLEAN_GUARD, BLOCKING_GUARD, CLEAN_GUARD])
+    session.call("toolu_1")
+    session.stop()
 
-    assert sorted(r["verdict"] for r in found) == ["allow", "block", "block"]
+    assert sorted(r["verdict"] for r in raw_records(session.log)) == ["allow", "block", "block"]
 
 
 @pytest.mark.parametrize("route", ROUTES)
 def test_debug_keeps_every_hooks_line(tmp_path: Path, home: Path, route: str) -> None:
-    found = _hooks(tmp_path, home, route, [CLEAN_GUARD] * 3, ["toolu_1"], CHOCK_LOG_LEVEL="debug")
+    session = Session(tmp_path, home, route, [CLEAN_GUARD] * 3, CHOCK_LOG_LEVEL="debug")
+    session.call("toolu_1")
 
-    assert len(found) == 3
+    assert len([r for r in raw_records(session.log) if r["event"] == "tool_use"]) == 3
 
 
-def test_a_call_with_no_id_is_collapsed_within_its_second(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_with_no_call_id_different_calls_in_one_second_are_both_written(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The key is (session, second, target): identical calls in one second collapse, different ones never do."""
     monkeypatch.delenv("CHOCK_LOG_LEVEL", raising=False)
     monkeypatch.delenv("CHOCK_GATE_LOG", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(journal, "log_now", lambda: "2026-10-14T00:00:00Z")
     path = tmp_path / "log" / "events.jsonl"
-    line = {"verdict": "allow", "target": "ls sha256:00", "session_id": "s"}
+    line = {"verdict": "allow", "target": "ls sha256:00", "session_id": SESSION, "policy_id": "p-a"}
 
-    for _ in range(3):
-        journal.log_write(path, line, tmp_path)
+    for policy in ("p-a", "p-b"):
+        journal.log_write(path, {**line, "policy_id": policy}, tmp_path)
     journal.log_write(path, {**line, "target": "cat sha256:01"}, tmp_path)
+    journal.log_write(path, {**line, "session_id": "other"}, tmp_path)
 
-    assert [r["target"] for r in records(path)][-2:] == ["ls sha256:00", "cat sha256:01"]
-    assert len(records(path)) in (2, 3)  # 3 only when the second turned between the writes
+    written = records(path)
+    assert sorted((r["session_id"], r["target"], r[journal.LOG_POLICIES]) for r in written) == [
+        ("other", "ls sha256:00", ["p-a"]),
+        (SESSION, "cat sha256:01", ["p-a"]),
+        (SESSION, "ls sha256:00", ["p-a", "p-b"]),
+    ]
 
 
 def test_an_unencodable_record_is_still_one_line(tmp_path: Path) -> None:

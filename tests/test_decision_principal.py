@@ -24,7 +24,7 @@ from decision_log_support import (
 from history_support import SECRET
 
 from chock.gate import assemble, decision_target
-from chock.gate.runner import actor, log
+from chock.gate.runner import actor, journal, log
 
 LAYOUTS = {
     "sync": (sync_layout, lambda repo, home: sync_log(repo)),
@@ -171,7 +171,10 @@ def test_gate_py_writes_the_fields_on_its_own_line(tmp_path: Path, home: Path, c
     )
 
     [record] = records(sync_log(repo))
-    assert (record["policy_id"], record["verdict"], record["level"]) == ("p-gate", verdict, "info"), proc.stderr
+    policy = (
+        record[journal.LOG_POLICIES] if verdict == "allow" else [record["policy_id"]]
+    )  # an allow is held, then listed
+    assert (policy, record["verdict"], record["level"]) == (["p-gate"], verdict, "info"), proc.stderr
     assert (record["session_id"], record["actor"], record["target"]) == (SESSION, "agent:claude_code", "app.py")
     assert SECRET not in sync_log(repo).read_text(encoding="utf-8")
 
