@@ -23,9 +23,17 @@ Only a person changes a stop: `stop` and `resume` refuse, and log the refusal, w
 agent marker (the same rule as a commit). `resume` removes the file.
 
 `chock sync` wires one hook of its own per client, `--stop-check`, with no matcher and whatever
-policies are installed, so the stop sees every tool call, reads included. Every plugin bundle
-`chock install` writes carries the same entry once, for every client it packages, Devin's included,
-and its member toggles never reach it. Unstopped it allows and
+policies are installed, so the stop sees every tool call, reads included. The plugin route carries
+the same entry, in every client format (Devin's included):
+
+| Route | Stop check |
+| --- | --- |
+| `chock sync` | one per client, beside chock's other entries |
+| `chock install` bundle | one per bundle; member toggles never reach it |
+| `chock plugin build` package (the marketplace route) | one per package that ships hooks |
+| an advisory-only package (skill text, no hooks) | none, as `chock sync` wires none where it wires nothing |
+
+With several packages installed, each runs its own check on every tool call. Unstopped it allows and
 logs nothing of its own beyond the call's one allow line. `chock status` shows a stop on its first line. Every refusal, the stop and
 the resume are logged ([Decision log](decision-log.md#stop-and-override)). The file is local state:
 `chock init` lists it in `.gitignore`, and CI never reads it.
@@ -33,8 +41,7 @@ the resume are logged ([Decision log](decision-log.md#stop-and-override)). The f
 **Limits.**
 
 - It reaches only agents whose hooks Chock wires and that the client runs. An agent with no hook is
-  stopped at commit and push only. A single-policy package built with `chock plugin build` carries no
-  stop check: there a stop reaches only the tools that package's own hooks match.
+  stopped at commit and push only.
 - Devin's hook is best-effort: the vendor runs it fail-open, so a hook that errors or times out lets
   the call through.
 - It refuses the *next* action. It does not end a process already running (a background shell, a

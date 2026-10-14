@@ -68,3 +68,22 @@ def plugin_doc(agent: str, hooks: Any, *, generic: bool) -> Any:
     if vendors.hook_entry_flat(agent):
         return {**vendors.config_envelope(agent), "hooks": entries}
     return entries if vendors.hook_entry_bare(agent) else {"hooks": entries}
+
+
+def _runs_it(node: Any) -> bool:
+    return isinstance(node, dict) and isinstance(node.get("command"), str) and STOP_CHECK_FLAG in node["command"]
+
+
+def without(node: Any) -> Any:
+    """`node` with every stop-check entry gone, and any group or event list it leaves empty: a bundle wires its own once."""
+    if isinstance(node, dict):
+        out = {}
+        for key, value in node.items():
+            kept = without(value)
+            if not (isinstance(value, list) and value and kept == []):
+                out[key] = kept
+        return out
+    if isinstance(node, list):
+        kept = [(item, without(item)) for item in node if not _runs_it(item)]
+        return [new for old, new in kept if not (old and new in ({}, []))]
+    return node

@@ -208,7 +208,7 @@ def _merge_member(
         if rel in (*special[1:], LICENSE_REL):
             continue
         if rel == special[0]:
-            doc = _repoint(json.loads(content), moved)
+            doc = _repoint(stop_check.without(json.loads(content)), moved)
         elif rel.as_posix() in moved:
             _place(files, Path(moved[rel.as_posix()]), content)
         else:
