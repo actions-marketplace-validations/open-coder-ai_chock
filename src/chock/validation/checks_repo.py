@@ -217,12 +217,13 @@ def _tracked_under(root: Path, rel: str) -> list[str]:
     if git is None:
         return []
     result = subprocess.run(  # noqa: S603 -- asking git what it tracks is this check's whole job
-        [git, "-C", str(root), "ls-files", "--", rel],
+        [git, "-C", str(root), "ls-files", "-z", "--", rel],
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
-    return result.stdout.split() if result.returncode == 0 else []
+    return [path for path in result.stdout.split("\0") if path] if result.returncode == 0 else []
 
 
 def check_ambient_token_budget(root: Path, report: Report) -> None:
