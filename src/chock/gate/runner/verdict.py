@@ -31,12 +31,21 @@ from .constants import (
     TOOL_USE_EVENT,
     VERDICT_ERROR,
 )
-from .context import GateResult
+from .context import GateResult, ListingError
 from .halt import HALT_POLICY, HALT_REASON, halt_covers, halt_message, halt_read
 from .kinds import KINDS
 from .log import _actor, _held_record, _log_halt, _log_outcome, _log_script_hook
 from .material import _context, _params, own_paths
-from .report import _annotate_safely, _annotation, _encodable, _github_actions, _reason, _report_refusal, ci_inert
+from .report import (
+    _annotate_safely,
+    _annotation,
+    _encodable,
+    _github_actions,
+    _reason,
+    _report_refusal,
+    ci_inert,
+    inert,
+)
 
 
 # >>> gate.py 14
@@ -183,7 +192,11 @@ def evaluate(
         return 2, VERDICT_ERROR
     signal = agent_signal(repo_root)
     judged = _judged_event(name, agent=signal is not None)
-    result = kind(ctx, _params(gate_path, spec), judged)
+    try:
+        result = kind(ctx, _params(gate_path, spec), judged)
+    except ListingError as exc:
+        print(f"gate: {inert(str(exc))} -- refusing rather than judging a change it cannot list.", file=sys.stderr)
+        return 2, VERDICT_ERROR
     return Evaluation(spec, result, rollout(repo_root, event, signal, base), signal, judged)
 
 

@@ -32,13 +32,32 @@ class GateResult:
     findings: list[dict] = field(default_factory=list)
 
 
+class ListingError(Exception):
+    """A git path listing the runner could not read: the gate refuses rather than judge a change it cannot see."""
+
+
+def _nul_paths(out: bytes) -> list[str]:
+    """Paths from a `-z` listing, verbatim. Raises ListingError on anything but NUL-terminated UTF-8 entries."""
+    if not out:
+        return []
+    entries = out.split(b"\0")
+    if entries.pop() or not all(entries):
+        msg = "git listed paths that are not NUL-terminated"
+        raise ListingError(msg)
+    try:
+        return [entry.decode("utf-8") for entry in entries]
+    except UnicodeDecodeError as exc:
+        msg = f"git listed a path that is not UTF-8 ({exc.reason})"
+        raise ListingError(msg) from exc
+
+
 def _is_outside(path: str) -> bool:
     """An absolute path: only a write the gate declared in `outside_repo` reaches the runner as one."""
     return path.startswith("/") or path[1:2] == ":"
 
 
 class GateContext:
-    """Read-only git facts. Every accessor swallows git errors and returns empty."""
+    """Read-only git facts. A path listing raises ListingError on a git error; every other accessor returns empty."""
 
     def __init__(
         self,
@@ -78,10 +97,28 @@ class GateContext:
         """The git-diff scope: a commit range in CI, the staged index otherwise."""
         return [f"{self.base}...HEAD"] if self.base else ["--cached"]
 
+    def _listing(self, command: str, *args: str) -> list[str]:
+        """A `-z` path listing; raises ListingError when git fails or its output does not parse."""
+        try:
+            proc = subprocess.run(  # noqa: S603 -- reading repo facts via git is this class's whole job
+                [_GIT, "--literal-pathspecs", command, "-z", *args],
+                cwd=str(self.repo_root),
+                capture_output=True,
+                check=False,
+            )
+        except OSError as exc:
+            msg = f"git could not run ({exc})"
+            raise ListingError(msg) from exc
+        if proc.returncode:
+            first = (proc.stderr.decode("utf-8", "replace").strip().splitlines() or [""])[0]
+            msg = f"git {command} failed (exit {proc.returncode}): {first}"
+            raise ListingError(msg)
+        return _nul_paths(proc.stdout)
+
     def _git(self, *args: str) -> str:
         try:
             proc = subprocess.run(  # noqa: S603 -- reading repo facts via git is this class's whole job
-                [_GIT, "-c", "core.quotePath=false", *args],
+                [_GIT, "--literal-pathspecs", "-c", "core.quotePath=false", *args],
                 cwd=str(self.repo_root),
                 capture_output=True,
                 text=True,
@@ -99,8 +136,7 @@ class GateContext:
         return bool(self._git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").strip())
 
     def staged_paths(self, diff_filter: str = "ACMRT") -> list[str]:
-        out = self._git("diff", *self._range(), "--name-only", f"--diff-filter={diff_filter}")
-        paths = (line.strip() for line in out.splitlines() if line.strip())
+        paths = self._listing("diff", *self._range(), "--name-only", f"--diff-filter={diff_filter}")
         return [path for path in paths if self.in_scope(path)]
 
     def added_lines(self, path: str) -> list[str]:
