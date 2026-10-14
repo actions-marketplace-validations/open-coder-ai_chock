@@ -4,9 +4,9 @@
 #
 #    pip-compile --generate-hashes --output-file=requirements/brand-assets.txt --strip-extras requirements/brand-assets.in
 #
-agentseam==0.3.3 \
-    --hash=sha256:2e7c832988711bf183955a6e77d570f783d99cc394e57f456eb520a8243b334d \
-    --hash=sha256:cf8e8c5aad79ba1521c564fcab4dc03b688d91b12307db5ca7173f961ad15e1e
+agentseam==0.3.5 \
+    --hash=sha256:429bc5d55930fdad9a6c102a19f516cab9e84a1ed43fdecb1ac02b52060ac51d \
+    --hash=sha256:7a34880b81fc2b6f125874f7b05da35a754d03ed8ecc35947df7c22108d9f87e
     # via -r requirements/brand-assets.in
 attrs==26.1.0 \
     --hash=sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309 \
@@ -18,9 +18,9 @@ cairocffi==1.7.1 \
     --hash=sha256:2e48ee864884ec4a3a34bfa8c9ab9999f688286eb714a15a43ec9d068c36557b \
     --hash=sha256:9803a0e11f6c962f3b0ae2ec8ba6ae45e957a146a004697a1ac1bbf16b073b3f
     # via cairosvg
-cairosvg==2.9.0 \
-    --hash=sha256:1debb00cd2da11350d8b6f5ceb739f1b539196d71d5cf5eb7363dbd1bfbc8dc5 \
-    --hash=sha256:4b82d07d145377dffdfc19d9791bd5fb65539bb4da0adecf0bdbd9cd4ffd7c68
+cairosvg==2.9.1 \
+    --hash=sha256:861bc28ad97ce4f537d50eb3d6ee97a7afcccec9c61ac25c4e7d073fe409aec7 \
+    --hash=sha256:f91c5628e834be024a0ed4544d76261cd84016a4c73bcdf26c386495825c05a1
     # via -r requirements/brand-assets.in
 cffi==2.1.1 \
     --hash=sha256:046bfc24911b37851ee1b51aab8bffe713d89c68c6a057b09484ce9fd5f69b4e \
