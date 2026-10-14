@@ -10,6 +10,7 @@ Everyday:
   sync       Recompile + rewire so the repo matches its policies (--ci/--skills for extras)
   check      Run every truth check: validate, verify, evals, matrix (--only to narrow; --history scans past commits)
   status     Policy states and coverage (--only registry,log for more)
+  doctor     Check each client's hooks on each route: present, current, and seen running (--client X)
   witness    Export one client's redacted decision log for its agentseam evidence issue (witness export --client C)
   enable     Enable a policy by id
   disable    Disable a policy by id

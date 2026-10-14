@@ -25,10 +25,26 @@ the same file earlier versions wrote, so older readers keep working.
 | `debug` | every hook call, allows included, plus a `trace`: wire event, tool, matched rule (or "no rule matched"), the guard's exit code, per-stage timings, and the command or path cut to 200 characters with every value the scan-secrets policy would block replaced by `[redacted]` |
 
 Each line carries `ts`, `route`, `level`, `agent`, `client` (when the payload names one), `event`,
-`policy_id`, `surface`, `verdict`, `reason`, `duration_ms` and `can_ask`. The sync route adds
+`policy_id`, `surface`, `verdict`, `reason`, `duration_ms`, `can_ask` and `session_id` (the client's
+session id, when the payload carries one). The sync route adds
 `chock_version` (left out when the hook's Python has no chock installed). The plugin route adds
 `plugin` and `plugin_version` instead, never `chock_version`: a plugin runs its own bundled Python, not chock. On the sync route a compiled gate's line is written by `gate.py`
 and keeps its own fields (`kind`, `match_count`, `matches`, `rules`).
+
+## Heartbeat
+
+Where the client documents a session-start event, chock wires one more hook there (the runtime,
+with no flags) on both routes, and it writes one line per session at `info`:
+
+```json
+{"ts": "...", "event": "session_start", "route": "sync", "agent": "codex_cli", "session_id": "...", "chock_version": "0.15.2", "level": "info"}
+```
+
+The plugin route's line carries `plugin` and `plugin_version` instead of `chock_version`. The
+hook never refuses and never blocks the session; a heartbeat that cannot be written is dropped.
+Most clients fail open when a hook crashes or never loads, so a session with no heartbeat is the
+sign of a hook that did not run: `chock doctor` reports it. Antigravity, Mistral Vibe and
+Windsurf document no session-start event, so they have no heartbeat.
 
 ## Settings (a person's, only)
 
@@ -83,8 +99,8 @@ chock status --summary [--since DAYS] [--route sync|plugin] [--json]
   the client's own default applies, and an undocumented one is shown as `unknown`, never warned on.
 - The top 5 guard faults, by policy and reason code.
 - Heartbeats (`session_start` records): hook records with no `session_start` before them, and
-  `session_start` records with no hook record after them, per route and client. The log carries no
-  session id, so a session runs from one heartbeat to the next. A client agentseam records no
+  `session_start` records with no hook record after them, per route and client. The summary groups by
+  heartbeat, not by `session_id`: a session runs from one heartbeat to the next. A client agentseam records no
   session-start event for is listed as "no heartbeat available", never as missing one.
 
 ## Evidence export

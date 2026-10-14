@@ -241,3 +241,14 @@ def stop_hook_config(vendor: str, command: str) -> Any:
 def config_envelope(vendor: str) -> dict[str, Any]:
     """Wrapper keys the vendor's hook config carries beside its hooks table."""
     return {key: value for key, value in _adapters.get(vendor).hook_config((), "").items() if key != "hooks"}
+
+
+def session_start_documented(vendor: str) -> bool:
+    """Whether `vendor`'s client documents a session-start event a hook can run on."""
+    entry = VENDOR_CONFIG.get(vendor) or {}
+    return _contract.SESSION_START in (entry.get("events") or {}).values()
+
+
+def session_start_hook_config(vendor: str, command: str) -> Any:
+    """The vendor's complete hook-config document running `command` when a session starts."""
+    return _adapters.get(vendor).hook_config((_contract.SESSION_START,), command, None)

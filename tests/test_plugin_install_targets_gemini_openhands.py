@@ -39,7 +39,7 @@ def test_an_installed_manifest_holds_only_the_documented_fields(tmp_path: Path, 
 
 def test_gemini_hooks_name_the_folder_by_its_documented_variable(tmp_path: Path) -> None:
     hooks = snapshot("gemini", tmp_path)["hooks"]["hooks"]
-    assert set(hooks) == {"BeforeTool", "AfterAgent"}
+    assert set(hooks) == {"BeforeTool", "AfterAgent", "SessionStart"}
     assert all('"${extensionPath}/scripts/' in c for c in hook_commands(hooks))
 
 
@@ -68,7 +68,7 @@ def test_a_hydrated_gemini_command_reaches_the_launcher_as_exact_single_argument
 
 def test_openhands_hooks_name_the_folder_by_absolute_path(tmp_path: Path) -> None:
     found = snapshot("openhands", tmp_path)
-    assert set(found["hooks"]["hooks"]) == {"PreToolUse", "Stop"}
+    assert set(found["hooks"]["hooks"]) == {"PreToolUse", "Stop", "SessionStart"}
     assert all(hook_dir.ROOT_TOKEN in c for c in hook_commands(found["hooks"]))
     assert found["manifest"]["name"] == "demo-bundle"
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import jsonschema
@@ -22,6 +23,9 @@ from guardrails_support import (
 from chock.guardrails import toggle
 from chock.guardrails.plugin import MEMBERS, PROTECT_ID, WRAPPER, WrapError, wrap
 from chock.validation.loading import load_schema
+
+#: A member's command judges something; the session-start heartbeat judges nothing and belongs to no member.
+HEARTBEAT_FREE = re.compile(r" --(?:guard|gate) ")
 
 RM = "rm -rf /"
 
@@ -129,7 +133,7 @@ def test_the_built_in_protection_cannot_be_switched_off(tmp_path: Path, home: Pa
 @pytest.mark.parametrize("client", MERGED_CLIENTS)
 def test_every_member_hook_is_wrapped_and_the_plugin_lists_its_members(tmp_path: Path, client: str) -> None:
     plugin, _repo, commands = build(tmp_path, client)
-    member_commands = [c for c in commands if PROTECT_ID not in c]
+    member_commands = [c for c in commands if PROTECT_ID not in c and HEARTBEAT_FREE.search(c)]
     assert member_commands and all(WRAPPER in c and f"--bundle {BUNDLE_ID} --member " in c for c in member_commands)
     assert (plugin / WRAPPER).read_text(encoding="utf-8") == Path(toggle.__file__).read_text(encoding="utf-8")
     listed = json.loads((plugin / MEMBERS).read_text(encoding="utf-8"))

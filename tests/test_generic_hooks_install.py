@@ -14,6 +14,7 @@ from chock import vendors
 from chock.compile.compiler import compile_policy
 from chock.compile.emitters.in_agent import GENERIC_VENDORS
 from chock.compile.surfaces import Surface
+from chock.hooks import heartbeat
 from chock.hooks.in_agent_install import install_hooks, installed_policy_ids
 from chock.hooks.launch import LAUNCHER_REL, hook_command
 
@@ -72,7 +73,9 @@ def test_install_writes_config_runtime_and_reports(tmp_path: Path, vendor: str) 
     commands = _commands(_config(repo, vendor))
     assert any(f".chock/bin/{vendor}.py" in c for c in commands)
     compiled = repo / ".chock" / "compiled" / POLICY / "pre-tool-use" / f"{vendor}-hooks.json"
-    assert commands == _commands(json.loads(compiled.read_text(encoding="utf-8"))), "installed == compiled"
+    beat = heartbeat.sync_doc(vendor)
+    expected = _commands(json.loads(compiled.read_text(encoding="utf-8"))) + (_commands(beat) if beat else [])
+    assert commands == expected, "installed == compiled, plus the heartbeat where session start is documented"
     assert (repo / LAUNCHER_REL).is_file()
     # Compared on the parsed strings, not the JSON text: a Windows interpreter path is
     # backslash-escaped on disk and would never match its own `sys.executable`.
