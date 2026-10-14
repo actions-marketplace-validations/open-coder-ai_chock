@@ -93,6 +93,17 @@
             }
           ]
         }
+      ],
+      "SessionStart": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${extensionPath}/scripts/launch.sh\" \"${extensionPath}/scripts/gemini_cli.py\"",
+              "timeout": 45000
+            }
+          ]
+        }
       ]
     }
   }

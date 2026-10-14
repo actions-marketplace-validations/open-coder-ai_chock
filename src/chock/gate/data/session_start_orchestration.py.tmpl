@@ -1,6 +1,8 @@
 
 
 def _chock_handle_session_start(event):
+    if runtime_route(globals().get("__file__") or sys.argv[0]) != DLOG_ROUTE_SYNC:
+        return None  # a plugin's session start is its heartbeat only: arming is the repo's own hook's job
     repo_root = _repo_root()
     if not (repo_root / ".chock").is_dir():
         return None  # not a chock-managed repo

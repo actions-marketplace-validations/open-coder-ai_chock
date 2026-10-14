@@ -102,7 +102,7 @@ def gate_doc(agent: str, command: str) -> Any:
     return doc
 
 
-def _store_timeout(store_name: str, doc: Any) -> Any:
+def store_timeout(store_name: str, doc: Any) -> Any:
     """`doc` with the store's own timeout field, where agentseam's rendering writes none and chock sync has no row (kimi)."""
     field = store.hook_timeout_field(store_name)
     if field is not None:
@@ -142,7 +142,7 @@ def plugin_files(spec: Spec, policy_dir: Path, manifest: dict[str, Any], repo_ro
         gate_doc(spec.agent, hook_command(spec, "--gate", "gate.json")) if gate else None,
     )
     if hooks is not None:
-        files[Path(shape["hooks"])] = json.dumps(_store_timeout(spec.store, hooks), indent=2) + "\n"
+        files[Path(shape["hooks"])] = json.dumps(store_timeout(spec.store, hooks), indent=2) + "\n"
         files.update(_runtime_files(spec.agent))
     if script:
         guard_gate.place(files, store.guard_files(policy_dir, script))

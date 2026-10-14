@@ -49,6 +49,11 @@
         "event": "Stop",
         "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${KIMI_PLUGIN_ROOT}/scripts/launch.sh\" \"${KIMI_PLUGIN_ROOT}/scripts/chock_bundle.py\" --verify \"${KIMI_PLUGIN_ROOT}/scripts/kimi_code.py\" --gate \"${KIMI_PLUGIN_ROOT}/scripts/chock-guardrails-protect/gate.json\" --stop",
         "timeout": 45
+      },
+      {
+        "event": "SessionStart",
+        "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${KIMI_PLUGIN_ROOT}/scripts/launch.sh\" \"${KIMI_PLUGIN_ROOT}/scripts/kimi_code.py\"",
+        "timeout": 45
       }
     ]
   },
@@ -71,6 +76,11 @@
     {
       "event": "Stop",
       "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${KIMI_PLUGIN_ROOT}/scripts/launch.sh\" \"${KIMI_PLUGIN_ROOT}/scripts/chock_bundle.py\" --verify \"${KIMI_PLUGIN_ROOT}/scripts/kimi_code.py\" --gate \"${KIMI_PLUGIN_ROOT}/scripts/chock-guardrails-protect/gate.json\" --stop",
+      "timeout": 45
+    },
+    {
+      "event": "SessionStart",
+      "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${KIMI_PLUGIN_ROOT}/scripts/launch.sh\" \"${KIMI_PLUGIN_ROOT}/scripts/kimi_code.py\"",
       "timeout": 45
     }
   ]

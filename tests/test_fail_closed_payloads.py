@@ -15,7 +15,7 @@ from pathlib import Path
 
 import client_payloads
 import pytest
-from bundle_fixtures import ALL_ROOTS, BUNDLE_ID, bundle, hook_commands, make_members, project, write
+from bundle_fixtures import ALL_ROOTS, BUNDLE_ID, bundle, judging_commands, make_members, project, write
 from conftest import run_hook_command
 from test_unreadable_stop import STOP_REFUSALS
 
@@ -75,7 +75,7 @@ def _refused(client: str, proc: object) -> bool:
 
 
 def _commands(package: Path) -> list[str]:
-    return hook_commands(json.loads(next(package.rglob("hooks.json")).read_text(encoding="utf-8")))
+    return judging_commands(json.loads(next(package.rglob("hooks.json")).read_text(encoding="utf-8")))
 
 
 def _run(command: str, repo: Path, payload: str, roots: Path | None) -> object:
@@ -154,7 +154,7 @@ def test_every_cursor_pre_tool_entry_sets_fail_closed_alone_and_merged(tmp_path:
     ]
     for files in packages:
         doc = json.loads(next(text for rel, text in files.items() if rel.name == "hooks.json"))
-        entries = [e for event, group in doc["hooks"].items() if event != "stop" for e in group]
+        entries = [e for event, group in doc["hooks"].items() if event not in ("stop", "sessionStart") for e in group]
         assert entries
         assert all(entry.get("failClosed") is True for entry in entries), entries
 

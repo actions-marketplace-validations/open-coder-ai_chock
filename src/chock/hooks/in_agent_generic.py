@@ -8,6 +8,7 @@ from typing import Any
 
 from chock import vendors
 from chock.emit import write_generated_json
+from chock.hooks import heartbeat
 from chock.hooks.in_agent_toml import install_toml, installed_toml_ids
 from chock.hooks.runtime_vendor import runtime_rel, vendor_runtime
 
@@ -141,6 +142,9 @@ def install_generic(repo_root: Path, vendor: str, *, uninstall: bool = False) ->
     vendor_runtime(repo_root, vendor)
     for _policy_id, fragment in fragments:
         _merge(settings, fragment)
+    beat = heartbeat.sync_doc(vendor)
+    if isinstance(beat, dict):
+        _merge(settings, beat)
     config_path.parent.mkdir(parents=True, exist_ok=True)
     write_generated_json(config_path, settings)
     return [policy_id for policy_id, _ in fragments]

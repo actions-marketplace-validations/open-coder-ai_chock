@@ -18,6 +18,7 @@ from bundle_fixtures import (
     bundle,
     denies,
     hook_commands,
+    judging_commands,
     make_members,
     project,
     run_command,
@@ -143,8 +144,10 @@ def test_every_member_keeps_its_own_skills_scripts_and_sibling_package(tmp_path:
 @pytest.mark.parametrize("client", MERGED_CLIENTS)
 def test_no_path_or_hook_command_collides_and_every_command_reaches_a_shipped_file(tmp_path: Path, client: str) -> None:
     out, _ = _merged(tmp_path, client)
-    commands = hook_commands(json.loads(_hooks_file(out).read_text(encoding="utf-8")))
-    targets = {re.search(r"--(?:guard|gate) \"?[^\s\"]*?(scripts/[^\s\"]+)", c).group(1) for c in commands}
+    doc = json.loads(_hooks_file(out).read_text(encoding="utf-8"))
+    commands = hook_commands(doc)
+    judging = judging_commands(doc)
+    targets = {re.search(r"--(?:guard|gate) \"?[^\s\"]*?(scripts/[^\s\"]+)", c).group(1) for c in judging}
     protect = f"scripts/{PROTECT_ID}"
     expected = {f"scripts/{GUARD_ID}/{GUARD_ID}.py", f"{protect}/{PROTECT_ID}.py"}
     if gate_package.gate_reaches(CLIENTS[client].agent):

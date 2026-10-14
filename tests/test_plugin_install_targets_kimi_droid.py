@@ -68,7 +68,7 @@ def test_kimi_ships_its_hooks_in_the_manifest_and_names_its_skills(tmp_path: Pat
     assert "hooks/hooks.json" not in found["files"] and "kimi.plugin.json" in found["files"]
     manifest = found["manifest"]
     assert manifest["skills"] == "./skills/" and set(manifest) <= set(kimi_code.MANIFEST_KEYS)
-    assert {rule["event"] for rule in manifest["hooks"]} == {"PreToolUse", "Stop"}
+    assert {rule["event"] for rule in manifest["hooks"]} == {"PreToolUse", "Stop", "SessionStart"}
     # Every rule holds only the four documented [[hooks]] fields, with chock's 45 s over Kimi's 30 s default.
     assert all(set(rule) <= {"event", "matcher", "command", "timeout"} for rule in manifest["hooks"])
     assert all(rule["timeout"] == 45 for rule in manifest["hooks"])
@@ -80,7 +80,7 @@ def test_kimi_ships_its_hooks_in_the_manifest_and_names_its_skills(tmp_path: Pat
 
 def test_droid_ships_a_top_level_event_map_under_its_root_variable(tmp_path: Path) -> None:
     found = snapshot("droid", tmp_path)
-    assert set(found["hooks"]) == {"PreToolUse", "Stop"}
+    assert set(found["hooks"]) == {"PreToolUse", "Stop", "SessionStart"}
     assert set(found["manifest"]) <= set(factory_droid.MANIFEST_KEYS)
     assert "agentseam records that Droid degrades an ask" in factory_droid.manifest_posture(enforced=True, guard=True)
 
