@@ -136,9 +136,7 @@ def test_a_hunk_that_cannot_be_placed_leaves_the_file_out(tmp_path: Path, patch:
     assert patch_image.patched_files(_codex(patch), _repo(tmp_path)) == {}
 
 
-@pytest.mark.parametrize(
-    "command", ["ls -la", "*** Begin Patch with no end", 42, None, "*** End of File\n*** End Patch\n*** Begin Patch"]
-)
+@pytest.mark.parametrize("command", ["ls -la", 42, None, "*** End of File\n*** End Patch"])
 def test_anything_that_is_not_a_patch_is_left_alone(tmp_path: Path, command) -> None:
     event = _codex(command)
     assert patch_image.patched_files(event, tmp_path) == {}
@@ -146,9 +144,18 @@ def test_anything_that_is_not_a_patch_is_left_alone(tmp_path: Path, command) -> 
     assert write_gate.writes_from_event(event, tmp_path) == {}
 
 
-def test_lines_before_the_first_file_and_an_end_of_file_marker_with_no_hunk_are_ignored() -> None:
-    patch = f"*** Begin Patch\nstray\n*** Update File: {REPO}\n*** End of File\n*** End Patch"
-    assert patch_image.parse_patch(patch) == [("update", REPO, None, [])]
+@pytest.mark.parametrize(
+    "patch",
+    [
+        "*** Begin Patch with no end",
+        f"*** Begin Patch\nstray\n*** Update File: {REPO}\n-a\n+b\n*** End Patch",
+        f"*** Begin Patch\n*** Update File: {REPO}\n*** End of File\n*** End Patch",
+    ],
+)
+def test_a_stray_line_or_an_update_with_no_hunk_is_refused(patch: str) -> None:
+    """Codex rejects these texts; the gate refuses rather than judge a guess (GAP-3e)."""
+    with pytest.raises(ValueError, match="does not parse"):
+        patch_image.parse_patch(patch)
 
 
 def test_a_payload_with_no_tool_input_is_not_a_patch() -> None:
@@ -194,8 +201,9 @@ def test_a_gate_reading_added_lines_sees_only_what_the_patch_adds(tmp_path: Path
     assert write_gate.evaluate_gate(["--gate", str(gate)], _codex(UPDATE)) is None
 
 
-def test_parsing_stops_at_the_text_end_when_there_is_no_end_marker() -> None:
-    assert patch_image.parse_patch("*** Begin Patch\n*** Add File: a.txt\n+x") == [("add", "a.txt", None, ["x"])]
+def test_a_patch_with_no_end_marker_is_refused() -> None:
+    with pytest.raises(ValueError, match="no End marker"):
+        patch_image.parse_patch("*** Begin Patch\n*** Add File: a.txt\n+x")
 
 
 def test_a_deleted_file_adds_no_lines() -> None:

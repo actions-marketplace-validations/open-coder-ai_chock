@@ -16,13 +16,18 @@ documented grammar::
     *** End of File               optional: the hunk ends the file
     *** End Patch
 
-Each added or updated file is rebuilt as the patch would leave it, from the file on disk. A
-hunk that cannot be placed leaves that file out, as the call itself would fail; the turn's end
-judges whatever lands. Extracted into the vendored runtime, so stdlib-only.
+The patch is read by Codex's own state machine (codex-rs apply-patch: streaming_parser.rs),
+so a marker is a marker only where Codex reads one; a patch Codex would not parse raises
+ValueError, which refuses the call. Each added or updated file is rebuilt as Codex would
+leave it (file_update.rs, seek_sequence.rs, text_file.rs), from the file on disk as earlier
+operations in the same call leave it, with paths taken from the agent's working directory.
+A hunk that cannot be placed leaves that file out, as the call itself would fail; the turn's
+end judges whatever lands. Extracted into the vendored runtime, so stdlib-only.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 _BEGIN = "*** Begin Patch"
@@ -32,14 +37,26 @@ _DELETE = "*** Delete File: "
 _UPDATE = "*** Update File: "
 _MOVE = "*** Move to: "
 _EOF = "*** End of File"
+_ENVIRONMENT = "*** Environment ID:"
 _HUNK = "@@"
+_HUNK_ANCHOR = "@@ "
 _OPS = (("add", _ADD), ("delete", _DELETE), ("update", _UPDATE))
 #: Where the patch sits in `tool_input`: Codex's `command`; Copilot CLI's `input` or `patch`, else the bare string.
 _PATCH_KEYS = ("command", "input", "patch")
+#: Rust's char::is_whitespace, which Codex's trim() uses; str.strip() would also strip \x1c-\x1f.
+_PATCH_SPACE = "\t\n\x0b\x0c\r \x85\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000"
+#: seek_sequence's last pass: typographic punctuation and odd spaces read as their ASCII form.
+_PATCH_ASCII = str.maketrans(
+    dict.fromkeys("\u2010\u2011\u2012\u2013\u2014\u2015\u2212", "-")
+    | dict.fromkeys("\u2018\u2019\u201a\u201b", "'")
+    | dict.fromkeys("\u201c\u201d\u201e\u201f", '"')
+    | dict.fromkeys("\xa0\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u202f\u205f\u3000", " ")
+)
+_PATCH_ENDINGS = ("\r\n", "\r", "\n")
 
 
 def patch_text(event):
-    """The patch an apply_patch call carries, from its first to its last marker; None otherwise."""
+    """The text an apply_patch call carries, from its first Begin marker on; None when it has none."""
     raw = getattr(event, "raw", None)
     tool_input = raw.get("tool_input") if isinstance(raw, dict) else None
     command = tool_input if isinstance(tool_input, str) else None
@@ -50,74 +67,267 @@ def patch_text(event):
     if isinstance(command, list):
         command = "\n".join(part for part in command if isinstance(part, str))
     start = command.find(_BEGIN) if isinstance(command, str) else -1
-    end = command.find(_END, start) if start >= 0 else -1
-    return command[start : end + len(_END)] if end >= 0 else None
+    return command[start:] if start >= 0 else None
 
 
-def _body_line(current, line):
-    """Add one line under the file operation `current` is reading."""
-    if line.startswith(_MOVE):
-        current[2] = line[len(_MOVE) :].strip()
-    elif line.startswith(_HUNK):
-        current[3].append([line[len(_HUNK) :].strip(), [], False])
-    elif line.startswith(_EOF):
-        if current[3]:
-            current[3][-1][2] = True
-    elif current[0] == "add":
-        current[3].append(line[1:] if line.startswith("+") else line)
+def _patch_refuse(number, line, why):
+    message = f"the apply_patch text does not parse at line {number} ({line[:80]!r}): {why}"
+    raise ValueError(message)
+
+
+def _patch_header(state, text):
+    """Open a file operation or end the patch when `text` is a header; False when it is not one."""
+    if text == _END:
+        _patch_not_empty(state, text)
+        state["mode"] = "ended"
+        return True
+    for op, marker in _OPS:
+        if text.startswith(marker):
+            _patch_not_empty(state, text)
+            state["ops"].append({"op": op, "path": text[len(marker) :], "move": None, "body": []})
+            state["mode"] = op
+            return True
+    return False
+
+
+def _patch_not_empty(state, text):
+    """Codex's ensure_update_hunk_is_not_empty: an update with no hunk, or an empty last hunk, refuses."""
+    last = state["ops"][-1] if state["ops"] else None
+    if last is None or last["op"] != "update":
+        return
+    if not last["body"] and state["mode"] == "update":
+        _patch_refuse(state["number"], text, f"update of {last['path']!r} has no hunk")
+    if last["body"] and not (last["body"][-1]["old"] or last["body"][-1]["new"]):
+        _patch_refuse(state["number"], text, "a hunk has no lines")
+
+
+def _patch_chunk(op, context=None):
+    chunk = {"context": context, "old": [], "new": [], "pairs": [], "eof": False, "added": []}
+    op["body"].append(chunk)
+    return chunk
+
+
+def _patch_hunk_marker(state, op, text):
+    """An `@@` or `*** End of File` line in an update; False when `text` is neither."""
+    chunks = op["body"]
+    anchored = text == _HUNK or text.startswith(_HUNK_ANCHOR)
+    if anchored and chunks and not (chunks[-1]["old"] or chunks[-1]["new"]):
+        _patch_refuse(state["number"], text, "a hunk has no lines")
+    if anchored:
+        _patch_chunk(op, text[len(_HUNK_ANCHOR) :] if text != _HUNK else None)
+        return True
+    if text != _EOF:
+        return False
+    if chunks and not (chunks[-1]["old"] or chunks[-1]["new"]):
+        _patch_refuse(state["number"], text, "a hunk has no lines")
+    if chunks:
+        chunks[-1]["eof"] = True
+    return True
+
+
+def _patch_change(op, line):
+    """A context, added or removed line of an update; False when `line` is none of those."""
+    kind = line[:1] if line else " "
+    if kind not in (" ", "+", "-"):
+        return False
+    chunk = op["body"][-1] if op["body"] else _patch_chunk(op)
+    text = line[1:]
+    if kind == " ":
+        chunk["pairs"].append((len(chunk["old"]), len(chunk["new"])))
+    if kind != "+":
+        chunk["old"].append(text)
+    if kind != "-":
+        chunk["new"].append(text)
+    if kind == "+":
+        chunk["added"].append(text)
+    return True
+
+
+def _patch_update_line(state, op, line):
+    """One line of an update, read as Codex's UpdateFile mode reads it."""
+    text = line.rstrip(_PATCH_SPACE)
+    if _patch_header(state, text):
+        return
+    if op["body"] and op["body"][-1]["eof"]:
+        if not text:
+            return
+        if text != _HUNK and not text.startswith(_HUNK_ANCHOR):
+            _patch_refuse(state["number"], line, "expected an @@ hunk after End of File")
+    if not op["body"] and op["move"] is None and text.startswith(_MOVE):
+        op["move"] = text[len(_MOVE) :]
+        return
+    if not (_patch_hunk_marker(state, op, text) or _patch_change(op, line)):
+        _patch_refuse(state["number"], line, "an update line must start with ' ', '+', '-' or @@")
+
+
+def _patch_line(state, line):
+    """Feed one patch line to the state machine."""
+    mode = state["mode"]
+    trimmed = line.strip(_PATCH_SPACE)
+    if mode == "update":
+        _patch_update_line(state, state["ops"][-1], line)
+    elif mode == "begun" and trimmed.startswith(_ENVIRONMENT) and trimmed[len(_ENVIRONMENT) :].strip(_PATCH_SPACE):
+        state["mode"] = "begun:env"
+    elif _patch_header(state, trimmed):
+        pass
+    elif mode == "add" and line.startswith("+"):
+        state["ops"][-1]["body"].append(line[1:])
     else:
-        if not current[3]:
-            current[3].append(["", [], False])
-        current[3][-1][1].append(line if line[:1] in (" ", "-", "+") else " " + line)
+        _patch_refuse(state["number"], line, "not a file header (Add File, Delete File, Update File)")
+
+
+def _patch_lines(text):
+    """`text` split on "\\n" as Codex splits it: str::lines, then its parser, each drop one trailing "\\r"."""
+    lines = text.split("\n")
+    if lines and not lines[-1]:
+        lines.pop()
+    return [line.removesuffix("\r").removesuffix("\r") for line in lines]
+
+
+def _patch_one(lines, start, operations):
+    """Read the patch whose Begin line is `lines[start]` into `operations`; the index after its End."""
+    if lines[start].strip(_PATCH_SPACE) != _BEGIN:
+        _patch_refuse(start + 1, lines[start], "the Begin marker must stand alone on its line")
+    state = {"mode": "begun", "ops": operations, "number": start + 1}
+    final = next((i for i in range(len(lines) - 1, start, -1) if lines[i].strip(_PATCH_SPACE)), None)
+    for index in range(start + 1, len(lines)):
+        state["number"] = index + 1
+        line = lines[index]
+        if index == final and line.strip(_PATCH_SPACE) == _END:
+            _patch_not_empty(state, _END)
+            return index + 1
+        _patch_line(state, line)
+        if state["mode"] == "ended":
+            return index + 1
+    return _patch_refuse(len(lines), lines[-1], "the patch has no End marker")
 
 
 def parse_patch(patch):
-    """[(op, path, moved_to, hunks)]: op is add/delete/update; a hunk is (anchor, lines, at_eof)."""
+    """[(op, path, moved_to, body)] for every patch in `patch`; ValueError when Codex would not parse one.
+
+    op is add/delete/update; an add's body is its lines, an update's its hunks (dicts: context, old,
+    new, pairs, eof, added).
+    """
+    lines = _patch_lines(patch)
     operations = []
-    for line in patch.replace("\r\n", "\n").split("\n")[1:]:
-        if line.startswith(_END):
-            break
-        opened = next(((op, marker) for op, marker in _OPS if line.startswith(marker)), None)
-        if opened is not None:
-            operations.append([opened[0], line[len(opened[1]) :].strip(), None, []])
-        elif operations:
-            _body_line(operations[-1], line)
-    return [tuple(operation) for operation in operations]
+    index = 0
+    while index < len(lines):
+        if _BEGIN in lines[index]:
+            lines[index] = lines[index][lines[index].index(_BEGIN) :]
+            index = _patch_one(lines, index, operations)
+        else:
+            index += 1
+    return [(op["op"], op["path"], op["move"], op["body"]) for op in operations]
 
 
-def _find(lines, wanted, start):
-    """Where `wanted` starts in `lines` at or after `start`, exactly or ignoring trailing space."""
-    for loose in (False, True):
-        for index in range(start, len(lines) - len(wanted) + 1):
-            window = lines[index : index + len(wanted)]
-            if window == wanted or (loose and [w.rstrip() for w in window] == [w.rstrip() for w in wanted]):
-                return index
+def _patch_match(lines, pattern, start, same):
+    for index in range(start, len(lines) - len(pattern) + 1):
+        if all(same(lines[index + i]) == same(want) for i, want in enumerate(pattern)):
+            return index
     return None
 
 
+def _seek(lines, pattern, start, *, eof):
+    """Codex's seek_sequence: exact, then ignoring trailing space, then both ends, then ASCII punctuation."""
+    if not pattern:
+        return start
+    if len(pattern) > len(lines):
+        return None
+    begin = max(len(lines) - len(pattern), start) if eof else start
+    for same in (
+        lambda s: s,
+        lambda s: s.rstrip(_PATCH_SPACE),
+        lambda s: s.strip(_PATCH_SPACE),
+        lambda s: s.strip(_PATCH_SPACE).translate(_PATCH_ASCII),
+    ):
+        found = _patch_match(lines, pattern, begin, same)
+        if found is not None:
+            return found
+    return None
+
+
+def _patch_split(chunk, start, old, new):
+    """Codex's replacements for one placed hunk: its context lines keep the file's own text."""
+    out = []
+    old_start = new_start = 0
+    for old_at, new_at in chunk["pairs"]:
+        if old_at >= len(old) or new_at >= len(new):
+            break
+        if (old_start, new_start) != (old_at, new_at):
+            out.append((start + old_start, old_at - old_start, new[new_start:new_at]))
+        old_start, new_start = old_at + 1, new_at + 1
+    if old_start != len(old) or new_start != len(new):
+        out.append((start + old_start, len(old) - old_start, new[new_start:]))
+    return out
+
+
+def _patch_place(chunk, lines, cursor):
+    """(replacements, cursor) for one hunk, or None when it cannot be placed."""
+    if chunk["context"] is not None:
+        found = _seek(lines, [chunk["context"]], cursor, eof=False)
+        if found is None:  # looser than Codex, which fails here: judging more never lets less through
+            anchor = chunk["context"].strip(_PATCH_SPACE)
+            found = next((i for i in range(cursor, len(lines)) if anchor in lines[i]), None)
+        if found is None:
+            return None
+        cursor = found + 1
+    old, new = chunk["old"], chunk["new"]
+    if not old:
+        return [(len(lines), 0, list(new))], cursor
+    found = _seek(lines, old, cursor, eof=chunk["eof"])
+    if found is None and old[-1] == "":
+        old = old[:-1]
+        new = new[:-1] if new and new[-1] == "" else new
+        found = _seek(lines, old, cursor, eof=chunk["eof"])
+    if found is None:
+        return None
+    return _patch_split(chunk, found, old, new), found + len(old)
+
+
+def _patch_source(text):
+    """[(line, ending)] as text_file.rs splits a file: on CRLF, CR or LF."""
+    lines = []
+    start = index = 0
+    while index < len(text):
+        ending = next((e for e in _PATCH_ENDINGS if text.startswith(e, index)), None)
+        if ending is None:
+            index += 1
+            continue
+        lines.append((text[start:index], ending))
+        index += len(ending)
+        start = index
+    if start < len(text):
+        lines.append((text[start:], None))
+    return lines
+
+
 def apply_hunks(text, hunks):
-    """`text` with the hunks applied in order, or None when one cannot be placed."""
-    lines = text.split("\n")
+    """`text` with the hunks applied as Codex applies them, or None when one cannot be placed."""
+    source = _patch_source(text)
+    lines = [line for line, _ in source]
+    preferred = next((ending for _, ending in source if ending), "\n")
+    replacements = []
     cursor = 0
-    for anchor, body, at_eof in hunks:
-        if anchor:
-            found = _find(lines, [anchor], cursor)
-            if found is None:
-                found = next((i for i in range(cursor, len(lines)) if anchor.strip() in lines[i]), None)
-            if found is None:
-                return None
-            cursor = found + 1
-        old = [line[1:] for line in body if line[:1] in (" ", "-")]
-        new = [line[1:] for line in body if line[:1] in (" ", "+")]
-        if not old:
-            at = len(lines) - (1 if lines and lines[-1] == "" else 0) if at_eof else cursor
-        else:
-            at = _find(lines, old, cursor)
-            if at is None:
-                return None
-        lines[at : at + len(old)] = new
-        cursor = at + len(new)
-    return "\n".join(lines)
+    for chunk in hunks:
+        placed = _patch_place(chunk, lines, cursor)
+        if placed is None:
+            return None
+        replacements.extend(placed[0])
+        cursor = placed[1]
+    out = []
+    done = 0
+    for start, length, new in sorted(replacements, key=lambda r: r[0]):
+        out.extend(source[done:start])
+        out.extend((line, preferred) for line in new)
+        done = start + length
+    out.extend(source[done:])
+    return "".join(line + (ending or preferred) for line, ending in out)
+
+
+def _patch_key(event, path):
+    """`path` as the call names it: relative to the agent's working directory when the event has one."""
+    cwd = getattr(event, "cwd", None)
+    return os.path.normpath(os.path.join(cwd, path)) if cwd else path
 
 
 def _read(root, path):
@@ -125,7 +335,7 @@ def _read(root, path):
     if not target.is_absolute():
         target = Path(root if root is not None else Path.cwd()) / target
     try:
-        return target.read_text(encoding="utf-8")
+        return target.read_bytes().decode("utf-8")
     except (OSError, UnicodeDecodeError):
         return None
 
@@ -136,14 +346,23 @@ def patched_files(event, root=None):
     if patch is None:
         return {}
     files = {}
+    disk = {}
     for op, path, moved_to, body in parse_patch(patch):
+        key = _patch_key(event, path)
         if op == "add":
-            files[path] = "\n".join(body) + "\n"
-        elif op == "update":
-            before = _read(root, path)
+            disk[key] = files[key] = "".join(line + "\n" for line in body)
+        elif op == "delete":
+            disk[key] = None
+            files.pop(key, None)
+        else:
+            before = disk[key] if key in disk else _read(root, key)
             after = apply_hunks(before, body) if before is not None else None
             if after is not None:
-                files[moved_to or path] = after
+                target = _patch_key(event, moved_to) if moved_to else key
+                if target != key:
+                    disk[key] = None
+                    files.pop(key, None)
+                disk[target] = files[target] = after
     return files
 
 
@@ -154,8 +373,10 @@ def patch_added(event):
         return {}
     added = {}
     for op, path, moved_to, body in parse_patch(patch):
+        key = _patch_key(event, moved_to or path)
         if op == "add":
-            added[path] = "\n".join(body)
+            added[key] = "\n".join(body)
         elif op == "update":
-            added[moved_to or path] = "\n".join(line[1:] for _, hunk, _ in body for line in hunk if line[:1] == "+")
+            lines = [line for chunk in body for line in chunk["added"]]
+            added[key] = "\n".join(filter(None, (added.get(key, ""), *lines)))
     return added
