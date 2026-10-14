@@ -703,6 +703,8 @@ LOG_CALL = 'call'
 
 LOG_CLAIMS = '.calls'
 
+_LOG_PER_HOOK = ('policy_id', 'plugin', 'plugin_version', 'kind', 'match_count', 'matches', 'rules')
+
 LOG_CLAIM_SECONDS = 600
 
 _LOG_CLAIM_PRUNER = '0'
@@ -779,7 +781,10 @@ def _log_prune_claims(folder):
             continue
 
 def log_claim(path, record, call):
-    """True for the first hook to log this tool call's plain allow; False for every later one. Fails open."""
+    """True for the first hook to log this tool call's plain allow; False for every later one. Fails open.
+
+    The call is the client's `tool_use_id`, else (session, second, target): identical calls in one second are one.
+    """
     key = '\x00'.join((str(record.get('session_id')), str(record.get('target')), call or log_now()))
     name = _chock_hashlib.sha256(key.encode('utf-8', 'backslashreplace')).hexdigest()[:_LOG_CLAIM_NAME]
     folder = _chock_Path(path).parent / LOG_CLAIMS
@@ -874,7 +879,8 @@ def log_append(path, record, max_bytes=LOG_DEFAULT_MAX_BYTES):
 def log_write(path, record, repo_root):
     """Write `record` to `path` when the level in force for `repo_root` admits it, stamped with its level. Raises on I/O.
 
-    At info a plain allowed action is written once per tool call (`call`, never itself written), by the first hook.
+    A plain allowed action is written once per tool call (`call`, never itself written), by the first hook and
+    naming no policy; at debug every later hook still writes its own line.
     """
     level, size = log_settings(repo_root)
     record = dict(record)
@@ -883,8 +889,11 @@ def log_write(path, record, repo_root):
     kept = 'would_action' in record and _chock_os.environ.get(LOG_LEGACY_ENV) == '0'
     if not (kept or log_admits(level, record_level)):
         return
-    if level == LOG_INFO and log_plain_action(record) and (not log_claim(path, record, call)):
-        return
+    if log_plain_action(record):
+        if log_claim(path, record, call):
+            record = {key: value for key, value in record.items() if key not in _LOG_PER_HOOK}
+        elif level == LOG_INFO:
+            return
     log_append(path, {**record, 'level': record_level}, size)
 
 GUARD_VIOLATION = 1

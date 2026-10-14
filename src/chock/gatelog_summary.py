@@ -15,7 +15,15 @@ from agentseam import contract
 from agentseam import matrix as _matrix
 
 from chock.gatelog import JSON_HELP, REPO_HELP, SINCE_HELP, positive_days
-from chock.gatelog_read import HEARTBEAT_EVENT, ROUTES, read_events, record_level, record_route
+from chock.gatelog_read import (
+    HEARTBEAT_EVENT,
+    ROUTES,
+    allowed_call,
+    allowed_calls,
+    read_events,
+    record_level,
+    record_route,
+)
 from chock.gatelog_report import _printable
 from chock.hook_timeout import hook_timeout
 
@@ -133,7 +141,8 @@ def summary(events: list[dict[str, Any]]) -> dict[str, Any]:
         "records": total,
         "debug_records": sum(record_level(r) != "info" for r in hooks),
         "rates": {k: {"count": n, "rate": round(n / total, 4) if total else 0.0} for k, n in counts.items()},
-        "policies": _tally(hooks, "policy_id"),
+        "allowed_calls": allowed_calls(hooks),
+        "policies": _tally([r for r in hooks if not allowed_call(r)], "policy_id"),
         "clients": _tally(hooks, "agent"),
         "hooks": _durations(hooks),
         "faults": _faults(hooks),
@@ -191,6 +200,7 @@ def render_text(report: dict[str, Any], since: int | None = None) -> str:
         return head[0] + "\nNo records yet."
     rates = report["rates"]
     lines = [*head, "Rates: " + ", ".join(f"{k} {_pct(rates[k])}" for k in (*VERDICTS, "fault"))]
+    lines.append(f"Allowed tool calls: {report['allowed_calls']} (each counted once, never toward a policy)")
     if report["records"]:
         lines += ["", *_table(report["policies"], "policy_id"), "", *_table(report["clients"], "agent")]
         lines += ["", *_hook_lines(report["hooks"])]
