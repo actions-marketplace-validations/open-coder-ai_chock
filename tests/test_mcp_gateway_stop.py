@@ -128,7 +128,10 @@ def test_stop_client_and_roots_parse():
     assert stop_client("codex-mcp-client") == "codex"
     assert stop_client("Visual Studio Code") is None
     assert stop_client(5) is None
-    assert initialize_roots({"roots": [{"uri": "file:///a%20b"}, "/c", {"uri": "https://x"}, 3]}) == ["/a b", "/c"]
+    assert initialize_roots({"roots": [{"uri": "file:///a%20b"}, "/c", {"uri": "https://x"}, 3]}) == [
+        str(Path("/a b")),
+        "/c",
+    ]
     assert initialize_roots(None) == []
 
 
