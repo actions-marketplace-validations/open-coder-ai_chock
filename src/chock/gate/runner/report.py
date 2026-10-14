@@ -122,7 +122,7 @@ def _shown(char: str) -> str:
 def inert(value: object) -> str:
     """`value` as one line of text, each unsafe character written as a visible escape (ESC as `\\x1b`).
 
-    The same rule as `chock.display.inert`, vendored: the runtime imports nothing from chock.
+    The same rule as `chock.display.inert`, vendored so the runtime stays self-contained.
     """
     text = str(value)
     return text if text.isprintable() else "".join(map(_shown, text))
