@@ -39,8 +39,10 @@ def _printable(text: object) -> str:
     return "".join(ch for ch in str(text) if ch.isprintable())
 
 
-def _log(repo: Path, event: str, fields: dict[str, object]) -> None:
+def _log(repo: Path | None, event: str, fields: dict[str, object]) -> None:
     """One local line: who stopped or resumed, when, and the scope. Best effort: a log failure never undoes the act."""
+    if repo is None:
+        return
     record = {"route": "sync", "policy_id": HALT_POLICY, "event": event, **fields}
     record["actor"] = actor_of(stop_agent_signal(repo))
     try:
@@ -49,7 +51,7 @@ def _log(repo: Path, event: str, fields: dict[str, object]) -> None:
         sys.stderr.write(f"chock: the stop is in place, but its log line was not written: {exc}\n")
 
 
-def _agent_refused(repo: Path, event: str) -> bool:
+def _agent_refused(repo: Path | None, event: str, fields: dict[str, object] | None = None) -> bool:
     """Only a person changes a stop (the actor rule): an agent's `chock stop` or `chock resume` is refused, logged."""
     signal = stop_agent_signal(repo)
     if signal is None:
@@ -58,7 +60,7 @@ def _agent_refused(repo: Path, event: str) -> bool:
         f"chock: refused: this shell is marked as an agent's ({signal}). Only a person stops or resumes "
         "agents; they run this from their own shell.\n"
     )
-    _log(repo, event, {"verdict": "block", "reason": HALT_REASON})
+    _log(repo, event, {"verdict": "block", "reason": HALT_REASON, **(fields or {})})
     return True
 
 
@@ -97,9 +99,11 @@ def stop_line(repo: Path) -> str | None:
 
 def print_stop(repo: Path, stream: TextIO) -> None:
     """`chock status` leads with a stop in force, before anything else it shows."""
-    stopped = stop_line(repo)
-    if stopped:
-        stream.write(stopped + "\n")
+    from chock.stop_everywhere import everywhere_line  # noqa: PLC0415 -- it imports this module
+
+    for stopped in (everywhere_line(), stop_line(repo)):
+        if stopped:
+            stream.write(stopped + "\n")
 
 
 def _write_private(path: Path, text: str) -> None:
@@ -123,8 +127,13 @@ def stop_main(argv: list[str] | None) -> int:
     _repo_arg(parser)
     parser.add_argument("--agent", choices=in_agent_vendors(), help="Stop this one client only (default: every agent)")
     parser.add_argument("--reason", default="", help="Why: the agent is told `stopped: <reason>`")
+    parser.add_argument("--everywhere", action="store_true", help="Stop every agent on this machine, in every repo")
     args = parser.parse_args(argv)
     repo = Path(args.repo).resolve()
+    if args.everywhere:
+        from chock.stop_everywhere import stop_everywhere  # noqa: PLC0415 -- it imports this module
+
+        return stop_everywhere(repo, args.agent, args.reason)
     if _agent_refused(repo, "repo_stop"):
         return 1
     doc = {"scope": args.agent or HALT_ALL, "reason": args.reason, "who": git_email(repo) or _UNKNOWN}
@@ -152,7 +161,13 @@ def resume_main(argv: list[str] | None) -> int:
     """Remove `.chock/stop.json`: agents' tool calls, commits and pushes are judged by the policies again."""
     parser = argparse.ArgumentParser(prog="chock resume", description=resume_main.__doc__)
     _repo_arg(parser)
-    repo = Path(parser.parse_args(argv).repo).resolve()
+    parser.add_argument("--everywhere", action="store_true", help="Lift the machine-wide stop only")
+    args = parser.parse_args(argv)
+    repo = Path(args.repo).resolve()
+    if args.everywhere:
+        from chock.stop_everywhere import resume_everywhere  # noqa: PLC0415 -- it imports this module
+
+        return resume_everywhere(repo)
     if _agent_refused(repo, "repo_resume") or not _person_confirms(repo):
         return 1
     path, entry = repo.joinpath(*HALT_PARTS), halt_registry_entry(repo)

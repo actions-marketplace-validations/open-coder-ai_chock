@@ -32,7 +32,7 @@ from .constants import (
     VERDICT_ERROR,
 )
 from .context import GateResult, ListingError
-from .halt import HALT_POLICY, HALT_REASON, halt_find, halt_git_roots, halt_message
+from .halt import HALT_POLICY, HALT_REASON, halt_everywhere_read, halt_find, halt_git_roots, halt_message
 from .kinds import KINDS
 from .log import _actor, _held_record, _log_halt, _log_outcome, _log_script_hook
 from .material import _context, _params, own_paths
@@ -120,7 +120,7 @@ def halt_git(repo_root: Path, event: str, policy_id: str | None = None) -> tuple
     signal = stop_agent_signal(repo_root)
     who = _actor(signal)
     client = str(who["actor"]).removeprefix(ACTOR_AGENT_PREFIX)
-    stop = halt_find(halt_git_roots(repo_root), client) if signal is not None else None
+    stop = (halt_find(halt_git_roots(repo_root), client) or halt_everywhere_read()) if signal is not None else None
     if stop is None:
         return None
     print(f"gate: {halt_message(stop)}", file=sys.stderr)

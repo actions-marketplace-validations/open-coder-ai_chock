@@ -44,6 +44,9 @@ HALT_CLIENTS = (
 #: so a runtime that cannot tell which repository its session is rooted in still sees every stop on the machine.
 HALT_REGISTRY_PARTS = (".chock", "stops")
 _HALT_REGISTRY_SUFFIX = ".json"
+#: The machine-wide stop (`chock stop --everywhere`) in the registry: no sha256 hex digest starts with `_`.
+HALT_EVERYWHERE_NAME = "_everywhere.json"
+_HALT_EVERYWHERE_UNREADABLE = "~/.chock/stops/_everywhere.json exists but cannot be read, so every agent is refused"
 _HALT_REGISTRY_UNREADABLE = "~/.chock/stops exists but cannot be read, so every agent is refused"
 _HALT_GITDIR = "gitdir:"
 _HALT_REASON_CAP = 200
@@ -94,9 +97,26 @@ def halt_registry_entry(repo_root):
     return halt_registry_dir() / f"{key}{_HALT_REGISTRY_SUFFIX}"
 
 
+def halt_everywhere_entry():
+    """`~/.chock/stops/_everywhere.json`: the machine-wide stop."""
+    return halt_registry_dir() / HALT_EVERYWHERE_NAME
+
+
+def halt_everywhere_read():
+    """The machine-wide stop, reaching every agent whatever its scope says, or None. A file there that is not a
+    regular one, or cannot be read or parsed, stops every agent: fail closed."""
+    path = halt_everywhere_entry()
+    if not os.path.lexists(path):
+        return None
+    unreadable = {"scope": HALT_ALL, "reason": _HALT_EVERYWHERE_UNREADABLE, "unreadable": True}
+    regular = os.path.isfile(path) and not os.path.islink(path)
+    stop = _halt_read_file(path, _HALT_EVERYWHERE_UNREADABLE) if regular else unreadable
+    return {**(stop or unreadable), "scope": HALT_ALL, "everywhere": True}
+
+
 def halt_registry_find(client, repos=None):
-    """The first registry entry that reaches `client` (only those for `repos`, when given), or None.
-    A registry that exists but cannot be listed, or an entry that cannot be read, refuses: fail closed."""
+    """The machine-wide stop, else the first registry entry that reaches `client` (only those for `repos`, when
+    given), or None. A registry that exists but cannot be listed, or an entry that cannot be read, refuses."""
     folder = halt_registry_dir()
     unreadable = {"scope": HALT_ALL, "reason": _HALT_REGISTRY_UNREADABLE, "unreadable": True}
     try:
@@ -105,6 +125,9 @@ def halt_registry_find(client, repos=None):
         return unreadable if os.path.lexists(folder) else None
     except OSError:
         return unreadable
+    everywhere = halt_everywhere_read() if HALT_EVERYWHERE_NAME in names else None
+    if everywhere is not None:
+        return everywhere
     wanted = None if repos is None else {halt_registry_entry(repo).name for repo in repos}
     for name in names:
         if not name.endswith(_HALT_REGISTRY_SUFFIX) or (wanted is not None and name not in wanted):
@@ -180,6 +203,11 @@ def halt_message(stop):
     """`stopped: <reason>`, the reason printable and capped, and the one way to lift it."""
     reason = "".join(ch for ch in str(stop.get("reason") or "") if ch.isprintable()).strip()
     reason = (reason or _HALT_NO_REASON)[:_HALT_REASON_CAP]
+    if stop.get("everywhere"):
+        return (
+            f"{HALT_REASON}: {reason}. A person stopped every agent on this machine (`chock stop --everywhere`); "
+            "every tool call is refused until they run `chock resume --everywhere`."
+        )
     return (
         f"{HALT_REASON}: {reason}. A person stopped agents in this repository (`chock stop`); "
         "every tool call is refused until they run `chock resume`."

@@ -33,3 +33,10 @@ def person_resume(repo: Path, typed: str | None = None) -> int:
     name = Path(repo).resolve().name if typed is None else typed
     with mock.patch.object(sys, "stdin", _TtyIn(name + "\n")), mock.patch.object(sys, "stdout", _TtyOut(sys.stdout)):
         return chock_stop.resume_main(["--repo", str(repo)])
+
+
+def person_resume_everywhere(typed: str = "everywhere", repo: Path | None = None) -> int:
+    """`chock resume --everywhere` as a person at a terminal who types `typed`."""
+    where = ["--repo", str(repo)] if repo is not None else []
+    with mock.patch.object(sys, "stdin", _TtyIn(typed + "\n")), mock.patch.object(sys, "stdout", _TtyOut(sys.stdout)):
+        return chock_stop.resume_main([*where, "--everywhere"])

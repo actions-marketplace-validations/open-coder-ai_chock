@@ -14,6 +14,9 @@ COMMON="$(cd "$(git rev-parse --git-common-dir)" && pwd -P)"
 BARE=""
 if [ "$(basename "$COMMON")" = ".git" ]; then MAIN="$(dirname "$COMMON")"; else MAIN="$COMMON"; BARE=1; fi
 STOPPED=""
+# `chock stop --everywhere`: the machine-wide stop in the person's home reaches every repository.
+EVERYWHERE="${HOME:-}/.chock/stops/_everywhere.json"
+if [ -n "${HOME:-}" ] && { [ -e "$EVERYWHERE" ] || [ -L "$EVERYWHERE" ]; }; then STOPPED=1; fi
 for DIR in "$TOP" "${TOP_REAL:-}" "$MAIN"; do
     while [ -n "$DIR" ]; do
         if [ -e "$DIR/.chock/stop.json" ] || [ -L "$DIR/.chock/stop.json" ]; then STOPPED=1; fi

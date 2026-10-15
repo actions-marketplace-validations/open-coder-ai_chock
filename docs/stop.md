@@ -60,6 +60,29 @@ both a TTY, and it asks for the repository's folder name to be typed before it r
 needs no terminal. `CHOCK_AGENT_COMMIT=0` clears no agent marker for any stop check (commit, push, stop,
 resume): an agent can set it too. `resume` removes the file and the registry entry.
 
+## Everywhere: one stop for the machine
+
+```bash
+chock stop   --everywhere [--reason "<why>"]
+chock resume --everywhere
+```
+
+`stop --everywhere` writes `~/.chock/stops/_everywhere.json` (`0o600`, beside the per-repository entries; no
+sha256 name starts with `_`). While it exists every Chock hook on the machine refuses every tool call, whatever
+its repository, session or client: the sync hooks, every plugin's `--stop-check`, the gateway, and an agent's
+commit or push at the git hooks. The refusal says the machine is stopped and that `chock resume --everywhere`
+lifts it. `--agent` is refused with it: the scope is every agent. A file there that is not a regular file (a
+folder, a symlink), or cannot be read or parsed, refuses too (fail closed).
+
+`resume --everywhere` is person-only, as `resume` is: it refuses an agent's shell (logged), needs stdin and
+stdout to be a TTY, and asks for the word `everywhere` to be typed. It removes that file only; a
+per-repository stop stays in force, and its output says so. `chock status` and `chock doctor` lead with
+`STOPPED EVERYWHERE` while it is in force. Run inside a repository, `stop` and `resume` write the same log
+lines as the per-repository ones, with `"everywhere": true`; outside every repository they write none. Nothing
+is sent over the network.
+
+Unstopped, the hooks' fast path is unchanged: the registry folder they already list is the only look.
+
 `chock sync` wires one hook of its own per client, `--stop-check`, with no matcher and whatever
 policies are installed, so the stop sees every tool call, reads included. The plugin route carries
 the same entry, in every client format (Devin's included):
@@ -96,10 +119,11 @@ the resume are logged ([Decision log](decision-log.md#stop-and-override)). The f
 - A person, or an agent working outside this repository's hooks, is not affected. Such an agent can also
   delete .chock/stop.json or `~/.chock/stops` directly: both are protected only from agents whose calls a
   hook judges. An agent with an unrestricted shell on a client without hooks is not stopped.
-- A stop holds against agents in the stopped scope. An agent running unstopped elsewhere on the same machine, with a shell, can remove the stop (for example by deleting the files); the hook and protect-agent-config refuse the common forms, not every one.
+- A stop holds against agents in the stopped scope. An agent running unstopped elsewhere on the same machine, with a shell, can remove the stop (for example by deleting the files); the hook and protect-agent-config refuse the common forms, not every one. `stop --everywhere` leaves no hook-wired agent unstopped; an agent with no Chock hook is not reached by it.
 - The terminal check is best-effort: an agent that can run a shell may give `resume` a pseudo-terminal
   (`script`, `expect`) and type the name. The hook refuses a call naming a stopped repository, and
-  protect-agent-config refuses `chock resume` and writes to any `.chock/` folder or `~/.chock/stops`, but
+  protect-agent-config refuses writes to any `.chock/` folder or `~/.chock/stops` (it does not refuse the
+  `chock resume` command itself, measured against chock-catalog `ca0ddc9`), but
   an agent whose command hides the path (built at run time) is stopped only by those hooks' reach.
 - The registry lives under the home folder. An agent whose hook runs with another `HOME`, or that deletes
   `~/.chock/stops` from a session no hook-judged stop reaches, skips the machine-wide registry: hooks that

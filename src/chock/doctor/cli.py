@@ -11,6 +11,7 @@ from pathlib import Path
 from chock.display import inert
 from chock.doctor import checks
 from chock.doctor.targets import plugin_targets, sync_targets
+from chock.stop_everywhere import everywhere_line
 
 
 def _say(line: str) -> None:
@@ -30,6 +31,9 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     repo = Path(args.repo).resolve()
+    stopped = everywhere_line()
+    if stopped:
+        (sys.stderr if args.json else sys.stdout).write(inert(stopped) + "\n")
     targets = [t for t in (*sync_targets(repo), *plugin_targets()) if args.client in (None, t.client, t.agent)]
     if not targets:
         who = f" for {args.client}" if args.client else ""
