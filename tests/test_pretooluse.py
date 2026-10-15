@@ -160,8 +160,10 @@ def test_install_writes_claude_settings_schema() -> None:
     install_hooks(repo, "claude_code")
 
     settings = json.loads((repo / ".claude" / "settings.json").read_text(encoding="utf-8"))
-    entries = settings["hooks"]["PreToolUse"]
+    *entries, stop_check = settings["hooks"]["PreToolUse"]
     assert entries, "no PreToolUse entries installed"
+    assert "matcher" not in stop_check, "the repo stop check sees every tool"
+    assert stop_check["hooks"][0]["command"].endswith(".chock/bin/claude_code.py --stop-check")
     for entry in entries:
         assert entry["matcher"] == "Bash|PowerShell"
         hook = entry["hooks"][0]

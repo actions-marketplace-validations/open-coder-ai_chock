@@ -35,6 +35,10 @@ def _chock_timed(judged, stage, ask):
 
 
 def _judge(event, judged):
+    halted = repo_stop_refusal(event)
+    if halted is not None:
+        judged[0:2] = [HALT_REASON, ".chock/stop.json"]
+        return Decision.deny(halted)
     if event.event == "pre_tool" and event.command:
         verdict = _chock_timed(judged, "guard", lambda: evaluate(
             sys.argv[1:], event.command, event.tool or "", can_ask=_chock_can_ask(event.raw)

@@ -51,7 +51,7 @@ def log_files(repo_root: Path, route: str | None = None, home: Path | None = Non
 
 
 def _records(lines: Iterable[str], *, heartbeats: bool = False) -> list[dict[str, Any]]:
-    """The readable records among `lines`; a record needs a policy id, or is a heartbeat when `heartbeats`."""
+    """The readable records among `lines`: a policy's, an allowed tool call's, or a heartbeat when `heartbeats`."""
     found = []
     for line in lines:
         try:
@@ -59,10 +59,22 @@ def _records(lines: Iterable[str], *, heartbeats: bool = False) -> list[dict[str
         except json.JSONDecodeError:
             continue
         if isinstance(record, dict) and (
-            record.get("policy_id") or (heartbeats and record.get("event") == HEARTBEAT_EVENT)
+            record.get("policy_id")
+            or journal.log_plain_action(record)
+            or (heartbeats and record.get("event") == HEARTBEAT_EVENT)
         ):
             found.append(record)
     return found
+
+
+def allowed_call(record: dict[str, Any]) -> bool:
+    """Whether `record` is a plain allowed tool call: counted once in total, never toward a policy."""
+    return journal.log_plain_action(record)
+
+
+def allowed_calls(records: list[dict[str, Any]]) -> int:
+    """How many tool calls were allowed: each call's one line, which names no policy (debug's per-hook lines do)."""
+    return sum(allowed_call(r) and not r.get("policy_id") for r in records)
 
 
 def record_route(record: dict[str, Any]) -> str:

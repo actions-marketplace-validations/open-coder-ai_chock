@@ -29,8 +29,22 @@ def no_gate_log(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def human_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run as a person's shell: the suite may itself be run by an agent that sets these markers."""
-    for name in ("CHOCK_AGENT_COMMIT", "CLAUDECODE", "AI_AGENT", "CHOCK_ALLOW", "CHOCK_ROLLOUT"):
+    for name in ("CHOCK_AGENT_COMMIT", "CLAUDECODE", "AI_AGENT", "CHOCK_ALLOW", "CHOCK_ROLLOUT", *PROJECT_ENV):
         monkeypatch.delenv(name, raising=False)
+
+
+#: The variables a client names its session's project root in: a hook a test runs names none unless it says so.
+PROJECT_ENV = ("CLAUDE_PROJECT_DIR", "GEMINI_PROJECT_DIR", "OPENHANDS_PROJECT_DIR")
+
+
+@pytest.fixture
+def private_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """`tmp_path/home` as this process's home, so `chock stop` writes its machine registry entry there."""
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    return home
 
 
 def bash_executable() -> str:

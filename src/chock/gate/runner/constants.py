@@ -134,7 +134,7 @@ GATE_LOG_ENV = "CHOCK_GATE_LOG"
 _LOG_MAX_BYTES = 1_048_576
 _LOG_MATCH_CAP = 20
 #: What an agent hook's runtime hands gate.py for its decision line (the `log` stdin key), each capped.
-_LOG_FIELDS = ("session_id", "actor", "target")
+_LOG_FIELDS = ("session_id", "actor", "target", "call")
 _LOG_FIELD_CAP = 512
 
 #: A pre-push stdin line is `<local ref> <local sha> <remote ref> <remote sha>`;

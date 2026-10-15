@@ -99,7 +99,7 @@ def test_a_shell_target_is_the_program_and_a_hash_never_an_argument(
     command = f"FOO=bar /usr/local/bin/deploy --token {SECRET} --to prod.example.invalid"
     [record] = _call(tmp_path, home, route, "Bash", {"command": command}, session_id=SESSION, guard=guard)
 
-    assert record["target"] == f"deploy {_sha(command)}"
+    assert record["target"] == f"- {_sha(command)}"
     written = json.dumps(record)
     for argument in (SECRET, "--token", "prod.example.invalid", "/usr/local/bin", "FOO=bar"):
         assert argument not in written
@@ -171,7 +171,8 @@ def test_gate_py_writes_the_fields_on_its_own_line(tmp_path: Path, home: Path, c
     )
 
     [record] = records(sync_log(repo))
-    assert (record["policy_id"], record["verdict"], record["level"]) == ("p-gate", verdict, "info"), proc.stderr
+    policy = None if verdict == "allow" else "p-gate"  # an allowed tool call's one line names no policy
+    assert (record.get("policy_id"), record["verdict"], record["level"]) == (policy, verdict, "info"), proc.stderr
     assert (record["session_id"], record["actor"], record["target"]) == (SESSION, "agent:claude_code", "app.py")
     assert SECRET not in sync_log(repo).read_text(encoding="utf-8")
 
@@ -235,7 +236,7 @@ def test_gate_py_keeps_only_short_string_fields_from_the_runtime() -> None:
         (f'TOKEN="{SECRET}" curl x', "-"),
         ("--version", "-"),
         ("", "-"),
-        (r"C:\Tools\deploy.exe --token x", "deploy.exe"),
+        (r"C:\Tools\deploy.exe --token x", "-"),
     ],
 )
 def test_the_program_is_a_bare_name_or_dash_never_an_argument(command: str, program: str) -> None:

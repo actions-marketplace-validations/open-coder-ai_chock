@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TextIO
 
 from chock.gatelog import FORMATS, GROUP_KEYS, LEVELS, ROUTES, VERDICTS, positive_days
+from chock.stop import print_stop
 
 
 def _run(label: str, fn, argv: list[str]) -> int:
@@ -243,6 +244,7 @@ def status_main(argv: list[str] | None) -> int:
     log_flags.add_argument("--plugin", help="Log: only records from this plugin (plugin route)")
     log_flags.add_argument("--follow", action="store_true", help="Log: print new records as they are written")
     args = parser.parse_args(argv)
+    print_stop(Path(args.repo).resolve(), sys.stderr if args.json or args.format == "md" else sys.stdout)
     if args.summary:
         from chock.gatelog_summary import main as summary_main
 

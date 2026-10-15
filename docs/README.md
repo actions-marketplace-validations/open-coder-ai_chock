@@ -15,6 +15,7 @@ Everything you need to understand, use, and extend Chock. New here? Start with
 | [Architecture](architecture.md) | Understand the *author → compile → enforce* model |
 | [Core Concepts](concepts.md) | Learn the vocabulary: artifacts, manifests, surfaces, coverage |
 | [CLI Reference](cli-reference.md) | Look up every command, flag, and example |
+| [Stop](stop.md) | Refuse every agent action in one repository until a person resumes, and what that does not reach |
 | [Authoring Policies](authoring-policies.md) | Write rules, hooks, skills, and subagents |
 | [Custom Policies](custom-policies.md) | Add your own policies to a plugin: templates, show-and-confirm install, trust on first use |
 | [Script-Backed Gates](script-backed-gates.md) | Declare a check no gate `kind` can express, and the contract its script runs under |

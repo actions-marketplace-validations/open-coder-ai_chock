@@ -128,7 +128,7 @@ chock status [--repo .] [--only policies,registry,log]
 Read-only. Default prints the policy table: every installed policy, its resolved state
 (`enabled`, `overridden`, `disabled`), coverage level, and whether it is `mandatory`.
 `--only registry` lists the artifact registry; `--only log` reports recorded gate outcomes on
-both routes, including policies that never fired ([Decision log](decision-log.md): levels, filters); `--summary` adds rates, latency vs timeout, faults and heartbeats; `chock witness export` writes one client's redacted log for its agentseam issue ([Decision log](decision-log.md#summary)). `chock doctor [--client X]` checks each client's hooks are in place, current and running ([Doctor](doctor.md)).
+both routes, including policies that never fired ([Decision log](decision-log.md): levels, filters); `--summary` adds rates, latency vs timeout, faults and heartbeats; `chock witness export` writes one client's redacted log for its agentseam issue ([Decision log](decision-log.md#summary)). `chock doctor [--client X]` checks each client's hooks are in place, current and running ([Doctor](doctor.md)). A stop in force (`chock stop`, `chock resume`) leads the output ([Stop](stop.md)).
 
 ### `enable` / `disable` — policy toggles
 

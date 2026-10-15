@@ -198,7 +198,7 @@ def test_json_without_by_keeps_its_shape(tmp_path: Path, capsys: pytest.CaptureF
 
     assert main(["--repo", str(tmp_path), "--json"]) == 0
 
-    assert set(json.loads(capsys.readouterr().out)) == {"summary", "silent", "events"}
+    assert set(json.loads(capsys.readouterr().out)) == {"summary", "silent", "events", "allowed_calls"}
 
 
 def test_json_and_markdown_are_exclusive(tmp_path: Path) -> None:

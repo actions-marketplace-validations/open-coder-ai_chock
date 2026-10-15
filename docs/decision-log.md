@@ -21,8 +21,11 @@ the same file earlier versions wrote, so older readers keep working.
 | Level | Writes |
 | :--- | :--- |
 | `off` | nothing |
-| `info` (default) | one line each time a policy fires: block, ask, warn, a guard fault, or an override or rollout level that let a finding through; and one line per allowed agent tool call, carrying only its `target` fingerprint |
-| `debug` | every hook call, the turn's end included, plus a `trace`: wire event, tool, matched rule (or "no rule matched"), the guard's exit code, per-stage timings, and the command or path cut to 200 characters with every value the scan-secrets policy would block replaced by `[redacted]` |
+| `info` (default) | one line each time a policy fires: block, ask, warn, a guard fault, or an override or rollout level that let a finding through; and one line per allowed agent tool call, carrying only its `target` fingerprint. However many policy hooks judge that call, its allow is one line, written at once by the first hook to run and naming no policy (no `policy_id`, `plugin` or match fields): an allowed call is the call's, not any one policy's. A call is known by the client's `tool_use_id`, else by session, second and `target`, so with no id two identical calls in one second are one line. Every block, ask, warn, fault and override keeps its own line per policy |
+| `debug` | every hook call (one allow line per policy hook), the turn's end included, plus a `trace`: wire event, tool, matched rule (or "no rule matched"), the guard's exit code, per-stage timings, and the command or path cut to 200 characters with every value the scan-secrets policy would block replaced by `[redacted]` |
+
+`chock status` counts allowed tool calls once each, in total (`allowed_calls`), and never toward a
+policy: its per-policy columns show what a policy decided, its blocks, asks, warns and overrides.
 
 Each line carries `ts`, `route`, `level`, `agent`, `client` (when the payload names one), `event`,
 `policy_id`, `surface`, `verdict`, `reason`, `duration_ms`, `can_ask`, `actor`, `session_id` (the
@@ -43,13 +46,33 @@ and `target` from the hook that ran it. A git hook's line carries `actor` only: 
 | A tool call on | `target` |
 | :--- | :--- |
 | a file in the repository | its repository-relative path, e.g. `src/app.py` |
-| a file outside it (or with no repository) | `outside:sha256:<hex of the absolute path>`: a home path names the user |
-| a shell command | `<program> sha256:<hex of the whole command line, UTF-8>`, e.g. `git sha256:9f2c...`. Leading `NAME=value` words and the program's folder are dropped; no argument is ever written. To confirm a suspected command: `printf %s '<command>' \| sha256sum` |
-| an MCP tool | `<server>/<tool>` |
+| a file outside it (or with no repository) | `outside:sha256:<hex of the absolute path>`: a home path names the user. On macOS and Linux a Windows drive or UNC path (`C:\...`, `\\server\...`) is outside, hashed as given |
+| a shell command | `<program> sha256:<hex of the whole command line, UTF-8>`, e.g. `git sha256:9f2c...`. Leading `NAME=value` words are skipped; no argument is ever written. The program is named only when it is a common command (`git`, `python3`, `/usr/bin/git` as `git`) or a plain word with no folder, digit, quote or redirect; anything else is `-`. To confirm a suspected command: `printf %s '<command>' \| sha256sum` |
+| an MCP tool | `<server>/<tool>`, redacted, cut to 128 characters |
 | any other tool | the tool's name |
 
 Redaction runs on every `target` first, the same scan-secrets pattern as a trace. A stop, a session
-start and an unreadable payload have no `target`.
+start and an unreadable payload have no `target`. `client`, and the client in `actor`, keep only
+`a-z`, `0-9`, `_` and `-` of the payload's `client_type`, at most 32. A character that is not UTF-8
+(a lone surrogate in a path) is written as the text `\uXXXX`, never dropping the line.
+
+**Known limit.** The hashes are unsalted sha256. Anyone holding the log can confirm a guessed path or
+a guessed command (a short or common one is easy to guess); they cannot read one they did not guess.
+Treat the log as private to the machine's owner.
+
+## Stop and override
+
+While a stop is in force (`chock stop`, [Stop](stop.md)),
+each call it refuses is a `block` line with `"reason": "stopped"` and the fields above (`actor`,
+`session_id`, `target`). A pre-tool refusal names the hook's policy; a commit or push refused at
+the git dispatcher names `chock-stop`. `chock stop` and `chock resume` each write one `chock-stop`
+line, event `repo_stop` or `repo_resume`, with `scope`, `who` (git `user.email`) and `when`.
+
+A person's `CHOCK_ALLOW` override is an `allow` line with `"override": "CHOCK_ALLOW"`, the
+`policy_id` it answered, and `approver`: the git `user.email` of the shell that ran it.
+
+`approver` and `who` name a person. They stay in this local log (created `0o600`): Chock sends
+nothing over the network, and `chock witness export` leaves both out.
 
 ## Heartbeat
 

@@ -89,3 +89,11 @@ def _log_script_hook(
         _write_log(repo_root / _CONFIG_PATH[0], record)
     except Exception:  # noqa: BLE001 -- best effort logging: never raises, never changes the verdict
         return
+
+
+def _log_halt(repo_root: Path, record: Mapping[str, object]) -> None:
+    """Record a call the repo stop refused; best effort like every gate log write."""
+    try:
+        _write_log(repo_root / _CONFIG_PATH[0], dict(record))
+    except Exception:  # noqa: BLE001 -- best effort logging: never raises, never changes the verdict
+        return

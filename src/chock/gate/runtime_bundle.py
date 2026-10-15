@@ -24,6 +24,7 @@ from . import (
     guard_runner,
     outside_repo,
     patch_image,
+    repo_stop,
     session_log,
     sessionstart,
     stop_reentry,
@@ -33,7 +34,7 @@ from . import (
     workspace_root,
     write_gate,
 )
-from .runner import journal
+from .runner import halt, journal
 
 BEGIN = "# >>> agentseam handler >>>"
 END = "# <<< agentseam handler <<<"
@@ -187,6 +188,7 @@ def _can_ask_tokens(agent: str) -> dict[str, str]:
 _HANDLER_MODULES = (
     budget,
     journal,
+    halt,
     guard_runner,
     decision_target,
     decision_log,
@@ -198,6 +200,7 @@ _HANDLER_MODULES = (
     stop_reentry,
     unreadable_stop,
     workspace_root,
+    repo_stop,
     stop_roots,
     write_gate,
     tool_call_gate,

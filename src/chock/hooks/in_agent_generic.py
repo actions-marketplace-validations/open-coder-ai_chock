@@ -8,11 +8,13 @@ from typing import Any
 
 from chock import vendors
 from chock.emit import write_generated_json
-from chock.hooks import heartbeat
+from chock.hooks import heartbeat, stop_check
 from chock.hooks.in_agent_toml import install_toml, installed_toml_ids
 from chock.hooks.runtime_vendor import runtime_rel, vendor_runtime
 
 _TOML = "toml"
+#: The stop check's place in the fragment list: wired for every vendor, never reported as a policy.
+STOP_CHECK_ID = "chock-stop"
 
 
 def load_config(path: Path) -> dict:
@@ -120,10 +122,11 @@ def install_generic(repo_root: Path, vendor: str, *, uninstall: bool = False) ->
     repo_root = Path(repo_root)
     marker = _marker(vendor)
     fragments = [] if uninstall else _fragments(repo_root, vendor)
+    stopping = [(STOP_CHECK_ID, stop_check.generic_doc(vendor))] if fragments else []
     if vendors.config_format(vendor) == _TOML:
-        installed = install_toml(repo_root, vendor, fragments)
+        installed = install_toml(repo_root, vendor, [*fragments, *stopping])
         _sync_runtime(repo_root, vendor, wanted=bool(installed))
-        return installed
+        return [policy_id for policy_id in installed if policy_id != STOP_CHECK_ID]
     config_path = repo_root / vendors.config_path(vendor)
     settings = load_config(config_path)
     prior: dict[str, dict] = {}
@@ -140,7 +143,7 @@ def install_generic(repo_root: Path, vendor: str, *, uninstall: bool = False) ->
         return []
 
     vendor_runtime(repo_root, vendor)
-    for _policy_id, fragment in fragments:
+    for _policy_id, fragment in [*fragments, *stopping]:
         _merge(settings, fragment)
     beat = heartbeat.sync_doc(vendor)
     if isinstance(beat, dict):

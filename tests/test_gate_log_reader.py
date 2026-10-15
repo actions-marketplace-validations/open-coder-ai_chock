@@ -110,7 +110,7 @@ def test_json_output_is_machine_readable(tmp_path: Path, capsys) -> None:
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["events"] == 4
-    assert {"summary", "silent", "events"} == set(payload)
+    assert {"summary", "silent", "events", "allowed_calls"} == set(payload)
 
 
 def test_warn_and_ask_are_counted_apart_from_allow_and_block() -> None:
