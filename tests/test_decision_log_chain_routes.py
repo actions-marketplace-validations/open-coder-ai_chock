@@ -12,9 +12,10 @@ from pathlib import Path
 
 import pytest
 from decision_log_support import BLOCKING_GUARD, hook_env, records, run_hook, sync_layout, sync_log
+from runtime_support import write_runtime
 
 from chock.cli import main as cli_main
-from chock.gate import assemble, runtime_bundle
+from chock.gate import assemble
 from chock.gate.runner import chain, journal
 from chock.gatelog_chain import chains, verify
 from chock.guardrails import chock_bundle_log, plugin
@@ -43,7 +44,7 @@ def _fill(path: Path, count: int) -> None:
 
 def test_the_git_hook_runner_and_an_agent_runtime_both_chain(tmp_path: Path, home: Path) -> None:
     gate = runpy.run_path(str(_source(tmp_path / "gate.py", assemble.runner_source())), run_name="gate")
-    hook = runpy.run_path(str(_source(tmp_path / "rt.py", runtime_bundle.render("claude_code"))), run_name="rt")
+    hook = runpy.run_path(str(write_runtime(tmp_path / "rt.py", "claude_code")), run_name="rt")
     log = tmp_path / "events.jsonl"
     for append in (gate["log_append"], hook["log_append"], gate["log_append"]):
         append(log, {"policy_id": "p", "verdict": "block"})
