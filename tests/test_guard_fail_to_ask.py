@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from agentseam import contract as _contract
 from runtime_payloads import DENY_ON_THE_WIRE, PAYLOADS
+from runtime_support import write_runtime
 
 from chock import evidence
 from chock.gate import budget, guard_runner, runtime_bundle
@@ -23,7 +24,7 @@ def runtimes(tmp_path_factory) -> dict[str, Path]:
     paths = {}
     for agent in runtime_bundle.RUNTIME_AGENTS:
         path = out / f"{agent}.py"
-        path.write_text(runtime_bundle.render(agent), encoding="utf-8")
+        write_runtime(path, agent)
         paths[agent] = path
     return paths
 

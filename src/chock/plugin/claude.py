@@ -48,18 +48,16 @@ _ENFORCED_NOTE = (
 _GATE_REL = _SCRIPTS_TEMPLATE.format(name=GATE_FILE)
 
 
-def _adapter_source(agent: str = "claude_code") -> str:
-    """`agent`'s self-contained runtime, verbatim -- agentseam's bundle plus chock's own"""
-    return runtime_bundle.render(agent)
-
-
 _LAUNCHER_REL = _SCRIPTS_TEMPLATE.format(name=launch.PLUGIN_LAUNCHER)
 
 
 def _runtime_files(agent: str) -> dict[Path, str]:
-    """`agent`'s runtime, and the launcher that starts it with a Python that actually runs."""
+    """`agent`'s runtime entry, the shared runtime it loads, and the launcher that starts it with a Python that runs."""
     return {
-        Path(_SCRIPTS_TEMPLATE.format(name=f"{agent}.py")): _adapter_source(agent),
+        **{
+            Path(_SCRIPTS_TEMPLATE.format(name=name)): text
+            for name, text in runtime_bundle.runtime_files(agent).items()
+        },
         Path(_LAUNCHER_REL): launch.launcher_text(),
     }
 

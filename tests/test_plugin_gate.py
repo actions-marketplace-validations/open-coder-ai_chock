@@ -18,8 +18,9 @@ from types import SimpleNamespace
 import pytest
 import yaml
 from conftest import guarded_launch, init_repo
+from runtime_support import load_runtime
 
-from chock.gate import runner, runtime_bundle
+from chock.gate import runner
 from chock.gate.assemble import runner_source
 from chock.plugin.claude import (
     POSTURE_ADVISORY,
@@ -164,10 +165,8 @@ def test_output_is_byte_stable_and_check_sees_drift(policy, tmp_path: Path) -> N
 # --- and it runs: the bundled runtime with the packaged layout -----------------------------------
 
 
-def _runtime() -> dict:
-    ns: dict = {"__name__": "chock_runtime_under_test"}
-    exec(compile(runtime_bundle.render("claude_code"), "<claude_code bundle>", "exec"), ns)  # noqa: S102 -- the rendered runtime is the unit under test
-    return ns
+def _runtime(folder: Path) -> dict:
+    return load_runtime(folder, "claude_code")
 
 
 def _write_event(repo: Path, path: str, content: str) -> SimpleNamespace:
@@ -186,7 +185,7 @@ def test_the_packaged_gate_refuses_a_write_and_lets_a_clean_one_through(policy, 
     repo = tmp_path / "project"
     repo.mkdir()
     init_repo(repo)
-    ns = _runtime()
+    ns = _runtime(tmp_path / "runtime")
     argv = ["--gate", str(out / "scripts" / "gate.json")]
 
     refused = ns["evaluate_gate"](argv, _write_event(repo, "src/App.java", "FORBIDDEN here"))
@@ -204,7 +203,7 @@ def test_the_packaged_gate_reads_the_turn_from_where_the_agent_works(policy, tmp
     repo.mkdir()
     init_repo(repo)
     (repo / "Leak.java").write_text("FORBIDDEN\n", encoding="utf-8")
-    ns = _runtime()
+    ns = _runtime(tmp_path / "runtime")
     refused = ns["evaluate_gate"](["--gate", str(out / "scripts" / "gate.json")], _stop_event(repo))
     assert refused is not None and "Leak.java" in refused[1]
 
@@ -216,7 +215,7 @@ def test_a_package_without_its_runner_refuses_rather_than_allowing(policy, tmp_p
     repo = tmp_path / "project"
     repo.mkdir()
     init_repo(repo)
-    ns = _runtime()
+    ns = _runtime(tmp_path / "runtime")
     refused = ns["evaluate_gate"](["--gate", str(out / "scripts" / "gate.json")], _write_event(repo, "a.java", "x"))
     assert refused is not None and refused[0] == "deny" and "runner" in refused[1]
 

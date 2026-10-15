@@ -6,7 +6,8 @@ input_schema:
       description: Path to the policy folder to optimize.
     evidence:
       type: string
-      description: Usage evidence such as execution traces, failure examples, or feedback.
+      description: Usage evidence such as execution traces, failure examples, or feedback; or paths to chock decision-log
+        JSONL files or `chock witness export` files, read by scripts/traces.py.
   required:
   - policy_path
   additionalProperties: false

@@ -82,12 +82,17 @@ def _engine_names() -> str:
 
 def engine(target: Target) -> Check:
     """Whether the installed runtime is the one this chock would build now, and (plugins) the commit it recorded."""
-    try:
-        same = target.runtime.read_text(encoding="utf-8") == runtime_bundle.render(target.agent)
-    except (OSError, UnicodeDecodeError):
-        return Check(FAIL, "engine", f"{target.runtime} is unreadable", _rebuild(target))
-    if not same:
-        return Check(FAIL, "engine", f"{target.runtime.name} was not built by {_engine_names()}", _rebuild(target))
+    shared = target.runtime.with_name(runtime_bundle.SHARED_FILE)
+    for path, expected in (
+        (target.runtime, runtime_bundle.render(target.agent)),
+        (shared, runtime_bundle.render_shared()),
+    ):
+        try:
+            same = path.read_text(encoding="utf-8") == expected
+        except (OSError, UnicodeDecodeError):
+            return Check(FAIL, "engine", f"{path} is unreadable", _rebuild(target))
+        if not same:
+            return Check(FAIL, "engine", f"{path.name} was not built by {_engine_names()}", _rebuild(target))
     if target.route == ROUTE_SYNC:
         return Check(PASS, "engine", f"runtime matches {_engine_names()}")
     built = marker_engine(target)
