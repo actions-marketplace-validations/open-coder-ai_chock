@@ -9,7 +9,7 @@ import re
 import pytest
 
 from chock.compile.emitters import ci, git_hook
-from chock.gate import runtime_bundle
+from chock.gate import runtime_bundle, runtime_shared
 from chock.hooks import installers, launch
 
 _TOKEN_RE = re.compile(r"__[A-Z0-9_]+__")
@@ -104,6 +104,13 @@ def test_ci_workflow_template_tokens(monkeypatch: pytest.MonkeyPatch, commit: st
     assert not _TOKEN_RE.search(install_ci.render())
 
 
+def test_every_rendered_runtime_file_carries_no_orphan_token() -> None:
+    """The shared runtime and every entry, with the loader's pin and file name filled in."""
+    for agent in runtime_bundle.RUNTIME_AGENTS:
+        for name, text in runtime_bundle.runtime_files(agent).items():
+            assert not _TOKEN_RE.search(text), f"{agent}: unfilled placeholder in {name}"
+
+
 def test_static_templates_carry_no_orphan_tokens() -> None:
     """Templates with no placeholders at all must stay that way."""
     from chock.scaffold import agents_md, skills_bridge, templates
@@ -114,7 +121,7 @@ def test_static_templates_carry_no_orphan_tokens() -> None:
         templates.SKILLS_GUARDRAIL,
         agents_md.POINTER_BLOCK,
         skills_bridge._BRIDGE_MARKER_BODY,
-        runtime_bundle._IMPORTS,
+        runtime_shared._IMPORTS,
         runtime_bundle._SESSION_START_BRANCH,
         runtime_bundle._SESSION_START_ORCHESTRATION,
     ):

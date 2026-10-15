@@ -6,8 +6,11 @@ import hashlib
 import json
 import os
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+from .chain import LOG_CHAIN_KEYS, LOG_CHAIN_UNCHAINED, log_chain_after, log_last_line, log_rotated, log_tail
 
 # >>> gate.py 20
 #: The level a person set for this shell's hooks; an agent's tool input never reaches a hook's environment.
@@ -47,6 +50,9 @@ _LOG_SECRET_RE = re.compile(
     r"""(?i)((AKIA|ASIA)[0-9A-Z]{16}|gh[oprsu]_[0-9A-Za-z]{36}|github_pat_[0-9A-Za-z_]{22,}|xox[bpas]-[0-9A-Za-z-]{10,}|(sk|rk)_live_[0-9A-Za-z]{16,}|sk-proj-[0-9A-Za-z_-]{20,}|sk-ant-[0-9A-Za-z_-]{20,}|sk-[0-9A-Za-z]{20,}|AIza[0-9A-Za-z_-]{35}|npm_[0-9A-Za-z]{36}|SG\.[0-9A-Za-z_-]{16,}\.[0-9A-Za-z_-]{16,}|eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*|-----BEGIN (RSA |OPENSSH |EC |DSA )?PRIVATE KEY-----|api[_-]?key\s*=\s*["'][A-Za-z0-9_\-]{20,}["']|secret[_-]?key\s*=\s*["'][A-Za-z0-9_\-]{20,}["']|auth[_-]?token\s*=\s*["'][A-Za-z0-9_\-]{20,}["']|password\s*=\s*["'][^"'\s]{12,}["']|(api|secret|auth)[_-]?(key|token)\s*[=:]\s*[A-Za-z0-9_\-]{20,}|password\s*[=:]\s*[^\s"'${}]{12,})"""
 )
 _LOG_BYTES_RANGE = "a whole number from 65536 (64 KiB) to 1073741824 (1 GiB)"
+#: How long a writer waits for the chain's lock before it writes its line unchained; held for one read and one write.
+LOG_CHAIN_WAIT = 1.0
+_LOG_CHAIN_POLL = 0.0002
 
 
 def log_settings_read(path):
@@ -192,40 +198,70 @@ def log_unlock(fd):
             return
 
 
-def log_rotate(path, max_bytes):
-    """Move a file past `max_bytes` to `<stem>.1<suffix>` under a lock; a busy lock or a failed move skips it this time."""
+def _log_lock_wait(fd):
+    """Take `log_lock`'s lock on `fd`, waiting up to `LOG_CHAIN_WAIT` seconds; False when it stays held."""
+    deadline = time.monotonic() + LOG_CHAIN_WAIT
+    while not log_lock(fd):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(_LOG_CHAIN_POLL)
+    return True
+
+
+def _log_rotate_held(path, max_bytes):
+    """Move a file past `max_bytes` to `log_rotated(path)`; the caller holds the chain's lock. A failed move waits."""
     try:
-        if not path.exists() or path.stat().st_size <= max_bytes:
-            return
-        lock = os.open(str(path) + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
+        if path.stat().st_size > max_bytes:
+            path.replace(log_rotated(path))
     except OSError:
         return
+
+
+def _log_line(path, stamped, *, held):
+    """`stamped` as one line's bytes, chained after the last line (or the rotated file's) when the lock is `held`.
+
+    A line that cannot be chained names why (`unchained`); a torn last line (no newline) is closed, never joined.
+    """
     try:
-        if log_lock(lock):
-            try:
-                if path.stat().st_size > max_bytes:  # another writer may have rotated it first
-                    path.replace(path.with_name(path.stem + ".1" + path.suffix))
-            finally:
-                log_unlock(lock)
-    except OSError:
-        return
-    finally:
-        os.close(lock)
+        last, torn = log_tail(path)
+        if held:
+            stamped = {**stamped, **log_chain_after(last or log_last_line(log_rotated(path)))}
+        else:
+            stamped = {**stamped, LOG_CHAIN_UNCHAINED: "lock"}
+    except (OSError, ValueError):
+        torn = False
+        stamped = {**stamped, LOG_CHAIN_UNCHAINED: "unreadable" if held else "lock"}
+    text = _LOG_SURROGATE.sub(lambda found: f"\\\\u{ord(found[0]):04x}", json.dumps(stamped, ensure_ascii=False))
+    line = (text + "\n").encode("utf-8")
+    return b"\n" + line if torn else line
 
 
 def log_append(path, record, max_bytes=LOG_DEFAULT_MAX_BYTES):
-    """Append one stamped, complete line to `path` in a single write, so writers in parallel never interleave."""
+    """Append one stamped, chained, complete line to `path` in a single write, under the chain's lock.
+
+    Each line names the sha256 of the line before it (`prev`) and its place (`seq`); the first line after a
+    rotation names the rotated file's last. A writer that cannot take the lock writes its line `unchained`.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    log_rotate(path, max_bytes)
-    stamped = {"ts": log_now(), **record}
-    text = _LOG_SURROGATE.sub(lambda found: f"\\\\u{ord(found[0]):04x}", json.dumps(stamped, ensure_ascii=False))
-    line = (text + "\n").encode("utf-8")
-    fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o600)
+    stamped = {"ts": log_now(), **{k: v for k, v in record.items() if k not in LOG_CHAIN_KEYS}}
+    lock = os.open(str(path) + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
     try:
-        os.write(fd, line)
+        held = _log_lock_wait(lock)
+        try:
+            if held:
+                _log_rotate_held(path, max_bytes)
+            line = _log_line(path, stamped, held=held)
+            fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o600)
+            try:
+                os.write(fd, line)
+            finally:
+                os.close(fd)
+        finally:
+            if held:
+                log_unlock(lock)
     finally:
-        os.close(fd)
+        os.close(lock)
 
 
 def log_write(path, record, repo_root):

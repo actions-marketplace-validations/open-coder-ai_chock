@@ -26,7 +26,7 @@ WRITER = """
 import sys
 from chock.gate.runner.journal import log_append
 for i in range(int(sys.argv[2])):
-    log_append(sys.argv[1], {"policy_id": "p", "writer": sys.argv[3], "i": i, "pad": "x" * 60}, 100_000)
+    log_append(sys.argv[1], {"policy_id": "p", "writer": sys.argv[3], "i": i, "pad": "x" * 60}, 200_000)
 """
 PER_WRITER = 500
 
@@ -77,8 +77,11 @@ def test_the_windows_lock_rotates_when_free_and_skips_rotation_when_busy(
 
     rotated = log.with_name("events.1.jsonl")
     assert rotated.exists() is not held
-    assert log.read_text(encoding="utf-8").splitlines()[-1].endswith('"verdict": "block"}'), "the line is never lost"
-    assert fake.calls == ([fake.LK_NBLCK] if held else [fake.LK_NBLCK, fake.LK_UNLCK])
+    last = json.loads(log.read_text(encoding="utf-8").splitlines()[-1])
+    assert last["verdict"] == "block", "the line is never lost"
+    assert last.get("unchained") == ("lock" if held else None)
+    assert fake.calls[-1] == (fake.LK_NBLCK if held else fake.LK_UNLCK)
+    assert set(fake.calls) == ({fake.LK_NBLCK} if held else {fake.LK_NBLCK, fake.LK_UNLCK})
 
 
 @pytest.mark.skipif(os.name == "nt", reason="fcntl is the lock everywhere but Windows")

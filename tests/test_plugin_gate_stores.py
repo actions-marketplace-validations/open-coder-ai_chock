@@ -18,10 +18,10 @@ from types import SimpleNamespace
 
 import pytest
 from conftest import init_repo
+from runtime_support import load_runtime
 from test_plugin_gate import POLICY_ID, SCRIPT, _manifest
 from test_plugin_gate import policy as shared_policy
 
-from chock.gate import runtime_bundle
 from chock.gate.stop_reentry import REENTRY_CAP
 from chock.hooks import stop_check
 from chock.plugin import codex, copilot, cursor, devin
@@ -178,8 +178,7 @@ def test_codex_s_packaged_gate_reads_the_turn_from_where_the_agent_works(gate_po
     repo.mkdir()
     init_repo(repo)
     (repo / "Leak.java").write_text("FORBIDDEN\n", encoding="utf-8")
-    ns: dict = {"__name__": "chock_runtime_under_test"}
-    exec(compile(runtime_bundle.render("codex_cli"), "<codex_cli bundle>", "exec"), ns)  # noqa: S102 -- the rendered runtime is the unit under test
+    ns = load_runtime(tmp_path / "runtime", "codex_cli")
     event = SimpleNamespace(event="stop", tool=None, command=None, path=None, content=None, cwd=str(repo), raw={})
     refused = ns["evaluate_gate"](["--gate", str(out / "scripts" / "gate.json")], event)
     assert refused is not None and "Leak.java" in refused[1]
