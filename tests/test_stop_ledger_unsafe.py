@@ -14,9 +14,9 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from runtime_support import write_runtime
 from test_stop_install import POLICY_ID, SECRET, _repo
 
-from chock.gate import runtime_bundle
 from chock.gate.stop_reentry import REENTRY_CAP
 from chock.hooks.in_agent_install import install_hooks
 
@@ -112,7 +112,7 @@ def test_a_regular_session_ledger_still_counts_and_caps(tmp_path: Path) -> None:
 @pytest.fixture
 def unreadable(tmp_path: Path) -> Callable[[], subprocess.CompletedProcess]:
     runtime = tmp_path / "claude_code.py"
-    runtime.write_text(runtime_bundle.render("claude_code"), encoding="utf-8")
+    write_runtime(runtime, "claude_code")
     gate = tmp_path / "stop" / "gate.json"
     gate.parent.mkdir()
     gate.write_text(json.dumps({"kind": "script", "on": ["tool_call"], "action": "block", "params": {}}), "utf-8")

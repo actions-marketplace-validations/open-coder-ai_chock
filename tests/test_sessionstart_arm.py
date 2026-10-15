@@ -10,6 +10,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from runtime_support import write_runtime
+
 from chock.gate import runtime_bundle
 from chock.hooks.launch import LAUNCHER_REL, hook_command
 from chock.hooks.sessionstart_install import install_sessionstart_hook
@@ -29,7 +31,7 @@ SESSION_START_PAYLOAD = json.dumps(
 def _rendered_runtime(tmp_path: Path) -> Path:
     path = tmp_path / ".chock" / "bin" / "claude_code.py"  # where `chock sync` vendors it: the sync route arms
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(runtime_bundle.render("claude_code"), encoding="utf-8")
+    write_runtime(path, "claude_code")
     return path
 
 

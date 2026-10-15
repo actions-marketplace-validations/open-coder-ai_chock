@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from agentseam import recordings
+from runtime_support import write_runtime
 
 import chock
 from chock.doctor import checks, cli
@@ -35,7 +36,7 @@ def home(tmp_path, monkeypatch):
 def _sync_repo(tmp_path: Path, agent: str = AGENT) -> Path:
     repo = tmp_path / "repo"
     (repo / ".chock" / "bin").mkdir(parents=True)
-    (repo / ".chock" / "bin" / f"{agent}.py").write_text(runtime_bundle.render(agent), encoding="utf-8")
+    write_runtime(repo / ".chock" / "bin" / f"{agent}.py", agent)
     (repo / launch.LAUNCHER_REL).write_text(launch.launcher_text(), encoding="utf-8")
     config = repo / {"claude_code": ".claude/settings.json", "windsurf": ".windsurf/hooks.json"}[agent]
     config.parent.mkdir(parents=True, exist_ok=True)
@@ -46,7 +47,7 @@ def _sync_repo(tmp_path: Path, agent: str = AGENT) -> Path:
 def _plugin(home: Path, *, version: str = chock.__version__) -> Path:
     folder = home / ".chock" / "marketplace" / CLIENT / "claude" / "obs-bundle"
     (folder / "scripts").mkdir(parents=True)
-    (folder / "scripts" / f"{AGENT}.py").write_text(runtime_bundle.render(AGENT), encoding="utf-8")
+    write_runtime(folder / "scripts" / f"{AGENT}.py", AGENT)
     (folder / "scripts" / launch.PLUGIN_LAUNCHER).write_text(launch.launcher_text(), encoding="utf-8")
     (folder / "hooks").mkdir()
     (folder / "hooks" / "hooks.json").write_text(json.dumps({"c": "scripts/claude_code.py"}), encoding="utf-8")
@@ -79,6 +80,20 @@ def test_a_runtime_from_another_engine_fails_with_the_sync_fix(tmp_path, home):
     [target] = sync_targets(repo)
     engine = _by_name(checks.run(target, repo))["engine"]
     assert engine.status == "FAIL"
+    assert "chock sync --repo" in engine.fix
+
+
+@pytest.mark.parametrize("stale", ["missing", "other-version"])
+def test_a_missing_or_stale_shared_runtime_fails_the_engine_check(tmp_path, home, stale):
+    repo = _sync_repo(tmp_path)
+    shared = repo / ".chock" / "bin" / runtime_bundle.SHARED_FILE
+    if stale == "missing":
+        shared.unlink()
+    else:
+        shared.write_text("# older engine\n", encoding="utf-8")
+    [target] = sync_targets(repo)
+    engine = _by_name(checks.run(target, repo))["engine"]
+    assert (engine.status, runtime_bundle.SHARED_FILE in engine.detail) == ("FAIL", True), engine
     assert "chock sync --repo" in engine.fix
 
 
