@@ -172,7 +172,7 @@ def test_markdown_cells_cannot_break_out_of_the_table(tmp_path: Path, capsys: py
     assert main(["--repo", str(tmp_path), "--format", "md", "--by", "agent"]) == 0
 
     row = capsys.readouterr().out.splitlines()[4]
-    assert row.startswith("| a\\|b'c &lt;x> |")
+    assert row.startswith("| a\\|b'c\\\\n&lt;x> |")
 
 
 def test_empty_log_markdown(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:

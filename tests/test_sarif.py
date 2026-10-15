@@ -170,7 +170,7 @@ def test_message_text_has_no_control_or_invisible_characters(tmp_path: Path) -> 
     log, _ = build(repo, "HEAD~1")
     (result,) = _valid(log)["results"]
     text = result["message"]["text"]
-    assert text == "a ::error::b [31m c? d"
+    assert text == "a ::error::b\\x00\\x1b[31m\\u202e c\\ud800 d"
     assert text.isprintable()
     json.dumps(log).encode("utf-8")
 
