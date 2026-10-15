@@ -1,11 +1,8 @@
-"""Per-agent vendored runtime: agentseam's bundle() plus chock's own gate handler."""
+"""Per-agent runtime entry: agentseam's bundle() plus chock's handler, which loads the shared runtime (runtime_shared)."""
 
 from __future__ import annotations
 
-import ast
 import functools
-import inspect
-import re
 
 from agentseam import bundler, contract
 
@@ -15,26 +12,8 @@ from chock.gate.wire_shapes import wire_raw as _wire_raw
 from chock.resources import package_data_dir
 from chock.vendors import entry, in_agent_vendors
 
-from . import (
-    budget,
-    decision_log,
-    decision_target,
-    edit_image,
-    gate_outcome,
-    guard_runner,
-    outside_repo,
-    patch_image,
-    repo_stop,
-    session_log,
-    sessionstart,
-    stop_reentry,
-    stop_roots,
-    tool_call_gate,
-    unreadable_stop,
-    workspace_root,
-    write_gate,
-)
-from .runner import halt, journal
+from . import sessionstart, write_gate
+from .runtime_shared import SHARED_FILE, SHARED_NAME, _extract, _needed_imports, _shared_body, render_shared, shared_pin
 
 BEGIN = "# >>> agentseam handler >>>"
 END = "# <<< agentseam handler <<<"
@@ -44,56 +23,6 @@ _SESSION_START_AGENTS = frozenset({"claude_code"})
 RUNTIME_AGENTS = in_agent_vendors()
 
 _DATA_DIR = package_data_dir("chock.gate", "data")
-_IMPORTS = _DATA_DIR.joinpath("imports.py.tmpl").read_text(encoding="utf-8")
-
-_RENAME = {
-    "fnmatch": "_chock_fnmatch",
-    "hashlib": "_chock_hashlib",
-    "re": "_chock_re",
-    "os": "_chock_os",
-    "shlex": "_chock_shlex",
-    "shutil": "_chock_shutil",
-    "subprocess": "_chock_subprocess",
-    "time": "_chock_time",
-    "datetime": "_chock_datetime",
-    "timezone": "_chock_timezone",
-    "Path": "_chock_Path",
-    "PurePosixPath": "_chock_PurePosixPath",
-    "PureWindowsPath": "_chock_PureWindowsPath",
-}
-
-
-class _Renamer(ast.NodeTransformer):
-    def visit_Name(self, node: ast.Name) -> ast.AST:
-        if node.id in _RENAME:
-            node.id = _RENAME[node.id]
-        return node
-
-    def visit_Attribute(self, node: ast.Attribute) -> ast.AST:
-        self.generic_visit(node)
-        return node
-
-
-def _segment(lines: list[bytes], node: ast.stmt) -> str:
-    """`ast.get_source_segment` over lines split once: it re-splits the whole source on every call."""
-    chunk = lines[node.lineno - 1 : node.end_lineno]
-    chunk[-1] = chunk[-1][: node.end_col_offset]
-    chunk[0] = chunk[0][node.col_offset :]
-    return b"".join(chunk).decode("utf-8")
-
-
-@functools.cache
-def _extract(module) -> str:
-    """Every top-level def/assignment in `module`, source order, minus its own imports --"""
-    source = inspect.getsource(module)
-    tree = ast.parse(source)
-    lines = source.encode("utf-8").splitlines(keepends=True)  # bytes split on \r, \n only, as ast counts lines
-    segments = []
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Assign)):
-            segments.append(_Renamer().visit(ast.parse(_segment(lines, node))))
-    return "\n\n".join(ast.unparse(seg) for seg in segments) + "\n"
-
 
 _DISPATCH = _DATA_DIR.joinpath("dispatch.py.tmpl").read_text(encoding="utf-8")
 _DISPATCH_BRANCH_TOKEN = "# __SESSION_START_BRANCH__\n"  # noqa: S105 -- a template marker, not a credential
@@ -101,6 +30,12 @@ _WIRE_NAME_OF = {"cursor": "cursor_wire(raw)"}  # a family that infers the wire 
 
 _UNREADABLE = _DATA_DIR.joinpath("unreadable_payload.py.tmpl").read_text(encoding="utf-8")
 _WIRE_RAW_TOKENS = {"__PRE_TOOL_RAW__": contract.PRE_TOOL, "__STOP_RAW__": contract.STOP}
+#: The flags the runtime fault reads the event from, with no shared runtime to read them through.
+_FLAG_TOKENS = {
+    "__GATE_FLAG__": repr(write_gate.GATE_FLAG),
+    "__STOP_FLAG__": repr(write_gate.STOP_FLAG),
+    "__STOP_DIR__": repr(write_gate._EVENT_ARG[contract.STOP]),
+}
 
 
 def _warn_answer(agent: str) -> str:
@@ -118,6 +53,8 @@ def _unreadable_source(agent: str) -> str:
     source = _UNREADABLE.replace("__WARN_RESPOND__", _warn_answer(agent)).replace("__RESPOND__", answer)
     for token, canonical in _WIRE_RAW_TOKENS.items():
         source = source.replace(token, repr(_wire_raw(agent, canonical)))
+    for token, value in _FLAG_TOKENS.items():
+        source = source.replace(token, value)
     return source
 
 
@@ -184,34 +121,27 @@ def _can_ask_tokens(agent: str) -> dict[str, str]:
     }
 
 
-#: The modules every handler carries, in order: each may use the names of those before it.
-_HANDLER_MODULES = (
-    budget,
-    journal,
-    halt,
-    guard_runner,
-    decision_target,
-    decision_log,
-    edit_image,
-    patch_image,
-    gate_outcome,
-    outside_repo,
-    session_log,
-    stop_reentry,
-    unreadable_stop,
-    workspace_root,
-    repo_stop,
-    stop_roots,
-    write_gate,
-    tool_call_gate,
-)
+_LOADER = _DATA_DIR.joinpath("runtime_loader.py.tmpl").read_text(encoding="utf-8")
+
+
+def _loader() -> str:
+    return (
+        _LOADER.replace("__SHARED_FILE_REPR__", repr(SHARED_FILE))
+        .replace("__SHARED_NAME_REPR__", repr(SHARED_NAME))
+        .replace("__SHARED_FILE__", SHARED_FILE)
+        .replace("__PIN__", repr(shared_pin()))
+    )
 
 
 def _handler_source(agent: str) -> str:
-    """The full handler-block body for `agent`: extracted guard logic, optionally extracted"""
-    parts = ["\n".join(_extract(module) for module in _HANDLER_MODULES)]
+    """Every name `agent`'s entry runs with: the shared guard logic, then the entry's own handler."""
+    return _shared_body() + _entry_handler(agent)
+
+
+def _entry_handler(agent: str) -> str:
+    """The handler block `agent`'s entry carries: the pinned loader, then its vendor's own glue."""
+    parts = [_loader()]
     if agent in _SESSION_START_AGENTS:
-        parts.append("\n")
         parts.append(_extract(sessionstart))
         parts.append(_SESSION_START_ORCHESTRATION)
     branch = _SESSION_START_BRANCH if agent in _SESSION_START_AGENTS else ""
@@ -250,28 +180,19 @@ def _hoist_point(source: str) -> int:
     return -1 if at < 0 else block_start + at + len(_SYS_IMPORT)
 
 
-def _needed_imports(handler_source: str) -> str:
-    """`_IMPORTS`, minus any line whose renamed name(s) `handler_source` never references.
-
-    `_IMPORTS` is one fixed block spliced into every vendor's bundle, but `guard_runner`
-    (extracted for every vendor) uses only five of its six names -- `shutil` is used solely by
-    `sessionstart`, extracted for claude_code alone, so every other vendor's bundle carried a
-    dead import. Filtering per line against what the assembled handler actually uses keeps
-    this in sync as the handler modules change, rather than hand-tuning the template.
-    """
-    used = set(re.findall(r"_chock_\w+", handler_source))
-    lines = [line for line in _IMPORTS.splitlines() if used & set(re.findall(r"_chock_\w+", line))]
-    return "\n".join(lines) + ("\n" if lines else "")
+def runtime_files(agent: str) -> dict[str, str]:
+    """{file name: text} for `agent`'s runtime: the entry and the shared runtime it loads, placed side by side."""
+    return {f"{agent}.py": render(agent), SHARED_FILE: render_shared()}
 
 
 @functools.cache
 def render(agent: str) -> str:
-    """Render `agent`'s self-contained vendored runtime: agentseam's bundle, chock's"""
+    """Render `agent`'s runtime entry: agentseam's bundle, chock's imports and its handler, which loads `render_shared()`."""
     source = bundler.bundle(agent)
     at = _hoist_point(source)
     if at < 0:
         raise ValueError("%s: bundle() output has no top-imports anchor to hoist onto" % agent)
-    handler = _handler_source(agent)
+    handler = _entry_handler(agent)
     source = source[:at] + "\n" + _needed_imports(handler) + source[at:]
     head, sep, rest = source.partition(BEGIN)
     if not sep:

@@ -138,4 +138,5 @@ def test_an_unencodable_record_is_still_one_line(tmp_path: Path) -> None:
 
     journal.log_append(path, {"target": "caf\udce9.txt"})
 
-    assert records(path) == [{"ts": records(path)[0]["ts"], "target": "caf\\udce9.txt"}]
+    first = {"seq": 0, "prev": "0" * 64}
+    assert records(path) == [{"ts": records(path)[0]["ts"], "target": "caf\\udce9.txt", **first}]
