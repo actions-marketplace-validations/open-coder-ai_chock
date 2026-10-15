@@ -13,7 +13,7 @@ import pytest
 import yaml
 from bundle_fixtures import ADVISORY_ID, GATE_ID, GUARD_ID, bundle, hook_commands, make_members, project, run_command
 from install_fixtures import make_catalog, selection, write_selection
-from packaging_helpers import tree_bytes
+from packaging_helpers import frozen_json, tree_bytes
 from runtime_payloads import DENY_ON_THE_WIRE, PAYLOADS
 
 from chock.guardrails import toggle
@@ -56,8 +56,8 @@ def snapshot(fmt: str, root: Path) -> dict:
 
 @pytest.mark.parametrize("fmt", TARGETS)
 def test_a_build_matches_its_golden_layout_manifest_and_hooks(tmp_path: Path, fmt: str) -> None:
-    golden = json.loads((GOLDEN / f"{fmt}.json").read_text(encoding="utf-8"))
-    assert snapshot(fmt, tmp_path) == golden
+    found = snapshot(fmt, tmp_path)
+    assert found == frozen_json(GOLDEN / f"{fmt}.json", found)
 
 
 @pytest.mark.parametrize("fmt", TARGETS)

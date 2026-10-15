@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 from conftest import baseline_policy
+from runtime_support import write_runtime
 
 from chock.gate import runtime_bundle
 
@@ -22,7 +23,7 @@ def runtimes(tmp_path_factory) -> dict[str, Path]:
     paths = {}
     for agent in runtime_bundle.RUNTIME_AGENTS:
         path = out / f"{agent}.py"
-        path.write_text(runtime_bundle.render(agent), encoding="utf-8")
+        write_runtime(path, agent)
         paths[agent] = path
     return paths
 

@@ -31,6 +31,8 @@ def _chock_declared():
     called = _flag_path(argv, TOOL_CALL_FLAG)
     if called is not None:
         actions.append(_chock_spec_action(called))
+    if HALT_HOOK_FLAG in argv and repo_stop_refusal(Event(AGENT, PRE_TOOL, raw={})) is not None:
+        actions.append("block")  # stopped: a payload nobody can read is still a call the stop refuses
     for action in ("block", "ask", "warn"):
         if action in actions:
             return action, event, gate
@@ -57,7 +59,20 @@ def _chock_unreadable_stop(gate):
     return settle_unreadable_stop(root, gate.parent.parent.name, _CHOCK_UNREADABLE)
 
 
+def _chock_runtime_refusal():
+    """A refusal in this client's grammar for the event the flags name, read without the shared runtime."""
+    _report(_CHOCK_RUNTIME_FAULT + "\n")
+    argv = sys.argv[1:]
+    gate = argv[argv.index(__GATE_FLAG__) + 1] if __GATE_FLAG__ in argv[:-1] else ""
+    stop = __STOP_FLAG__ in argv or _chock_os.path.basename(_chock_os.path.dirname(gate)) == __STOP_DIR__
+    event = Event(AGENT, STOP if stop else PRE_TOOL, raw=dict(_CHOCK_WIRE_RAW[STOP if stop else PRE_TOOL]))
+    text, code = __RESPOND__(degrade(Decision.deny(_CHOCK_RUNTIME_FAULT), event), event)
+    return (text, code) if _chock_refuses(text, code) else ("", 2)
+
+
 def _chock_unreadable():
+    if _CHOCK_RUNTIME_FAULT is not None:
+        return _chock_runtime_refusal()
     action, kind, gate = _chock_declared()
     if action in (None, "warn"):
         return "", 0

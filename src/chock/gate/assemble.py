@@ -14,6 +14,7 @@ RUNNER_PACKAGE = "chock.gate.runner"
 #: from an install fails the build rather than vendoring a runner without it.
 MODULES = (
     "actor",
+    "chain",
     "cli",
     "constants",
     "context",

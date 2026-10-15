@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from stop_person_support import person_resume
 
 from chock import stop as chock_stop
 from chock.compile.compiler import compile_policy
@@ -16,6 +17,9 @@ from chock.compile.surfaces import Surface
 from chock.gate.runner import judge, script_verdict
 from chock.hooks.installers import get_hooks_dir, install_dispatcher, install_policy_hooks
 from chock.witness_export import bundle
+
+#: `chock stop` writes its machine registry entry under this test's own home, never the real one.
+pytestmark = pytest.mark.usefixtures("private_home")
 
 POLICY_ID = "word-check"
 AGENT = {"CHOCK_AGENT_COMMIT": "1"}
@@ -84,7 +88,7 @@ def test_an_agents_commit_is_refused_while_stopped_and_a_persons_passes(repo: Pa
     assert (record["verdict"], record["event"], record["actor"]) == ("block", "agent-commit", "agent:unknown")
 
     assert _commit(repo, PERSON).returncode == 0
-    chock_stop.resume_main(["--repo", str(repo)])
+    person_resume(repo)
     assert _commit(repo, AGENT).returncode == 0
 
 
