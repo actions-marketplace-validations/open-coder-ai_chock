@@ -8,12 +8,13 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
+from chock.display import inert
 from chock.doctor import checks
 from chock.doctor.targets import plugin_targets, sync_targets
 
 
 def _say(line: str) -> None:
-    sys.stdout.write(line + "\n")
+    sys.stdout.write(inert(line) + "\n")
 
 
 def _parser() -> argparse.ArgumentParser:

@@ -14,9 +14,9 @@ from typing import Any
 from agentseam import contract
 from agentseam import matrix as _matrix
 
+from chock.display import inert_all
 from chock.gatelog import JSON_HELP, REPO_HELP, SINCE_HELP, positive_days
 from chock.gatelog_read import HEARTBEAT_EVENT, ROUTES, read_events, record_level, record_route
-from chock.gatelog_report import _printable
 from chock.hook_timeout import hook_timeout
 
 VERDICTS = ("block", "ask", "warn")
@@ -185,6 +185,7 @@ def _heartbeat_lines(beats: dict[str, Any]) -> list[str]:
 
 
 def render_text(report: dict[str, Any], since: int | None = None) -> str:
+    report = inert_all(report)
     window = f", last {since} days" if since is not None else ""
     head = [f"Decision log summary ({report['records']} hook records{window})"]
     if not report["records"] and not report["heartbeats"]["sessions"]:
@@ -215,7 +216,5 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     events = read_events(Path(args.repo).resolve(), args.since, route=args.route, heartbeats=True)
     report = summary(events)
-    sys.stdout.write(
-        (json.dumps(report, indent=2) if args.json else _printable(render_text(report, args.since))) + "\n"
-    )
+    sys.stdout.write((json.dumps(report, indent=2) if args.json else render_text(report, args.since)) + "\n")
     return 0
