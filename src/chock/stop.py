@@ -13,55 +13,19 @@ import sys
 from pathlib import Path
 from typing import TextIO
 
-from chock.gate.runner.actor import actor_of, git_email, stop_agent_signal
+from chock.gate.runner.actor import git_email
 from chock.gate.runner.halt import (
     HALT_ALL,
     HALT_PARTS,
-    HALT_POLICY,
-    HALT_REASON,
     halt_find,
     halt_norm,
     halt_read,
     halt_registry_entry,
     halt_repos,
 )
-from chock.gate.runner.journal import log_now, log_trace_text, log_write
-
-_LOG = (".chock", "log", "gate-events.jsonl")
-_UNKNOWN = "unknown"
-_LIMITS = (
-    "It refuses the NEXT action of an agent whose hooks Chock wires; it stops no running process "
-    "and revokes no credential."
-)
-
-
-def _printable(text: object) -> str:
-    return "".join(ch for ch in str(text) if ch.isprintable())
-
-
-def _log(repo: Path | None, event: str, fields: dict[str, object]) -> None:
-    """One local line: who stopped or resumed, when, and the scope. Best effort: a log failure never undoes the act."""
-    if repo is None:
-        return
-    record = {"route": "sync", "policy_id": HALT_POLICY, "event": event, **fields}
-    record["actor"] = actor_of(stop_agent_signal(repo))
-    try:
-        log_write(repo.joinpath(*_LOG), record, repo)
-    except OSError as exc:
-        sys.stderr.write(f"chock: the stop is in place, but its log line was not written: {exc}\n")
-
-
-def _agent_refused(repo: Path | None, event: str, fields: dict[str, object] | None = None) -> bool:
-    """Only a person changes a stop (the actor rule): an agent's `chock stop` or `chock resume` is refused, logged."""
-    signal = stop_agent_signal(repo)
-    if signal is None:
-        return False
-    sys.stderr.write(
-        f"chock: refused: this shell is marked as an agent's ({signal}). Only a person stops or resumes "
-        "agents; they run this from their own shell.\n"
-    )
-    _log(repo, event, {"verdict": "block", "reason": HALT_REASON, **(fields or {})})
-    return True
+from chock.gate.runner.journal import log_now, log_trace_text
+from chock.stop_common import LIMITS, UNKNOWN, agent_refused, log_stop, printable, write_private
+from chock.stop_everywhere import everywhere_line, resume_everywhere, stop_everywhere
 
 
 def _person_confirms(repo: Path) -> bool:
@@ -89,8 +53,8 @@ def stop_line(repo: Path) -> str | None:
     if stop.get("unreadable"):
         return "STOPPED: .chock/stop.json cannot be read, so every agent is refused. `chock resume` removes it."
     scope = "every agent" if stop["scope"] == HALT_ALL else f"agent {stop['scope']}"
-    who, when = _printable(stop.get("who") or _UNKNOWN), _printable(stop.get("when") or _UNKNOWN)
-    reason = _printable(stop.get("reason") or "no reason given")
+    who, when = printable(stop.get("who") or UNKNOWN), printable(stop.get("when") or UNKNOWN)
+    reason = printable(stop.get("reason") or "no reason given")
     return (
         f"STOPPED: {scope}, by {who} at {when}: {reason}. Its tool calls, commits and pushes are refused; "
         "`chock resume` lifts it."
@@ -99,20 +63,9 @@ def stop_line(repo: Path) -> str | None:
 
 def print_stop(repo: Path, stream: TextIO) -> None:
     """`chock status` leads with a stop in force, before anything else it shows."""
-    from chock.stop_everywhere import everywhere_line  # noqa: PLC0415 -- it imports this module
-
     for stopped in (everywhere_line(), stop_line(repo)):
         if stopped:
             stream.write(stopped + "\n")
-
-
-def _write_private(path: Path, text: str) -> None:
-    """Write `path` whole, readable by its owner alone (0o600), in a folder only they can list (0o700)."""
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    staged = path.with_name(f".{path.name}.{os.getpid()}")
-    with os.fdopen(os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w", encoding="utf-8") as out:
-        out.write(text)
-    os.replace(staged, path)
 
 
 def _repo_arg(parser: argparse.ArgumentParser) -> None:
@@ -131,23 +84,21 @@ def stop_main(argv: list[str] | None) -> int:
     args = parser.parse_args(argv)
     repo = Path(args.repo).resolve()
     if args.everywhere:
-        from chock.stop_everywhere import stop_everywhere  # noqa: PLC0415 -- it imports this module
-
         return stop_everywhere(repo, args.agent, args.reason)
-    if _agent_refused(repo, "repo_stop"):
+    if agent_refused(repo, "repo_stop"):
         return 1
-    doc = {"scope": args.agent or HALT_ALL, "reason": args.reason, "who": git_email(repo) or _UNKNOWN}
+    doc = {"scope": args.agent or HALT_ALL, "reason": args.reason, "who": git_email(repo) or UNKNOWN}
     doc["when"] = log_now()
     path = repo.joinpath(*HALT_PARTS)
     path.parent.mkdir(parents=True, exist_ok=True)
     staged = path.with_name(f".{path.name}.{os.getpid()}")
     staged.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
     os.replace(staged, path)
-    _log(repo, "repo_stop", {**doc, "reason": log_trace_text(args.reason)})
-    sys.stdout.write(f"{stop_line(repo)}\n{_LIMITS}\n")
+    log_stop(repo, "repo_stop", {**doc, "reason": log_trace_text(args.reason)})
+    sys.stdout.write(f"{stop_line(repo)}\n{LIMITS}\n")
     entry = halt_registry_entry(repo)
     try:
-        _write_private(entry, json.dumps({**doc, "repo": os.path.realpath(repo)}, indent=2) + "\n")
+        write_private(entry, json.dumps({**doc, "repo": os.path.realpath(repo)}, indent=2) + "\n")
     except OSError as exc:
         sys.stderr.write(
             f"chock stop: the stop is in force here, but {entry} was not written: {exc}. A hook that cannot tell "
@@ -165,10 +116,8 @@ def resume_main(argv: list[str] | None) -> int:
     args = parser.parse_args(argv)
     repo = Path(args.repo).resolve()
     if args.everywhere:
-        from chock.stop_everywhere import resume_everywhere  # noqa: PLC0415 -- it imports this module
-
         return resume_everywhere(repo)
-    if _agent_refused(repo, "repo_resume") or not _person_confirms(repo):
+    if agent_refused(repo, "repo_resume") or not _person_confirms(repo):
         return 1
     path, entry = repo.joinpath(*HALT_PARTS), halt_registry_entry(repo)
     stop = halt_read(repo)
@@ -188,7 +137,7 @@ def resume_main(argv: list[str] | None) -> int:
     except OSError as exc:
         sys.stderr.write(f"chock resume: cannot remove {path}: {exc}; the stop is still in force.\n")
         return 1
-    _log(repo, "repo_resume", {"scope": stop["scope"], "who": git_email(repo) or _UNKNOWN, "when": log_now()})
+    log_stop(repo, "repo_resume", {"scope": stop["scope"], "who": git_email(repo) or UNKNOWN, "when": log_now()})
     return _unregister(
         entry, "Resumed: agents' tool calls, commits and pushes are judged by this repository's policies again.\n"
     )

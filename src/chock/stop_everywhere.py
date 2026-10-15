@@ -14,7 +14,7 @@ from pathlib import Path
 from chock.gate.runner.actor import git_email
 from chock.gate.runner.halt import HALT_ALL, halt_everywhere_entry, halt_everywhere_read, halt_repos
 from chock.gate.runner.journal import log_now, log_trace_text
-from chock.stop import _LIMITS, _UNKNOWN, _agent_refused, _log, _printable, _write_private
+from chock.stop_common import LIMITS, UNKNOWN, agent_refused, log_stop, printable, write_private
 
 #: The word a person types to resume: the repository name's equivalent for a stop that names no repository.
 CONFIRM_WORD = "everywhere"
@@ -41,8 +41,8 @@ def everywhere_line() -> str | None:
             f"STOPPED EVERYWHERE: {halt_everywhere_entry()} cannot be read, so every agent on this machine is "
             "refused. `chock resume --everywhere` removes it."
         )
-    who, when = _printable(stop.get("who") or _UNKNOWN), _printable(stop.get("when") or _UNKNOWN)
-    reason = _printable(stop.get("reason") or "no reason given")
+    who, when = printable(stop.get("who") or UNKNOWN), printable(stop.get("when") or UNKNOWN)
+    reason = printable(stop.get("reason") or "no reason given")
     return (
         f"STOPPED EVERYWHERE: every agent on this machine, by {who} at {when}: {reason}. Their tool calls, commits "
         "and pushes are refused in every repository; `chock resume --everywhere` lifts it."
@@ -55,17 +55,17 @@ def stop_everywhere(repo: Path, agent: str | None, reason: str) -> int:
         sys.stderr.write("chock stop: --everywhere stops every agent; it takes no --agent.\n")
         return 2
     log_repo = _log_repo(repo)
-    if _agent_refused(log_repo, "repo_stop", _MARK):
+    if agent_refused(log_repo, "repo_stop", _MARK):
         return 1
-    doc = {"scope": HALT_ALL, "reason": reason, "who": git_email(log_repo) or _UNKNOWN, "when": log_now(), **_MARK}
+    doc = {"scope": HALT_ALL, "reason": reason, "who": git_email(log_repo) or UNKNOWN, "when": log_now(), **_MARK}
     entry = halt_everywhere_entry()
     try:
-        _write_private(entry, json.dumps(doc, indent=2) + "\n")
+        write_private(entry, json.dumps(doc, indent=2) + "\n")
     except OSError as exc:
         sys.stderr.write(f"chock stop: {entry} was not written: {exc}; nothing is stopped.\n")
         return 1
-    _log(log_repo, "repo_stop", {**doc, "reason": log_trace_text(reason)})
-    sys.stdout.write(f"{everywhere_line()}\n{_LIMITS}\n")
+    log_stop(log_repo, "repo_stop", {**doc, "reason": log_trace_text(reason)})
+    sys.stdout.write(f"{everywhere_line()}\n{LIMITS}\n")
     return 0
 
 
@@ -88,7 +88,7 @@ def _person_confirms() -> bool:
 def resume_everywhere(repo: Path) -> int:
     """Remove the machine-wide stop. Per-repository stops stay in force."""
     log_repo = _log_repo(repo)
-    if _agent_refused(log_repo, "repo_resume", _MARK) or not _person_confirms():
+    if agent_refused(log_repo, "repo_resume", _MARK) or not _person_confirms():
         return 1
     entry = halt_everywhere_entry()
     if not os.path.lexists(entry):
@@ -101,8 +101,8 @@ def resume_everywhere(repo: Path) -> int:
             f"chock resume --everywhere: {entry} was not removed ({exc}); the machine-wide stop is still in force.\n"
         )
         return 1
-    _log(
-        log_repo, "repo_resume", {"scope": HALT_ALL, "who": git_email(log_repo) or _UNKNOWN, "when": log_now(), **_MARK}
+    log_stop(
+        log_repo, "repo_resume", {"scope": HALT_ALL, "who": git_email(log_repo) or UNKNOWN, "when": log_now(), **_MARK}
     )
     sys.stdout.write("Resumed everywhere: the machine-wide stop is lifted.\n" + _PER_REPO)
     return 0
