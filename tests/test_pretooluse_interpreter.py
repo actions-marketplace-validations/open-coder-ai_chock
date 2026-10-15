@@ -169,6 +169,7 @@ def test_an_old_baked_entry_is_replaced_by_the_launcher_form_and_foreign_entries
     install_hooks(repo, "claude_code")
     entries = json.loads(path.read_text(encoding="utf-8"))["hooks"]["PreToolUse"]
     assert entries[0] == theirs, "the adopter's own entry must survive, first"
-    assert len(entries) == 2, "the old entry is ours: replaced, not kept beside the new one"
+    assert len(entries) == 3, "the old entry is ours: replaced, not kept beside the new one (and the stop check)"
     assert entries[1]["hooks"][0]["command"] == hook_command(".chock/bin/claude_code.py", "--guard", GUARD)
+    assert entries[2]["hooks"][0]["command"] == hook_command(".chock/bin/claude_code.py", "--stop-check")
     assert "block-destructive-commands" in installed_policy_ids(repo, "claude_code")

@@ -26,6 +26,8 @@ DATA: dict[str, Any] = json.loads(
 #: A plugin name a log line gives is only ever a folder name; anything else is not looked up.
 _PLUGIN_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _UNKNOWN = "unknown"
+#: A person's git email (an override's approver, a stop's author): kept in the local 0o600 log, never exported.
+LOCAL_ONLY = ("approver", "who")
 #: The only file type an export writes: it never replaces a config, a script or anything else.
 EXPORT_SUFFIX = ".json"
 
@@ -114,7 +116,7 @@ def bundle(agent: str, records: list[dict[str, Any]], repo_root: Path, since: in
 
     home = os.path.expanduser("~")
     refs = redact(catalog_refs(agent, records, repo_root), home)
-    records = redact(records, home)
+    records = redact([{k: v for k, v in r.items() if k not in LOCAL_ONLY} for r in records], home)
     plugins = sorted({f"{r['plugin']} {r.get('plugin_version') or ''}".strip() for r in records if r.get("plugin")})
     return {
         "format": DATA["format"],

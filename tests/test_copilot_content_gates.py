@@ -108,8 +108,9 @@ def _edit(repo: Path, new: str) -> str:
 
 def test_the_installed_file_carries_a_write_gate_and_a_stop_gate_in_the_witnessed_entry_shape(tmp_path: Path) -> None:
     hooks = _hooks(_repo(tmp_path))
-    (pre,) = hooks["PreToolUse"]
+    pre, stop_check = hooks["PreToolUse"]
     (stop,) = hooks["Stop"]
+    assert "matcher" not in stop_check and stop_check["bash"].endswith(" --stop-check"), "the repo stop sees every tool"
     assert set(pre) == ENTRY_KEYS | {"matcher"}
     assert pre["matcher"] == COPILOT_WRITE_MATCHER == "Edit|Write"
     assert set(stop) == ENTRY_KEYS, "a turn end has no tool to match"

@@ -60,6 +60,20 @@ start and an unreadable payload have no `target`. `client`, and the client in `a
 a guessed command (a short or common one is easy to guess); they cannot read one they did not guess.
 Treat the log as private to the machine's owner.
 
+## Stop and override
+
+While a stop is in force (`chock stop`, [Stop](stop.md)),
+each call it refuses is a `block` line with `"reason": "stopped"` and the fields above (`actor`,
+`session_id`, `target`). A pre-tool refusal names the hook's policy; a commit or push refused at
+the git dispatcher names `chock-stop`. `chock stop` and `chock resume` each write one `chock-stop`
+line, event `repo_stop` or `repo_resume`, with `scope`, `who` (git `user.email`) and `when`.
+
+A person's `CHOCK_ALLOW` override is an `allow` line with `"override": "CHOCK_ALLOW"`, the
+`policy_id` it answered, and `approver`: the git `user.email` of the shell that ran it.
+
+`approver` and `who` name a person. They stay in this local log (created `0o600`): Chock sends
+nothing over the network, and `chock witness export` leaves both out.
+
 ## Heartbeat
 
 Where the client documents a session-start event, chock wires one more hook there (the runtime,

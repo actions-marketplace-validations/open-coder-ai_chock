@@ -156,7 +156,8 @@ def _hook_schema(repo: Adopter) -> None:
     entries = repo.read_json(".claude/settings.json")["hooks"]["PreToolUse"]
     assert entries, "no PreToolUse entries installed"
     for entry in entries:
-        assert entry["matcher"], "an entry has no matcher"
+        stop_check = [h["command"].endswith(" --stop-check") for h in entry["hooks"]] == [True]
+        assert entry.get("matcher") or stop_check, "an entry has no matcher (only the repo stop check sees every tool)"
         for hook in entry["hooks"]:
             assert hook["type"] == "command"
             # Repo-relative, run by git from the top level: survives a repo move, names no interpreter.
