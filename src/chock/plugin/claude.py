@@ -11,7 +11,7 @@ from agentseam import packaging
 from chock.compile.emitters.in_agent import GATE_FILE
 from chock.compile.emitters.in_agent_hooks import hooks_map_file
 from chock.gate import runtime_bundle
-from chock.hooks import launch
+from chock.hooks import launch, stop_check
 from chock.plugin import gate_package, guard_gate, store
 from chock.plugin.build import (
     LICENSE_REL,
@@ -48,18 +48,16 @@ _ENFORCED_NOTE = (
 _GATE_REL = _SCRIPTS_TEMPLATE.format(name=GATE_FILE)
 
 
-def _adapter_source(agent: str = "claude_code") -> str:
-    """`agent`'s self-contained runtime, verbatim -- agentseam's bundle plus chock's own"""
-    return runtime_bundle.render(agent)
-
-
 _LAUNCHER_REL = _SCRIPTS_TEMPLATE.format(name=launch.PLUGIN_LAUNCHER)
 
 
 def _runtime_files(agent: str) -> dict[Path, str]:
-    """`agent`'s runtime, and the launcher that starts it with a Python that actually runs."""
+    """`agent`'s runtime entry, the shared runtime it loads, and the launcher that starts it with a Python that runs."""
     return {
-        Path(_SCRIPTS_TEMPLATE.format(name=f"{agent}.py")): _adapter_source(agent),
+        **{
+            Path(_SCRIPTS_TEMPLATE.format(name=name)): text
+            for name, text in runtime_bundle.runtime_files(agent).items()
+        },
         Path(_LAUNCHER_REL): launch.launcher_text(),
     }
 
@@ -146,6 +144,7 @@ def claude_plugin_files(policy_dir: Path, manifest: dict[str, Any], repo_root: P
         gate_package.gate_hooks_file("claude_code", _gate_command()) if gate else None,
     )
     if hooks is not None:
+        hooks = guard_gate.merge_hooks(hooks, stop_check.plugin_doc("claude_code", hooks, generic=False))
         files[Path(packaging.supports("claude_code", packaging.HOOKS))] = json.dumps(hooks, indent=2) + "\n"
         files.update(_runtime_files("claude_code"))
     if script:

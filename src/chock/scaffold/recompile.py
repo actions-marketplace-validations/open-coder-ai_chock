@@ -23,7 +23,7 @@ from chock.hooks.in_agent_install import (
     uninstall_hooks,
 )
 from chock.hooks.installers import get_hooks_dir, install_policy_hooks
-from chock.hooks.runtime_vendor import owned_markers, runtime_rel
+from chock.hooks.runtime_vendor import owned_markers, prune_shared_runtime, runtime_rel
 from chock.hooks.sessionstart_install import install_sessionstart_hook
 from chock.hooks.wiring_drift import wiring_differences
 from chock.index.cli import cmd_refresh
@@ -273,6 +273,7 @@ def recompile(repo_root: Path | str, agents: list[str], *, skip_hooks: bool = Fa
 
         before = _witness()
         unwired = _install_vendors(repo_root, wired)
+        prune_shared_runtime(repo_root)
         if _witness() != before:
             with tempfile.TemporaryDirectory(prefix="chock-coverage-", dir=chock_dir) as tmp2:
                 coverage = _compile_all(repo_root, agents, Path(tmp2) / "compiled")

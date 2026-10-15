@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from runtime_support import load_runtime, write_runtime
 
 from chock.eval import execute
 from chock.gate import guard_runner, runtime_bundle
@@ -69,7 +70,7 @@ def dumping_guard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def run_bundle(agent: str, payload: dict, guard: Path, tmp_path: Path) -> subprocess.CompletedProcess[bytes]:
     runtime = tmp_path / f"{agent}.py"
-    runtime.write_text(runtime_bundle.render(agent), encoding="utf-8")
+    write_runtime(runtime, agent)
     return subprocess.run(
         [sys.executable, str(runtime), "--guard", str(guard)],
         input=json.dumps(payload).encode(),
@@ -104,9 +105,8 @@ def test_cursor_follows_the_event_that_fired(event, payload, expected, tmp_path,
 
 
 @pytest.mark.parametrize("agent", sorted(PAYLOADS))
-def test_an_unknown_event_name_cannot_ask(agent) -> None:
-    namespace: dict = {}
-    exec(runtime_bundle.render(agent), namespace)  # noqa: S102 -- loading the rendered bundle is the test
+def test_an_unknown_event_name_cannot_ask(agent, tmp_path) -> None:
+    namespace = load_runtime(tmp_path, agent)
     unknown = {"hook_event_name": "NotAnEvent", "hookEventName": "NotAnEvent", "agent_action_name": "NotAnEvent"}
 
     assert namespace["_chock_can_ask"](unknown) is False

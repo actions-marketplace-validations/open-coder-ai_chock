@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 from conftest import init_repo
+from runtime_support import write_runtime
 
-from chock.gate import runtime_bundle
 from chock.gate.assemble import runner_source
 
 POLICY = "demo-policy"
@@ -22,7 +22,7 @@ def _install(repo: Path, action: str) -> None:
     bin_dir = repo / ".chock" / "bin"
     bin_dir.mkdir(parents=True)
     (bin_dir / "gate.py").write_text(runner_source(), encoding="utf-8")
-    (bin_dir / "claude_code.py").write_text(runtime_bundle.render("claude_code"), encoding="utf-8")
+    write_runtime(bin_dir / "claude_code.py", "claude_code")
     gate = repo / ".chock" / "compiled" / POLICY / "pre-tool-use" / "gate.json"
     gate.parent.mkdir(parents=True)
     spec = {
