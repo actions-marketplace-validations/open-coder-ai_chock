@@ -10,6 +10,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from chock.display import inert_all
 from chock.gatelog_read import (
     LEVELS,
     LOG_NAME,
@@ -25,7 +26,7 @@ from chock.gatelog_read import (
     record_route,
     settings_problems,
 )
-from chock.gatelog_report import _printable, render_groups_md, render_groups_text
+from chock.gatelog_report import render_groups_md, render_groups_text
 
 __all__ = ["LEVELS", "ROUTES", "VERDICTS", "follow", "log_files", "read_events"]
 
@@ -167,6 +168,7 @@ def installed_policies(repo_root: Path) -> list[str]:
 
 
 def render_text(summary: list[dict[str, Any]], silent: list[str], allowed: int = 0) -> str:
+    summary, silent = inert_all(summary), inert_all(silent)
     cols = ("events", "allow", "block", "ask", "warn") + (
         ("would_block",) if any(e["would_block"] for e in summary) else ()
     )
@@ -238,7 +240,7 @@ def main(argv: list[str] | None = None, *, polls: int | None = None) -> int:
         elif args.format == "md":
             print(render_groups_md(rows, by, args.since))
         else:
-            print(_printable(render_groups_text(rows, by)))
+            print(render_groups_text(rows, by))
         return 0
 
     summary = summarize(events)
@@ -251,7 +253,7 @@ def main(argv: list[str] | None = None, *, polls: int | None = None) -> int:
         report = {"summary": summary, "silent": silent, "events": len(events), "allowed_calls": allowed_calls(events)}
         print(json.dumps(report, indent=2))
     else:
-        print(_printable(render_text(summary, silent, allowed_calls(events))))
+        print(render_text(summary, silent, allowed_calls(events)))
     return 0
 
 

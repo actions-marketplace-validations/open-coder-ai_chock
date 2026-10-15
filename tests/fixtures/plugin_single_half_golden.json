@@ -56,7 +56,7 @@
     "skills/protect-config/SKILL.md": "02fe6c6e3410f7f8e80b2730b2f478a550eec14ef8ece84cad4557889fd39b78"
   },
   "guard/devin": {
-    ".devin-plugin/plugin.json": "fd7cb5f9308d731df51d07441f25f5f09baebede9bf13b546788e6af0491657b",
+    ".devin-plugin/plugin.json": "d46d2c23ad2c496736b49b27477df1f689d4bd2cbc036ff9dec83e4945703f38",
     "hooks.json": "181dcf1951afa52fa245b0f1b8889ecfdcb962bf6c286a8d42c89d9da68e4f86",
     "scripts/protect-config.py": "1a8f6f596cef71e3f3657c903b9a8fff3e48df700f49aa4ec42a0361c8d21914",
     "skills/protect-config/SKILL.md": "735981b8389ec7f004b5d52ff7360b8f3c876d8ded4d525f7b22e1716e7edc3c"

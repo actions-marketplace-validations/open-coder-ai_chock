@@ -144,7 +144,7 @@ def test_non_utf8_path_is_judged_on_its_raw_form(tmp_path: Path, capsys: pytest.
     rc, out, _ = run(repo, "--json", capsys=capsys)
     assert rc == 1 and [f["rule"] for f in json.loads(out)["findings"]] == ["forbidden-path"]
     rc, out, _ = run(repo, capsys=capsys)
-    assert rc == 1 and "?" in out
+    assert rc == 1 and "x\\udcffprod.env" in out
 
 
 def test_skip_counts_are_noted_on_stderr(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

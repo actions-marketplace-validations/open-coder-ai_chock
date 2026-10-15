@@ -14,6 +14,7 @@ from chock.compile.surfaces import Surface
 from chock.plugin import posture
 from chock.plugin.codex import POSTURE_ENFORCED_CODEX
 from chock.plugin.cursor import POSTURE_ENFORCED_CURSOR
+from chock.plugin.devin import POSTURE_BESTEFFORT_DEVIN
 
 WITNESS_ROW = {
     "agent": "cursor",
@@ -35,6 +36,7 @@ CLAIM_ROW = {
 RENDERS = {
     "codex_cli": (posture.enforced_codex, POSTURE_ENFORCED_CODEX),
     "cursor": (posture.enforced_cursor, POSTURE_ENFORCED_CURSOR),
+    "devin": (posture.enforced_devin, POSTURE_BESTEFFORT_DEVIN),
 }
 
 
@@ -170,6 +172,15 @@ def test_claude_codes_plugin_witness_cites_its_record_and_witnesses_no_repo_hook
     assert "witness/results/witness-claude-code-2026-10-12.md" in row.method
     assert "198694b" in row.method
     assert evidence.witness("claude_code", Surface.PRE_TOOL_USE.value) is None
+
+
+def test_devins_plugin_witness_cites_its_record_and_witnesses_no_repo_hook() -> None:
+    """W-DEV: the plugin route was witnessed, so only plugin-hook has a row; the repo-hook route was not."""
+    row = evidence.witness("devin", evidence.PLUGIN_HOOK)
+    assert row is not None
+    assert "witness/results/witness-devin-2026-10-08.md" in row.method
+    assert "0f06113" in row.method
+    assert evidence.witness("devin", Surface.PRE_TOOL_USE.value) is None
 
 
 def test_the_shipped_ledger_is_the_file_on_disk() -> None:

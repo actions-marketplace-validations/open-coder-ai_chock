@@ -13,10 +13,10 @@ import sys
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 from urllib.parse import quote, urlsplit
 
 from chock import __version__
+from chock.display import inert
 from chock.gate import runner
 from chock.gate.sarif_output import refusal, write_output
 from chock.guidance.source import CONTRACT, POLICIES_DIR, GuidanceError, read_text
@@ -28,16 +28,14 @@ _LEVEL = {runner.ACTION_BLOCK: "error", runner.ACTION_ASK: "warning", runner.ACT
 _CONTRACT_BYTES = 4_000_000
 _TEXT_CAP = 1000
 _ID_CAP = 200
-_UTF8 = SimpleNamespace(encoding="utf-8")
-_UNSAFE = re.compile(r"[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]+")
+_SPACES = re.compile(r"[ \t\r\n]+")
 _CWE_ID = re.compile(r"CWE-(\d+)")
 _MATCH = re.compile(r"(?P<path>[^:\s][^:]*?)(?::(?P<line>\d+))?: (?P<text>.*)", re.DOTALL)
 
 
 def safe_text(value: object, cap: int = _TEXT_CAP) -> str:
-    """One line of text with no control, line-break or invisible character and nothing a UTF-8 file cannot hold."""
-    text = " ".join(_UNSAFE.sub(" ", str(value)).split())
-    text = runner._encodable(text, _UTF8)
+    """One line of text: line breaks become spaces; any other control or invisible character is shown escaped."""
+    text = inert(_SPACES.sub(" ", str(value)).strip())
     return text if len(text) <= cap else text[: cap - 1] + "…"
 
 

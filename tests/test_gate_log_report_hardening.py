@@ -43,7 +43,7 @@ def test_text_output_drops_terminal_control_characters(tmp_path: Path, capsys: p
 
     out = capsys.readouterr().out
     assert "\x1b" not in out and "\x07" not in out
-    assert "evil?]0;title?agent" in out and "plain" in out
+    assert "evil\\x1b]0;title\\x07agent" in out and "plain" in out
 
 
 @pytest.mark.parametrize("days", ["0", "-3"])

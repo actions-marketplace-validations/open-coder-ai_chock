@@ -15,6 +15,7 @@ from typing import Any
 from agentseam import matrix as _matrix
 
 from chock import __version__, vendors
+from chock.display import inert
 from chock.gate.runner import journal
 from chock.gatelog import SINCE_HELP, positive_days
 from chock.gatelog_chain import heads
@@ -200,5 +201,5 @@ def main(argv: list[str] | None = None) -> int:
         f"Attach it to: {doc['issue']}",
         "Form fields: " + "; ".join(f"{label} = {shown[key]}" for key, label in DATA["form_fields"].items()),
     ]
-    sys.stdout.write("\n".join(lines) + "\n")
+    sys.stdout.write("\n".join(map(inert, lines)) + "\n")
     return 0
