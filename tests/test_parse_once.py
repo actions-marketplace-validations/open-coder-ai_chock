@@ -9,7 +9,16 @@ import os
 import yaml
 
 from chock import yamlio
-from chock.gate import edit_image, guard_runner, patch_apply, patch_image, runtime_bundle, sessionstart, write_gate
+from chock.gate import (
+    edit_image,
+    guard_runner,
+    patch_apply,
+    patch_image,
+    runtime_bundle,
+    runtime_shared,
+    sessionstart,
+    write_gate,
+)
 
 
 def test_the_libyaml_loader_is_used_when_present() -> None:
@@ -49,7 +58,7 @@ def test_the_bundle_segments_match_ast_exactly() -> None:
         source = inspect.getsource(module)
         lines = source.encode("utf-8").splitlines(keepends=True)
         for node in ast.parse(source).body:
-            assert runtime_bundle._segment(lines, node) == ast.get_source_segment(source, node)
+            assert runtime_shared._segment(lines, node) == ast.get_source_segment(source, node)
 
 
 def test_a_runtime_is_rendered_once_per_process(monkeypatch) -> None:

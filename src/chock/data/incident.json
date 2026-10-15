@@ -1,0 +1,6 @@
+{
+  "format": "chock-incident/1",
+  "notice": "Read from this machine's own decision log. It is evidence for a person's report, not a report, and it makes no claim about any regulation or standard. Nothing was sent anywhere.",
+  "share_notice": "--share: approver and who (a person's git email) are left out.",
+  "local_notice": "approver and who name a person; pass --share before giving this to anyone else."
+}

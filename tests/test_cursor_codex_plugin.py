@@ -64,6 +64,7 @@ def test_cursor_guard_policy_layout_and_hook(policy, tmp_path: Path) -> None:
         Path("hooks/hooks.json"),
         Path("scripts/cursor.py"),
         Path("scripts/launch.sh"),
+        Path("scripts/_chock_runtime.py"),
         Path("scripts/block-destructive-commands.sh"),
     }
 
@@ -113,6 +114,7 @@ def test_codex_guard_policy_layout_and_hook(policy, tmp_path: Path) -> None:
         Path("hooks/hooks.json"),
         Path("scripts/codex_cli.py"),
         Path("scripts/launch.sh"),
+        Path("scripts/_chock_runtime.py"),
         Path("scripts/block-destructive-commands.sh"),
         Path("assets/icon.svg"),
     }

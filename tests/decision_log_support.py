@@ -9,8 +9,7 @@ import sys
 from pathlib import Path
 
 from conftest import init_repo
-
-from chock.gate import runtime_bundle
+from runtime_support import write_runtime
 
 AGENT = "claude_code"
 POLICY = "p-log"
@@ -29,7 +28,7 @@ def sync_layout(tmp: Path, guard_body: str) -> tuple[Path, Path, Path]:
     init_repo(repo)
     runtime = repo / ".chock" / "bin" / f"{AGENT}.py"
     runtime.parent.mkdir(parents=True)
-    runtime.write_text(runtime_bundle.render(AGENT), encoding="utf-8")
+    write_runtime(runtime, AGENT)
     guard = repo / ".agents" / "policies" / POLICY / "implementations" / "guard.sh"
     guard.parent.mkdir(parents=True)
     guard.write_text(guard_body, encoding="utf-8", newline="\n")
@@ -44,7 +43,7 @@ def plugin_layout(tmp: Path, guard_body: str) -> tuple[Path, Path, Path]:
     root = tmp / "plugins" / POLICY
     runtime = root / "scripts" / f"{AGENT}.py"
     runtime.parent.mkdir(parents=True)
-    runtime.write_text(runtime_bundle.render(AGENT), encoding="utf-8")
+    write_runtime(runtime, AGENT)
     manifest = root / ".claude-plugin" / "plugin.json"
     manifest.parent.mkdir(parents=True)
     manifest.write_text(json.dumps({"name": POLICY, "version": PLUGIN_VERSION}), encoding="utf-8")

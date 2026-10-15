@@ -23,6 +23,7 @@ from decision_log_support import (
     sync_layout,
     sync_log,
 )
+from runtime_support import write_runtime
 
 from chock import vendors
 from chock.compile.emitters.in_agent_hooks import adapter_rel, generic_hooks_file
@@ -101,7 +102,7 @@ def test_every_documented_agent_runtime_writes_its_heartbeat(tmp_path, agent):
     (repo / ".git").mkdir(parents=True)
     runtime = repo / ".chock" / "bin" / f"{agent}.py"
     runtime.parent.mkdir(parents=True)
-    runtime.write_text(runtime_bundle.render(agent), encoding="utf-8")
+    write_runtime(runtime, agent)
     done = _start(runtime, repo, hook_env(tmp_path / "home"), agent)
     assert (done.returncode, done.stdout) == (0, "")
     assert [(r["event"], r["agent"]) for r in records(sync_log(repo))] == [("session_start", agent)]

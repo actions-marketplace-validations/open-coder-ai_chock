@@ -7,6 +7,7 @@ from pathlib import Path
 
 from conftest import baseline_policy, init_repo
 
+from chock.gate import runtime_bundle
 from chock.hooks.in_agent_install import WIRED_VENDORS
 from chock.hooks.launch import LAUNCHER_REL
 from chock.scaffold.recompile import recompile, wired_vendors
@@ -37,9 +38,14 @@ def test_a_claude_only_repo_gets_no_other_vendors_config(tmp_path: Path) -> None
 
     assert (repo / ".claude" / "settings.json").exists()
     assert (repo / ".chock" / "bin" / "claude_code.py").exists()
+    assert (repo / ".chock" / "bin" / runtime_bundle.SHARED_FILE).exists(), "the entry loads it from beside itself"
     for stray in (".cursor", ".codex", ".windsurf", ".devin", ".gemini", ".github/hooks", ".agents/hooks.json"):
         assert not (repo / stray).exists(), stray
-    runtimes = sorted(p.name for p in (repo / ".chock" / "bin").iterdir() if p.name not in {"gate.py", "launch.sh"})
+    runtimes = sorted(
+        p.name
+        for p in (repo / ".chock" / "bin").iterdir()
+        if p.name not in {"gate.py", "launch.sh", runtime_bundle.SHARED_FILE}
+    )
     assert runtimes == ["claude_code.py"], "no other vendor's runtime is vendored either"
     assert (repo / LAUNCHER_REL).is_file(), "the launcher every hook command runs"
 
@@ -66,6 +72,7 @@ def test_a_vendor_dropped_from_supported_agents_has_its_runtime_pruned(tmp_path:
 
     assert not (repo / ".chock" / "bin" / "cursor.py").exists()
     assert (repo / ".chock" / "bin" / "claude_code.py").exists()
+    assert (repo / ".chock" / "bin" / runtime_bundle.SHARED_FILE).exists(), "the entry loads it from beside itself"
 
 
 def test_dropping_a_vendor_removes_its_hook_config_entries_too(tmp_path: Path) -> None:

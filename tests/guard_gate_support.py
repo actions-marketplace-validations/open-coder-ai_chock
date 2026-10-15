@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 import yaml
 
+from chock.gate import runtime_bundle
 from chock.plugin import claude, codex, copilot, cursor, devin
 
 POLICY_ID = "protect-config"
@@ -53,7 +54,7 @@ DIFFERS = {
 #: Engine files copied verbatim into every enforcing package; they change with the engine, not
 #: with how a package is assembled, so the single-half golden leaves them out.
 RUNTIME_NAMES = frozenset({"claude_code.py", "codex_cli.py", "vscode_copilot.py", "cursor.py", "devin.py"})
-RUNTIME_NAMES |= {"launch.sh", "gate.py"}
+RUNTIME_NAMES |= {"launch.sh", "gate.py", runtime_bundle.SHARED_FILE}
 
 
 def manifest(*, guard: bool, gate: bool, policy_id: str = POLICY_ID) -> dict[str, Any]:

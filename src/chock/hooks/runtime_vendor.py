@@ -26,6 +26,10 @@ def runtime_rel(agent: str) -> Path:
     return Path(".chock") / "bin" / f"{agent}.py"
 
 
+#: The guard logic every entry in `.chock/bin/` loads from beside itself.
+SHARED_RUNTIME_REL = Path(".chock") / "bin" / runtime_bundle.SHARED_FILE
+
+
 def owned_markers(agent: str) -> tuple[str, ...]:
     """Every `.chock/bin/` command substring that identifies a hook entry as `agent`'s own."""
     rel = runtime_rel(agent).as_posix()
@@ -58,13 +62,21 @@ def sync_session_helper(repo_root: Path) -> None:
     write_generated(dest, resources.files("chock.gate").joinpath("session_reader.py").read_text(encoding="utf-8"))
 
 
+def prune_shared_runtime(repo_root: Path) -> None:
+    """Drop the shared runtime once no entry in `.chock/bin/` is left to load it."""
+    shared = Path(repo_root) / SHARED_RUNTIME_REL
+    if not any((Path(repo_root) / runtime_rel(agent)).exists() for agent in runtime_bundle.RUNTIME_AGENTS):
+        shared.unlink(missing_ok=True)
+
+
 def vendor_runtime(repo_root: Path, agent: str) -> Path:
-    """Write `agent`'s self-contained runtime into `.chock/bin/`. Returns the path written."""
+    """Write `agent`'s runtime entry, and the shared runtime it loads, into `.chock/bin/`. Returns the entry."""
     dest = Path(repo_root) / runtime_rel(agent)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    # LF on every platform: the drift check compares this file to the render byte for byte,
+    # LF on every platform: the drift check compares these files to the render byte for byte,
     # and a text-mode write on Windows turned every runtime into a standing "differs".
-    write_generated(dest, runtime_bundle.render(agent))
+    for name, text in runtime_bundle.runtime_files(agent).items():
+        write_generated(dest.with_name(name), text)
     with contextlib.suppress(OSError):
         dest.chmod(0o755)
     write_launcher(repo_root)

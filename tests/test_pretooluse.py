@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 from conftest import baseline_policy, run_hook_command
+from runtime_support import write_runtime
 
-from chock.gate import runtime_bundle
 from chock.gate.guard_runner import find_interpreter
 
 FRAMEWORK_ROOT = Path(__file__).resolve().parents[1]
@@ -22,7 +22,7 @@ GUARD = baseline_policy("block-destructive-commands") / "implementations" / "blo
 @pytest.fixture(scope="module")
 def claude_code_runtime(tmp_path_factory) -> Path:
     path = tmp_path_factory.mktemp("runtime") / "claude_code.py"
-    path.write_text(runtime_bundle.render("claude_code"), encoding="utf-8")
+    write_runtime(path, "claude_code")
     return path
 
 

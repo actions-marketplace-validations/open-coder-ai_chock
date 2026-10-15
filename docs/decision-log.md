@@ -12,9 +12,47 @@ no network, no telemetry. A file's contents are never logged.
 
 Every chock plugin in a client, the merged bundle and single catalog plugins alike, appends to that
 client's one file; each line names its `plugin`. A line is written in one append, so hooks running at
-once never interleave. One rotated file is kept beside each (`gate-events.1.jsonl`, `events.1.jsonl`);
-rotation takes a lock (fcntl, or msvcrt on Windows), and a writer that finds it busy skips rotating. The sync file is
-the same file earlier versions wrote, so older readers keep working.
+once never interleave. One rotated file is kept beside each (`gate-events.1.jsonl`, `events.1.jsonl`).
+Each write takes a lock beside the file (fcntl, or msvcrt on Windows) to rotate and chain the line (see
+[Hash chain](#hash-chain)). The sync file is the same file earlier versions wrote, so older readers keep working.
+
+## Hash chain
+
+Each line carries `seq`, its place in its file's chain, and `prev`, the sha256 of the line before it
+(that line's exact bytes, without the newline). A log's first line names 64 zeros. After a rotation the
+new file's first line names the rotated file's last, so the chain runs across both files. Every route
+writes through the same journal: runtime hooks, git hooks, the MCP gateway, `chock stop` and
+`chock resume`, and overrides.
+
+A writer waits up to one second for the lock. A line it cannot chain (the lock stayed held, or the last
+line could not be read) is still written, with `unchained` naming why. A chaining failure never
+changes a verdict.
+
+```bash
+chock status --verify-log [--route sync|plugin] [--json]   # exit 0 intact, 1 at a break
+chock status --verify-log --head <seq>:<sha256>            # confirm a head you kept is still there
+```
+
+It walks each log (rotated file first) and reports the first break: the file, the line, and the
+expected and found `prev` or `seq`. An edited, deleted, inserted or reordered line breaks the link of
+the line after it. History that is missing or rotated away is not a break: the walk reports
+`chain starts at <hash> (seq N)`. Lines written before chaining existed are counted, then the chain
+starts. A line written after that by a runtime that does not chain yet (until `chock sync` regenerates
+it, or the plugin is reinstalled) is a break of kind `unchained`. The break names the line and says why: a runtime without chaining wrote it, or a writer timed out on the
+lock. **An intact chain needs every runtime regenerated** (`chock sync`, or reinstalling the plugin) once this
+version is installed; until then, lines from older runtimes break it.
+
+What it shows, and what it does not:
+
+- It shows a change made after the fact to someone who kept an earlier head (`seq` and `sha256`, as
+  `--verify-log` prints it and `chock witness export` carries it): `--head` fails once that record
+  changes, even when every later hash was recomputed.
+- It does not stop anyone who can write the file. A local admin, or any process running as you, can
+  rewrite the whole file and every hash, and the walk then passes. Without a kept head, the chain
+  shows only edits that left the later links alone.
+- Deleting the newest lines, or the oldest lines of the oldest file, leaves no break; only a kept head
+  shows the first.
+- It makes no claim about any regulation or standard.
 
 ## Levels
 
@@ -182,3 +220,39 @@ matrix row or chock's install warnings, otherwise a new evidence report. `--clie
 agentseam id (`gemini_cli`), a `chock install` client (`gemini-cli`) or a `chock sync` agent name
 (`gemini`). `--out` must name a new `.json` file: an existing file is refused, never overwritten, and the
 export is created readable by you only. Nothing is uploaded: you attach the file yourself, after reading it.
+
+The export also carries `chain`, an additive optional key: `chock-witness-export/1` readers ignore keys
+they do not know, so the format stays `/1`. It holds each log's head (`seq`, `sha256` of its last line) and whether its
+walk was intact, so an attestation over the export binds the log as it stood. A person's override at a
+git hook (`CHOCK_ALLOW`, no agent on the line) is exported as evidence beside the client's records;
+`approver` and `who` stay in the local log only.
+
+## Incident timeline
+
+```bash
+chock incident --since <time> [--until <time>] [--format text|md|json] [--share] [--route sync|plugin] [--repo .]
+```
+
+Reads every decision log on the routes asked for (each rotated file before its current one) and prints
+the window `[--since, --until)` as one timeline, oldest first: the start is included, the end is not, so
+adjacent windows never repeat a line. A time is an ISO date or time (no zone means UTC; a date alone is
+`00:00:00Z`) or `24h`, `90m`, `3d` ago; `--until` defaults to now. Equal times keep log order. It prints;
+it writes no file and sends nothing anywhere.
+
+| Shown | From |
+| :--- | :--- |
+| each session start, refusal (block, ask, warn, fault), rollout let-through, toggle, override, `chock stop` and `chock resume` | one entry each, with `actor`, `session_id`, `policy_id`, `verdict`, `target`, `reason` and its `file:line` |
+| plain allowed tool calls | counted per session (`allowed calls`), never listed or put to a policy: they name none |
+| sessions | first and last time in the window, actors, allowed calls, verdict counts, overrides |
+| a chain break ([Hash chain](#hash-chain)) | an entry at its place, before the line it breaks at |
+| an unreadable line (not JSON, not an object, no readable `ts`) | an entry at its place, dated by the nearest readable line; never a crash |
+| each log's chain | `chain intact from seq X to Y` over the window, or `break at <file>:<line> (<kind>)`, plus the breaks outside the window, counted |
+
+Every string is redacted as in [Evidence export](#evidence-export) (home written `~`, scan-secrets
+redaction, 200-character cap). Text and Markdown output write every control, bidi and invisible
+character as a visible escape (`\x1b`), the same rule as the gate's own report; JSON is ASCII with
+escapes. `approver` and `who` are shown, because the log is your own; `--share` leaves both out, as
+`chock witness export` does. Debug-only lines (one allow per policy hook) are counted, not listed.
+
+The output is evidence for a person's report. It is not a report, it drafts none, and it makes no
+claim about any regulation or standard.

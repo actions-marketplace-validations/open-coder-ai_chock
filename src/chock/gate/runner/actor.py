@@ -85,6 +85,21 @@ def agent_signal(repo_root: Path | None = None) -> str | None:
     return next((name for name in configured if env.get(name)), None)
 
 
+def stop_agent_signal(repo_root: Path | None = None) -> str | None:
+    """The first agent marker set, for every stop check (commit, push, stop, resume): `CHOCK_AGENT_COMMIT=0`,
+    the commit rule's escape hatch for a person's git in an agent's terminal, clears nothing, since an agent can
+    set it too."""
+    env = os.environ
+    named = env.get(AGENT_COMMIT_ENV, "").strip().lower()
+    checks = (
+        (AGENT_COMMIT_ENV, bool(named) and named not in _HUMAN_ENV),
+        (f"{CLAUDECODE_ENV}=1", env.get(CLAUDECODE_ENV) == "1"),
+        (AI_AGENT_ENV, bool(env.get(AI_AGENT_ENV, "").strip())),
+        *((name, bool(env.get(name))) for name in (_config_agent_env(repo_root) if repo_root is not None else [])),
+    )
+    return next((signal for signal, present in checks if present), None)
+
+
 def actor_of(signal: str | None) -> str:
     """Who acted, as a log record names it: `person`, or `agent:<client>` from the marker (`unknown` when it names none)."""
     if signal is None:

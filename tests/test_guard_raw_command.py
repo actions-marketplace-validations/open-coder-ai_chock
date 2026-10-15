@@ -9,8 +9,9 @@ import sys
 from pathlib import Path
 
 import pytest
+from runtime_support import write_runtime
 
-from chock.gate import guard_runner, runtime_bundle
+from chock.gate import guard_runner
 
 ENV_DUMP = 'printf "%s\\n" "$CHOCK_TOOL" "$CHOCK_RAW_COMMAND" "$CHOCK_ARGV_FALLBACK" "$#" > "$OUT"; exit 3'
 POWERSHELL_COMMAND = "Remove-Item -Recurse C:\\"  # one trailing backslash: shlex raises on it
@@ -105,7 +106,7 @@ def test_exit_1_with_a_reason_still_blocks(tmp_path, capsys) -> None:
 def test_a_crashing_guard_asks_through_a_vendored_runtime(tmp_path) -> None:
     guard = make_guard(tmp_path, "raise SystemExit(1)\n", "silent.py")
     runtime = tmp_path / "claude_code.py"
-    runtime.write_text(runtime_bundle.render("claude_code"), encoding="utf-8")
+    write_runtime(runtime, "claude_code")
     payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"}}
 
     proc = subprocess.run(
