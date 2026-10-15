@@ -226,3 +226,33 @@ they do not know, so the format stays `/1`. It holds each log's head (`seq`, `sh
 walk was intact, so an attestation over the export binds the log as it stood. A person's override at a
 git hook (`CHOCK_ALLOW`, no agent on the line) is exported as evidence beside the client's records;
 `approver` and `who` stay in the local log only.
+
+## Incident timeline
+
+```bash
+chock incident --since <time> [--until <time>] [--format text|md|json] [--share] [--route sync|plugin] [--repo .]
+```
+
+Reads every decision log on the routes asked for (each rotated file before its current one) and prints
+the window `[--since, --until)` as one timeline, oldest first: the start is included, the end is not, so
+adjacent windows never repeat a line. A time is an ISO date or time (no zone means UTC; a date alone is
+`00:00:00Z`) or `24h`, `90m`, `3d` ago; `--until` defaults to now. Equal times keep log order. It prints;
+it writes no file and sends nothing anywhere.
+
+| Shown | From |
+| :--- | :--- |
+| each session start, refusal (block, ask, warn, fault), rollout let-through, toggle, override, `chock stop` and `chock resume` | one entry each, with `actor`, `session_id`, `policy_id`, `verdict`, `target`, `reason` and its `file:line` |
+| plain allowed tool calls | counted per session (`allowed calls`), never listed or put to a policy: they name none |
+| sessions | first and last time in the window, actors, allowed calls, verdict counts, overrides |
+| a chain break ([Hash chain](#hash-chain)) | an entry at its place, before the line it breaks at |
+| an unreadable line (not JSON, not an object, no readable `ts`) | an entry at its place, dated by the nearest readable line; never a crash |
+| each log's chain | `chain intact from seq X to Y` over the window, or `break at <file>:<line> (<kind>)`, plus the breaks outside the window, counted |
+
+Every string is redacted as in [Evidence export](#evidence-export) (home written `~`, scan-secrets
+redaction, 200-character cap). Text and Markdown output write every control, bidi and invisible
+character as a visible escape (`\x1b`), the same rule as the gate's own report; JSON is ASCII with
+escapes. `approver` and `who` are shown, because the log is your own; `--share` leaves both out, as
+`chock witness export` does. Debug-only lines (one allow per policy hook) are counted, not listed.
+
+The output is evidence for a person's report. It is not a report, it drafts none, and it makes no
+claim about any regulation or standard.

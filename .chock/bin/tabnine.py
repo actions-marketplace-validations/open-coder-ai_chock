@@ -722,6 +722,58 @@ def allowed_seconds(expired):
     """The time a timed-out call was actually given, as text (what the deadline left it, not the full budget)."""
     return f'{max(float(expired.timeout or 0), 0.0):.1f}s'
 
+LOG_CHAIN_PREV, LOG_CHAIN_SEQ = ('prev', 'seq')
+
+LOG_CHAIN_UNCHAINED = 'unchained'
+
+LOG_CHAIN_KEYS = (LOG_CHAIN_PREV, LOG_CHAIN_SEQ, LOG_CHAIN_UNCHAINED)
+
+LOG_CHAIN_GENESIS = '0' * 64
+
+_LOG_TAIL_BYTES = 65536
+
+def log_rotated(path):
+    """Where `log_append` moves a full log: `<stem>.1<suffix>` beside it."""
+    path = _chock_Path(path)
+    return path.with_name(path.stem + '.1' + path.suffix)
+
+def log_tail(path):
+    """(the last line of `path` as bytes without its newline or None, whether the file ends without a newline)."""
+    try:
+        with open(path, 'rb') as fh:
+            size = fh.seek(0, _chock_os.SEEK_END)
+            fh.seek(max(0, size - _LOG_TAIL_BYTES))
+            tail = fh.read()
+            if b'\n' not in tail.rstrip(b'\n') and size > len(tail):
+                fh.seek(0)
+                tail = fh.read()
+    except FileNotFoundError:
+        return (None, False)
+    last = tail.rstrip(b'\n').rsplit(b'\n', 1)[-1]
+    return (last or None, bool(tail) and (not tail.endswith(b'\n')))
+
+def log_last_line(path):
+    """The last line of `path` as bytes, without its newline; None for a missing or empty file."""
+    return log_tail(path)[0]
+
+def log_line_hash(line):
+    """The chain's link to a line: the sha256 of its exact bytes, without the newline."""
+    return _chock_hashlib.sha256(line).hexdigest()
+
+def log_line_seq(line):
+    """A line's place in its chain, or -1 when it carries none (an unchained or unreadable line)."""
+    try:
+        seq = json.loads(line).get(LOG_CHAIN_SEQ)
+    except (ValueError, AttributeError):
+        return -1
+    return seq if type(seq) is int else -1
+
+def log_chain_after(last):
+    """The chain fields of the line after `last` (bytes); the genesis when no line came before."""
+    if last is None:
+        return {LOG_CHAIN_SEQ: 0, LOG_CHAIN_PREV: LOG_CHAIN_GENESIS}
+    return {LOG_CHAIN_SEQ: log_line_seq(last) + 1, LOG_CHAIN_PREV: log_line_hash(last)}
+
 LOG_LEVEL_ENV = 'CHOCK_LOG_LEVEL'
 
 LOG_LEGACY_ENV = 'CHOCK_GATE_LOG'
@@ -742,15 +794,33 @@ LOG_MAX_MAX_BYTES = 1073741824
 
 LOG_ALLOW = 'allow'
 
-LOG_LET_THROUGH = ('override', 'would_action')
+LOG_LET_THROUGH = ('override', 'would_action', 'target')
 
 LOG_TRACE_CAP = 200
 
 LOG_REDACTED = '[redacted]'
 
+LOG_CALL = 'call'
+
+LOG_CLAIMS = '.calls'
+
+_LOG_PER_HOOK = ('policy_id', 'plugin', 'plugin_version', 'kind', 'match_count', 'matches', 'rules')
+
+LOG_CLAIM_SECONDS = 600
+
+_LOG_CLAIM_PRUNER = '0'
+
+_LOG_CLAIM_NAME = 32
+
+_LOG_SURROGATE = _chock_re.compile('[\ud800-\udfff]')
+
 _LOG_SECRET_RE = _chock_re.compile('(?i)((AKIA|ASIA)[0-9A-Z]{16}|gh[oprsu]_[0-9A-Za-z]{36}|github_pat_[0-9A-Za-z_]{22,}|xox[bpas]-[0-9A-Za-z-]{10,}|(sk|rk)_live_[0-9A-Za-z]{16,}|sk-proj-[0-9A-Za-z_-]{20,}|sk-ant-[0-9A-Za-z_-]{20,}|sk-[0-9A-Za-z]{20,}|AIza[0-9A-Za-z_-]{35}|npm_[0-9A-Za-z]{36}|SG\\.[0-9A-Za-z_-]{16,}\\.[0-9A-Za-z_-]{16,}|eyJ[A-Za-z0-9_-]*\\.[A-Za-z0-9_-]*\\.[A-Za-z0-9_-]*|-----BEGIN (RSA |OPENSSH |EC |DSA )?PRIVATE KEY-----|api[_-]?key\\s*=\\s*["\'][A-Za-z0-9_\\-]{20,}["\']|secret[_-]?key\\s*=\\s*["\'][A-Za-z0-9_\\-]{20,}["\']|auth[_-]?token\\s*=\\s*["\'][A-Za-z0-9_\\-]{20,}["\']|password\\s*=\\s*["\'][^"\'\\s]{12,}["\']|(api|secret|auth)[_-]?(key|token)\\s*[=:]\\s*[A-Za-z0-9_\\-]{20,}|password\\s*[=:]\\s*[^\\s"\'${}]{12,})')
 
 _LOG_BYTES_RANGE = 'a whole number from 65536 (64 KiB) to 1073741824 (1 GiB)'
+
+LOG_CHAIN_WAIT = 1.0
+
+_LOG_CHAIN_POLL = 0.0002
 
 def log_settings_read(path):
     """(the valid settings in one scope's file, what is wrong with it); a missing file is ({}, [])."""
@@ -797,17 +867,58 @@ def log_settings(repo_root):
     return (level, size)
 
 def log_record_level(record):
-    """`debug` for a plain allow, `info` for every decision a policy made or something let through."""
+    """`debug` for a plain allow, `info` for every decision a policy made, something let through, or an agent's action."""
     plain = record.get('verdict') == LOG_ALLOW and (not any((key in record for key in LOG_LET_THROUGH)))
     return LOG_DEBUG if plain else LOG_INFO
+
+def log_plain_action(record):
+    """Whether `record` is an agent's action that every policy let through untouched: one line per tool call."""
+    untouched = not any((key in record for key in LOG_LET_THROUGH if key != 'target'))
+    return record.get('verdict') == LOG_ALLOW and 'target' in record and untouched
+
+def _log_prune_claims(folder):
+    cutoff = _chock_datetime.now(_chock_timezone.utc).timestamp() - LOG_CLAIM_SECONDS
+    for claim in folder.iterdir():
+        try:
+            if claim.stat().st_mtime < cutoff:
+                claim.unlink()
+        except OSError:
+            continue
+
+def log_claim(path, record, call):
+    """True for the first hook to log this tool call's plain allow; False for every later one. Fails open.
+
+    The call is the client's `tool_use_id`, else (session, second, target): identical calls in one second are one.
+    """
+    key = '\x00'.join((str(record.get('session_id')), str(record.get('target')), call or log_now()))
+    name = _chock_hashlib.sha256(key.encode('utf-8', 'backslashreplace')).hexdigest()[:_LOG_CLAIM_NAME]
+    folder = _chock_Path(path).parent / LOG_CLAIMS
+    try:
+        folder.mkdir(mode=448, parents=True, exist_ok=True)
+        _chock_os.close(_chock_os.open(str(folder / name), _chock_os.O_WRONLY | _chock_os.O_CREAT | _chock_os.O_EXCL, 384))
+    except FileExistsError:
+        return False
+    except OSError:
+        return True
+    if name.startswith(_LOG_CLAIM_PRUNER):
+        _log_prune_claims(folder)
+    return True
+
+def log_now():
+    """The UTC time to the second, as every line is stamped."""
+    return _chock_datetime.now(_chock_timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 def log_admits(level, record_level):
     """Whether a record of `record_level` is written at `level`."""
     return level == LOG_DEBUG or (level == LOG_INFO and record_level == LOG_INFO)
 
+def log_redact(text):
+    """`text` with every value scan-secrets would block replaced."""
+    return _LOG_SECRET_RE.sub(LOG_REDACTED, str(text))
+
 def log_trace_text(text):
     """`text` with every value scan-secrets would block replaced, then cut to `LOG_TRACE_CAP` characters."""
-    redacted = _LOG_SECRET_RE.sub(LOG_REDACTED, str(text))
+    redacted = log_redact(text)
     return redacted if len(redacted) <= LOG_TRACE_CAP else redacted[:LOG_TRACE_CAP] + '...'
 
 def log_windows():
@@ -836,46 +947,249 @@ def log_unlock(fd):
         except (OSError, ImportError):
             return
 
-def log_rotate(path, max_bytes):
-    """Move a file past `max_bytes` to `<stem>.1<suffix>` under a lock; a busy lock or a failed move skips it this time."""
+def _log_lock_wait(fd):
+    """Take `log_lock`'s lock on `fd`, waiting up to `LOG_CHAIN_WAIT` seconds; False when it stays held."""
+    deadline = _chock_time.monotonic() + LOG_CHAIN_WAIT
+    while not log_lock(fd):
+        if _chock_time.monotonic() >= deadline:
+            return False
+        _chock_time.sleep(_LOG_CHAIN_POLL)
+    return True
+
+def _log_rotate_held(path, max_bytes):
+    """Move a file past `max_bytes` to `log_rotated(path)`; the caller holds the chain's lock. A failed move waits."""
     try:
-        if not path.exists() or path.stat().st_size <= max_bytes:
-            return
-        lock = _chock_os.open(str(path) + '.lock', _chock_os.O_RDWR | _chock_os.O_CREAT, 384)
+        if path.stat().st_size > max_bytes:
+            path.replace(log_rotated(path))
     except OSError:
         return
+
+def _log_line(path, stamped, *, held):
+    """`stamped` as one line's bytes, chained after the last line (or the rotated file's) when the lock is `held`.
+
+    A line that cannot be chained names why (`unchained`); a torn last line (no newline) is closed, never joined.
+    """
     try:
-        if log_lock(lock):
+        last, torn = log_tail(path)
+        if held:
+            stamped = {**stamped, **log_chain_after(last or log_last_line(log_rotated(path)))}
+        else:
+            stamped = {**stamped, LOG_CHAIN_UNCHAINED: 'lock'}
+    except (OSError, ValueError):
+        torn = False
+        stamped = {**stamped, LOG_CHAIN_UNCHAINED: 'unreadable' if held else 'lock'}
+    text = _LOG_SURROGATE.sub(lambda found: f'\\\\u{ord(found[0]):04x}', json.dumps(stamped, ensure_ascii=False))
+    line = (text + '\n').encode('utf-8')
+    return b'\n' + line if torn else line
+
+def log_append(path, record, max_bytes=LOG_DEFAULT_MAX_BYTES):
+    """Append one stamped, chained, complete line to `path` in a single write, under the chain's lock.
+
+    Each line names the sha256 of the line before it (`prev`) and its place (`seq`); the first line after a
+    rotation names the rotated file's last. A writer that cannot take the lock writes its line `unchained`.
+    """
+    path = _chock_Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    stamped = {'ts': log_now(), **{k: v for k, v in record.items() if k not in LOG_CHAIN_KEYS}}
+    lock = _chock_os.open(str(path) + '.lock', _chock_os.O_RDWR | _chock_os.O_CREAT, 384)
+    try:
+        held = _log_lock_wait(lock)
+        try:
+            if held:
+                _log_rotate_held(path, max_bytes)
+            line = _log_line(path, stamped, held=held)
+            fd = _chock_os.open(str(path), _chock_os.O_WRONLY | _chock_os.O_APPEND | _chock_os.O_CREAT | getattr(_chock_os, 'O_BINARY', 0), 384)
             try:
-                if path.stat().st_size > max_bytes:
-                    path.replace(path.with_name(path.stem + '.1' + path.suffix))
+                _chock_os.write(fd, line)
             finally:
+                _chock_os.close(fd)
+        finally:
+            if held:
                 log_unlock(lock)
-    except OSError:
-        return
     finally:
         _chock_os.close(lock)
 
-def log_append(path, record, max_bytes=LOG_DEFAULT_MAX_BYTES):
-    """Append one stamped, complete line to `path` in a single write, so writers in parallel never interleave."""
-    path = _chock_Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    log_rotate(path, max_bytes)
-    stamped = {'ts': _chock_datetime.now(_chock_timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), **record}
-    line = (json.dumps(stamped, ensure_ascii=False) + '\n').encode('utf-8')
-    fd = _chock_os.open(str(path), _chock_os.O_WRONLY | _chock_os.O_APPEND | _chock_os.O_CREAT | getattr(_chock_os, 'O_BINARY', 0), 384)
-    try:
-        _chock_os.write(fd, line)
-    finally:
-        _chock_os.close(fd)
-
 def log_write(path, record, repo_root):
-    """Write `record` to `path` when the level in force for `repo_root` admits it, stamped with its level. Raises on I/O."""
+    """Write `record` to `path` when the level in force for `repo_root` admits it, stamped with its level. Raises on I/O.
+
+    A plain allowed action is written once per tool call (`call`, never itself written), by the first hook and
+    naming no policy; at debug every later hook still writes its own line.
+    """
     level, size = log_settings(repo_root)
+    record = dict(record)
+    call = record.pop(LOG_CALL, None)
     record_level = log_record_level(record)
     kept = 'would_action' in record and _chock_os.environ.get(LOG_LEGACY_ENV) == '0'
-    if kept or log_admits(level, record_level):
-        log_append(path, {**record, 'level': record_level}, size)
+    if not (kept or log_admits(level, record_level)):
+        return
+    if log_plain_action(record):
+        if log_claim(path, record, call):
+            record = {key: value for key, value in record.items() if key not in _LOG_PER_HOOK}
+        elif level == LOG_INFO:
+            return
+    log_append(path, {**record, 'level': record_level}, size)
+
+HALT_PARTS = ('.chock', 'stop.json')
+
+HALT_ALL = 'all'
+
+HALT_REASON = 'stopped'
+
+HALT_POLICY = 'chock-stop'
+
+HALT_CLIENT_RE = _chock_re.compile('^[a-z0-9_]{1,32}$')
+
+HALT_HOOK_FLAG = '--stop-check'
+
+HALT_CLIENTS = ('antigravity', 'claude_code', 'codex_cli', 'cursor', 'devin', 'factory_droid', 'gemini_cli', 'goose', 'grok', 'mistral_vibe', 'openhands', 'tabnine', 'vscode_copilot', 'windsurf')
+
+HALT_REGISTRY_PARTS = ('.chock', 'stops')
+
+_HALT_REGISTRY_SUFFIX = '.json'
+
+_HALT_REGISTRY_UNREADABLE = '~/.chock/stops exists but cannot be read, so every agent is refused'
+
+_HALT_GITDIR = 'gitdir:'
+
+_HALT_REASON_CAP = 200
+
+_HALT_UNREADABLE = '.chock/stop.json exists but cannot be read, so every agent is refused'
+
+_HALT_NO_REASON = 'no reason given'
+
+_HALT_CASELESS = ('darwin', 'win32', 'cygwin')
+
+def _halt_read_file(path, unreadable):
+    """The stop `path` holds as {scope, reason, ...}, or None when there is no file. A file that exists but
+    cannot be read or parsed, or names no valid scope, stops every agent: fail closed."""
+    stopped = {'scope': HALT_ALL, 'reason': unreadable, 'unreadable': True}
+    try:
+        doc = json.loads(_chock_Path(path).read_text(encoding='utf-8'))
+    except (FileNotFoundError, NotADirectoryError):
+        return stopped if _chock_os.path.lexists(path) else None
+    except (OSError, UnicodeError, ValueError):
+        return stopped
+    scope = doc.get('scope') if isinstance(doc, dict) else None
+    if not isinstance(scope, str) or not (scope == HALT_ALL or HALT_CLIENT_RE.match(scope)):
+        return stopped
+    reason = doc.get('reason')
+    return {**doc, 'scope': scope, 'reason': reason if isinstance(reason, str) else ''}
+
+def halt_read(repo_root):
+    """The stop in force for `repo_root`, or None; read fail-closed."""
+    if repo_root is None:
+        return None
+    return _halt_read_file(_chock_Path(repo_root).joinpath(*HALT_PARTS), _HALT_UNREADABLE)
+
+def halt_registry_dir():
+    """`~/.chock/stops`: the machine-level registry of every stop in force."""
+    return _chock_Path(_chock_os.path.expanduser('~')).joinpath(*HALT_REGISTRY_PARTS)
+
+def halt_norm(path):
+    """`path`'s realpath, casefolded where the filesystem ignores case (realpath keeps the case it was typed in)."""
+    real = _chock_os.path.realpath(str(path))
+    return real.casefold() if sys.platform in _HALT_CASELESS else real
+
+def halt_registry_entry(repo_root):
+    """The registry entry for `repo_root`, named by the sha256 of its normalised realpath."""
+    key = _chock_hashlib.sha256(halt_norm(repo_root).encode('utf-8')).hexdigest()
+    return halt_registry_dir() / f'{key}{_HALT_REGISTRY_SUFFIX}'
+
+def halt_registry_find(client, repos=None):
+    """The first registry entry that reaches `client` (only those for `repos`, when given), or None.
+    A registry that exists but cannot be listed, or an entry that cannot be read, refuses: fail closed."""
+    folder = halt_registry_dir()
+    unreadable = {'scope': HALT_ALL, 'reason': _HALT_REGISTRY_UNREADABLE, 'unreadable': True}
+    try:
+        names = sorted(_chock_os.listdir(folder))
+    except (FileNotFoundError, NotADirectoryError):
+        return unreadable if _chock_os.path.lexists(folder) else None
+    except OSError:
+        return unreadable
+    wanted = None if repos is None else {halt_registry_entry(repo).name for repo in repos}
+    for name in names:
+        if not name.endswith(_HALT_REGISTRY_SUFFIX) or (wanted is not None and name not in wanted):
+            continue
+        stop = _halt_read_file(folder / name, _HALT_REGISTRY_UNREADABLE)
+        if stop is not None and halt_covers(stop, client):
+            return stop
+    return None
+
+def halt_main_root(repo_root):
+    """The main worktree of the linked worktree at `repo_root` (its `.git` is a file naming a gitdir whose
+    `commondir` leads to the main `.git`), or the bare repository itself that holds it, else None. Read from
+    disk: the runtime cannot wait on git."""
+    dot = _chock_Path(repo_root) / '.git'
+    try:
+        text = dot.read_text(encoding='utf-8').strip() if dot.is_file() else ''
+        if not text.startswith(_HALT_GITDIR):
+            return None
+        gitdir = _chock_Path(repo_root) / text[len(_HALT_GITDIR):].strip()
+        common = gitdir.joinpath('commondir').read_text(encoding='utf-8').strip()
+    except (OSError, UnicodeError):
+        return None
+    common_dir = _chock_Path(_chock_os.path.realpath(gitdir / common))
+    return common_dir.parent if common_dir.name == '.git' else common_dir
+
+def halt_repos(path):
+    """Every repository holding `path`, as spelled and with every symlink resolved, nearest first: each folder up
+    from it with a `.git`, nested ones included."""
+    try:
+        text = str(path)
+        heres = dict.fromkeys((_chock_Path(found) for found in (_chock_os.path.abspath(text), _chock_os.path.realpath(text))))
+    except (OSError, ValueError):
+        return []
+    folders = (folder for here in heres for folder in (here, *here.parents))
+    return [folder for folder in dict.fromkeys(folders) if _chock_os.path.lexists(folder / '.git')]
+
+def halt_find(roots, client):
+    """The first stop in force over `roots`, or in the main worktree of any of them, that reaches `client`."""
+    seen = []
+    for root in roots:
+        for folder in (root, halt_main_root(root)):
+            if folder is None or folder in seen:
+                continue
+            seen.append(folder)
+            stop = halt_read(folder)
+            if stop is not None and halt_covers(stop, client):
+                return stop
+    return None
+
+def _halt_client(name):
+    return str(name or '').strip().lower().replace('-', '_')
+
+def _halt_names(client, named):
+    """Whether `client` (from a marker or a bundle) names the client id `named`, or a shorter form of it."""
+    return client.startswith(named) or named.startswith(client + '_')
+
+def halt_covers(stop, client):
+    """Whether `stop` reaches `client`: every agent, or the one named (`cursor_agent` is `cursor`'s; `codex` may
+    be `codex_cli`). An agent naming no client, or one no in-agent client id matches, is reached: fail closed."""
+    scope, client = (_halt_client(stop.get('scope')), _halt_client(client))
+    if scope == HALT_ALL or not client:
+        return True
+    return _halt_names(client, scope) or not any((_halt_names(client, known) for known in HALT_CLIENTS))
+
+def halt_message(stop):
+    """`stopped: <reason>`, the reason printable and capped, and the one way to lift it."""
+    reason = ''.join((ch for ch in str(stop.get('reason') or '') if ch.isprintable())).strip()
+    reason = (reason or _HALT_NO_REASON)[:_HALT_REASON_CAP]
+    return f'{HALT_REASON}: {reason}. A person stopped agents in this repository (`chock stop`); every tool call is refused until they run `chock resume`.'
+
+def halt_git_roots(repo_root: _chock_Path) -> list[_chock_Path]:
+    """Every folder whose stop reaches a git command, as the git dispatcher finds them: the work tree
+    (`GIT_WORK_TREE` too), the checkout of the git dir and of the common dir (a bare repository is its own),
+    and every folder above each, symlinks resolved."""
+    named = [_chock_Path(repo_root), *(_chock_Path(_chock_os.environ[name]) for name in ('GIT_WORK_TREE', 'GIT_DIR') if _chock_os.environ.get(name))]
+    try:
+        shown = _chock_subprocess.run(['git', 'rev-parse', '--absolute-git-dir', '--git-common-dir'], capture_output=True, text=True, encoding='utf-8', timeout=10, check=False)
+        dirs = shown.stdout.splitlines() if shown.returncode == 0 else []
+    except (OSError, _chock_subprocess.SubprocessError, UnicodeError):
+        dirs = []
+    for found in (_chock_Path(_chock_os.path.realpath(line)) for line in dirs if line):
+        named.append(found.parent if found.name == '.git' else found)
+    heres = (_chock_Path(spelled(str(path))) for path in named for spelled in (_chock_os.path.abspath, _chock_os.path.realpath))
+    return list(dict.fromkeys((folder for here in heres for folder in (here, *here.parents))))
 
 GUARD_VIOLATION = 1
 
@@ -1086,6 +1400,111 @@ def evaluate(argv: list[str], command: str, tool: str='', *, can_ask: bool | Non
         return (VERDICT_ESCALATE, f'chock could not check this command against {guard.stem}: {why}. Approving runs it unchecked.')
     return None
 
+DLOG_AGENT_PREFIX = 'agent:'
+
+_DLOG_HASH_PREFIX, _DLOG_OUTSIDE_PREFIX = ('sha256:', 'outside:')
+
+_DLOG_MCP_TOOL = _chock_re.compile('^mcp__(?P<server>.+?)__(?P<tool>.+)$')
+
+_DLOG_ASSIGNMENT = _chock_re.compile('^[A-Za-z_][A-Za-z0-9_]*=')
+
+_DLOG_OPAQUE_MARKS = ('$(', '`', "'", '"')
+
+_DLOG_PLAIN_PROGRAM = _chock_re.compile('^[A-Za-z][A-Za-z._+-]{0,63}$')
+
+_DLOG_KNOWN_PROGRAMS = frozenset(['awk', 'bash', 'base64', 'cat', 'cd', 'chmod', 'cp', 'curl', 'diff', 'docker', 'echo', 'env', 'find', 'gh', 'git', 'go', 'gpg2', 'grep', 'head', 'jq', 'ls', 'make', 'md5sum', 'mkdir', 'mv', 'node', 'npm', 'npx', 'pip', 'pip3', 'pnpm', 'pwsh', 'pytest', 'python', 'python2', 'python3', 'rg', 'rm', 'ruff', 'sed', 'sh', 'sha1sum', 'sha256sum', 'sort', 'tail', 'tar', 'test', 'uv', 'wc', 'wget', 'xargs', 'yarn', 'zsh'])
+
+_DLOG_PROGRAM_CAP = 64
+
+_DLOG_MCP_CAP = 128
+
+_DLOG_CLIENT_UNSAFE = _chock_re.compile('[^a-z0-9_-]')
+
+_DLOG_CLIENT_CAP = 32
+
+_DLOG_WINDOWS_PATH = _chock_re.compile('^(?:[A-Za-z]:|\\\\\\\\)')
+
+_DLOG_UNNAMED = '-'
+
+def dlog_session(event, record):
+    """`record` with the client's session id, where the payload carries one: what groups a session's lines."""
+    session = getattr(event, 'session_id', None)
+    if isinstance(session, str) and session:
+        record['session_id'] = session
+    return record
+
+def _dlog_client(raw):
+    """The payload's `client_type` as `[a-z0-9_-]{1,32}`, or None when nothing of it is left."""
+    named = raw.get('client_type') if isinstance(raw, dict) else None
+    if not isinstance(named, str):
+        return None
+    return _DLOG_CLIENT_UNSAFE.sub('', named.lower())[:_DLOG_CLIENT_CAP] or None
+
+def dlog_actor(event):
+    """`agent:<client>`: an agent hook is always an agent's call; the client named in the payload, else the bundle's."""
+    named = _dlog_client(getattr(event, 'raw', None)) or getattr(event, 'agent', None)
+    return DLOG_AGENT_PREFIX + str(named or 'unknown')
+
+def _dlog_sha256(text):
+    return _DLOG_HASH_PREFIX + _chock_hashlib.sha256(str(text).encode('utf-8', 'surrogatepass')).hexdigest()
+
+def _dlog_program(command):
+    """The program's bare name: after plain `NAME=value` words; `-` when a shell parser would be needed to tell."""
+    for word in str(command).split():
+        if not _DLOG_ASSIGNMENT.match(word):
+            return '' if word.startswith('-') else word
+        if any((mark in word for mark in _DLOG_OPAQUE_MARKS)):
+            return ''
+    return ''
+
+def dlog_command_print(command):
+    """`<program> sha256:<hex of the whole command>`: the program's bare name only, never an argument."""
+    program = _dlog_program(command)
+    base = _chock_re.split('[\\\\/]', program)[-1]
+    known = base in _DLOG_KNOWN_PROGRAMS or _DLOG_PLAIN_PROGRAM.match(program)
+    return f'{(log_redact(base) if known else _DLOG_UNNAMED)} {_dlog_sha256(command)}'
+
+def dlog_path_print(path, cwd, repo):
+    """The repository-relative path; any path outside `repo` (or with no repo) is `outside:sha256:<hex>`."""
+    if _chock_os.sep == '/' and _DLOG_WINDOWS_PATH.match(str(path)):
+        return _DLOG_OUTSIDE_PREFIX + _dlog_sha256(path)
+    full = _chock_os.path.realpath(_chock_os.path.join(cwd or _chock_os.getcwd(), str(path)))
+    if repo is not None:
+        try:
+            return log_redact(_chock_Path(full).relative_to(_chock_os.path.realpath(repo)).as_posix())
+        except ValueError:
+            pass
+    return _DLOG_OUTSIDE_PREFIX + _dlog_sha256(full)
+
+def dlog_target(event, repo):
+    """What a tool call touched, as a fingerprint: `server/tool`, a command's print, a path's; None off a tool call."""
+    if getattr(event, 'event', None) != 'pre_tool':
+        return None
+    tool = str(getattr(event, 'tool', None) or '')
+    mcp = _DLOG_MCP_TOOL.match(tool)
+    if mcp:
+        return log_redact(f"{mcp['server']}/{mcp['tool']}")[:_DLOG_MCP_CAP]
+    command, path = (getattr(event, 'command', None), getattr(event, 'path', None))
+    if command:
+        return dlog_command_print(command)
+    if path:
+        return dlog_path_print(path, getattr(event, 'cwd', None), repo)
+    return log_redact(tool)[:_DLOG_PROGRAM_CAP] or None
+
+def dlog_fields(event, repo):
+    """Who did what, for a decision line: session_id, actor, and target on a tool call. Never raises: {} instead."""
+    try:
+        fields = dlog_session(event, {'actor': dlog_actor(event)})
+        target = dlog_target(event, repo)
+    except Exception:
+        return {}
+    if target:
+        fields['target'] = target
+    call = getattr(event, 'tool_use_id', None)
+    if target and isinstance(call, str) and call:
+        fields[LOG_CALL] = call
+    return fields
+
 DLOG_ROUTE_SYNC, DLOG_ROUTE_PLUGIN = ('sync', 'plugin')
 
 _DLOG_SYNC_BIN = ('.chock', 'bin')
@@ -1111,6 +1530,10 @@ _DLOG_SURFACE = {'pre_tool': 'pre-tool-use', 'stop': 'stop'}
 _DLOG_NO_RULE = 'no rule matched'
 
 _DLOG_DIST_INFO = _chock_re.compile('^chock-([^-]+)\\.dist-info$')
+
+_DLOG_GATE_LOGGED_CODES = (0, 1, 3, 4)
+
+GATE_LAST = {}
 
 def _dlog_flag_value(argv, flag):
     if flag in argv:
@@ -1168,17 +1591,6 @@ def _dlog_repo_root(start):
         return None
     return next((folder for folder in (here, *here.parents) if (folder / '.git').exists()), None)
 
-def dlog_session(event, record):
-    """`record` with the client's session id, where the payload carries one: what groups a session's lines."""
-    session = getattr(event, 'session_id', None)
-    if isinstance(session, str) and session:
-        record['session_id'] = session
-    return record
-
-def _dlog_client(raw):
-    named = raw.get('client_type') if isinstance(raw, dict) else None
-    return named if isinstance(named, str) else None
-
 def _dlog_trace(event, wire, rule, stages):
     """The debug-only fields: what was detected and matched, and how long each stage took. Never file contents."""
     trace = {'wire_event': wire, 'tool': event.tool, 'rule': rule or _DLOG_NO_RULE, 'stages_ms': stages}
@@ -1191,9 +1603,11 @@ def _dlog_trace(event, wire, rule, stages):
     return trace
 
 def _dlog_reason(source, outcome):
-    """A short code for why: `guard-blocked`, `guard-errored`, `gate-block`, `fault`, or `no-rule` for an allow."""
+    """A short code for why: `stopped`, `guard-blocked`, `guard-errored`, `gate-block`, `fault`, or `no-rule` (allow)."""
     if source is None:
         return 'no-rule'
+    if source == HALT_REASON:
+        return HALT_REASON
     if source == 'guard' and 'outcome' in GUARD_LAST:
         return f"guard-{GUARD_LAST['outcome']}"
     return source if source == 'fault' else f"{source}-{_DLOG_SPOKEN.get(outcome, 'allow')}"
@@ -1215,21 +1629,23 @@ def log_decision(argv, event, decision, judged, context):
         runtime = globals().get('__file__') or sys.argv[0]
         route = runtime_route(runtime)
         source, rule, started, stages = judged
-        if route == DLOG_ROUTE_SYNC and _DLOG_GATE_FLAG in argv and (source in (None, 'gate')):
+        gate_wrote = event.event != 'pre_tool' or GATE_LAST.get('code') in _DLOG_GATE_LOGGED_CODES
+        if route == DLOG_ROUTE_SYNC and _DLOG_GATE_FLAG in argv and (source in (None, 'gate')) and gate_wrote:
             return
         agent = str(getattr(event, 'agent', None) or 'unknown')
         log_path, repo = _dlog_paths(route, runtime, agent, event)
         outcome = getattr(decision, 'outcome', None) if decision is not None else None
         level = log_settings(repo)[0]
-        if not log_admits(level, log_record_level({'verdict': _DLOG_SPOKEN.get(outcome, 'allow')})):
+        fields = dlog_fields(event, repo)
+        if not log_admits(level, log_record_level({'verdict': _DLOG_SPOKEN.get(outcome, 'allow'), **fields})):
             return
         plugin_name, plugin_version = dlog_plugin_manifest(runtime, context.get('manifests', ())) if route == DLOG_ROUTE_PLUGIN else ('', '')
         target = next((v for v in (_dlog_flag_value(argv, f) for f in _DLOG_TARGET_FLAGS) if v), None)
-        record = {'route': route, 'agent': agent, 'event': _DLOG_EVENT_LOGGED.get(event.event, event.event), 'policy_id': _dlog_policy_id(target, route, plugin_name), 'surface': _DLOG_SURFACE.get(event.event, str(event.event)), 'verdict': _DLOG_SPOKEN.get(outcome, 'allow'), 'reason': _dlog_reason(source, outcome), 'duration_ms': round((_chock_time.monotonic() - started) * 1000), 'can_ask': context.get('can_ask')}
+        record = {'route': route, 'agent': agent, 'event': _DLOG_EVENT_LOGGED.get(event.event, event.event), 'policy_id': HALT_POLICY if HALT_HOOK_FLAG in argv else _dlog_policy_id(target, route, plugin_name), 'surface': _DLOG_SURFACE.get(event.event, str(event.event)), 'verdict': _DLOG_SPOKEN.get(outcome, 'allow'), 'reason': _dlog_reason(source, outcome), 'duration_ms': round((_chock_time.monotonic() - started) * 1000), 'can_ask': context.get('can_ask')}
         version = _dlog_chock_version() if route == DLOG_ROUTE_SYNC else ''
         if version:
             record['chock_version'] = version
-        dlog_session(event, record)
+        record.update(fields)
         client = _dlog_client(event.raw)
         if client:
             record['client'] = client
@@ -1343,6 +1759,105 @@ def added_from_event(event):
         return {}
     return {str(path): '\n'.join((new for _, new, _ in replacements))}
 
+_PATCH_SPACE = '\t\n\x0b\x0c\r \x85\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000'
+
+_PATCH_ASCII = str.maketrans(dict.fromkeys('‐‑‒–—―−', '-') | dict.fromkeys('‘’‚‛', "'") | dict.fromkeys('“”„‟', '"') | dict.fromkeys('\xa0\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u202f\u205f\u3000', ' '))
+
+_PATCH_ENDINGS = ('\r\n', '\r', '\n')
+
+def _patch_match(lines, pattern, start, same):
+    for index in range(start, len(lines) - len(pattern) + 1):
+        if all((same(lines[index + i]) == same(want) for i, want in enumerate(pattern))):
+            return index
+    return None
+
+def _seek(lines, pattern, start, *, eof):
+    """Codex's seek_sequence: exact, then ignoring trailing space, then both ends, then ASCII punctuation."""
+    if not pattern:
+        return start
+    if len(pattern) > len(lines):
+        return None
+    begin = max(len(lines) - len(pattern), start) if eof else start
+    for same in (lambda s: s, lambda s: s.rstrip(_PATCH_SPACE), lambda s: s.strip(_PATCH_SPACE), lambda s: s.strip(_PATCH_SPACE).translate(_PATCH_ASCII)):
+        found = _patch_match(lines, pattern, begin, same)
+        if found is not None:
+            return found
+    return None
+
+def _patch_split(chunk, start, old, new):
+    """Codex's replacements for one placed hunk: its context lines keep the file's own text."""
+    out = []
+    old_start = new_start = 0
+    for old_at, new_at in chunk['pairs']:
+        if old_at >= len(old) or new_at >= len(new):
+            break
+        if (old_start, new_start) != (old_at, new_at):
+            out.append((start + old_start, old_at - old_start, new[new_start:new_at]))
+        old_start, new_start = (old_at + 1, new_at + 1)
+    if old_start != len(old) or new_start != len(new):
+        out.append((start + old_start, len(old) - old_start, new[new_start:]))
+    return out
+
+def _patch_place(chunk, lines, cursor):
+    """(replacements, cursor) for one hunk, or None when it cannot be placed."""
+    if chunk['context'] is not None:
+        found = _seek(lines, [chunk['context']], cursor, eof=False)
+        if found is None:
+            anchor = chunk['context'].strip(_PATCH_SPACE)
+            found = next((i for i in range(cursor, len(lines)) if anchor in lines[i]), None)
+        if found is None:
+            return None
+        cursor = found + 1
+    old, new = (chunk['old'], chunk['new'])
+    if not old:
+        return ([(len(lines), 0, list(new))], cursor)
+    found = _seek(lines, old, cursor, eof=chunk['eof'])
+    if found is None and old[-1] == '':
+        old = old[:-1]
+        new = new[:-1] if new and new[-1] == '' else new
+        found = _seek(lines, old, cursor, eof=chunk['eof'])
+    if found is None:
+        return None
+    return (_patch_split(chunk, found, old, new), found + len(old))
+
+def _patch_source(text):
+    """[(line, ending)] as text_file.rs splits a file: on CRLF, CR or LF."""
+    lines = []
+    start = index = 0
+    while index < len(text):
+        ending = next((e for e in _PATCH_ENDINGS if text.startswith(e, index)), None)
+        if ending is None:
+            index += 1
+            continue
+        lines.append((text[start:index], ending))
+        index += len(ending)
+        start = index
+    if start < len(text):
+        lines.append((text[start:], None))
+    return lines
+
+def apply_hunks(text, hunks):
+    """`text` with the hunks applied as Codex applies them, or None when one cannot be placed."""
+    source = _patch_source(text)
+    lines = [line for line, _ in source]
+    preferred = next((ending for _, ending in source if ending), '\n')
+    replacements = []
+    cursor = 0
+    for chunk in hunks:
+        placed = _patch_place(chunk, lines, cursor)
+        if placed is None:
+            return None
+        replacements.extend(placed[0])
+        cursor = placed[1]
+    out = []
+    done = 0
+    for start, length, new in sorted(replacements, key=lambda r: r[0]):
+        out.extend(source[done:start])
+        out.extend(((line, preferred) for line in new))
+        done = start + length
+    out.extend(source[done:])
+    return ''.join((line + (ending or preferred) for line, ending in out))
+
 _BEGIN = '*** Begin Patch'
 
 _END = '*** End Patch'
@@ -1357,14 +1872,18 @@ _MOVE = '*** Move to: '
 
 _EOF = '*** End of File'
 
+_ENVIRONMENT = '*** Environment ID:'
+
 _HUNK = '@@'
+
+_HUNK_ANCHOR = '@@ '
 
 _OPS = (('add', _ADD), ('delete', _DELETE), ('update', _UPDATE))
 
 _PATCH_KEYS = ('command', 'input', 'patch')
 
 def patch_text(event):
-    """The patch an apply_patch call carries, from its first to its last marker; None otherwise."""
+    """The text an apply_patch call carries, from its first Begin marker on; None when it has none."""
     raw = getattr(event, 'raw', None)
     tool_input = raw.get('tool_input') if isinstance(raw, dict) else None
     command = tool_input if isinstance(tool_input, str) else None
@@ -1375,77 +1894,158 @@ def patch_text(event):
     if isinstance(command, list):
         command = '\n'.join((part for part in command if isinstance(part, str)))
     start = command.find(_BEGIN) if isinstance(command, str) else -1
-    end = command.find(_END, start) if start >= 0 else -1
-    return command[start:end + len(_END)] if end >= 0 else None
+    return command[start:] if start >= 0 else None
 
-def _body_line(current, line):
-    """Add one line under the file operation `current` is reading."""
-    if line.startswith(_MOVE):
-        current[2] = line[len(_MOVE):].strip()
-    elif line.startswith(_HUNK):
-        current[3].append([line[len(_HUNK):].strip(), [], False])
-    elif line.startswith(_EOF):
-        if current[3]:
-            current[3][-1][2] = True
-    elif current[0] == 'add':
-        current[3].append(line[1:] if line.startswith('+') else line)
+def _patch_refuse(number, line, why):
+    message = f'the apply_patch text does not parse at line {number} ({line[:80]!r}): {why}'
+    raise ValueError(message)
+
+def _patch_header(state, text):
+    """Open a file operation or end the patch when `text` is a header; False when it is not one."""
+    if text == _END:
+        _patch_not_empty(state, text)
+        state['mode'] = 'ended'
+        return True
+    for op, marker in _OPS:
+        if text.startswith(marker):
+            _patch_not_empty(state, text)
+            state['ops'].append({'op': op, 'path': text[len(marker):], 'move': None, 'body': []})
+            state['mode'] = op
+            return True
+    return False
+
+def _patch_not_empty(state, text):
+    """Codex's ensure_update_hunk_is_not_empty: an update with no hunk, or an empty last hunk, refuses."""
+    last = state['ops'][-1] if state['ops'] else None
+    if last is None or last['op'] != 'update':
+        return
+    if not last['body'] and state['mode'] == 'update':
+        _patch_refuse(state['number'], text, f"update of {last['path']!r} has no hunk")
+    if last['body'] and (not (last['body'][-1]['old'] or last['body'][-1]['new'])):
+        _patch_refuse(state['number'], text, 'a hunk has no lines')
+
+def _patch_chunk(op, context=None):
+    chunk = {'context': context, 'old': [], 'new': [], 'pairs': [], 'eof': False, 'added': []}
+    op['body'].append(chunk)
+    return chunk
+
+def _patch_hunk_marker(state, op, text):
+    """An `@@` or `*** End of File` line in an update; False when `text` is neither."""
+    chunks = op['body']
+    anchored = text == _HUNK or text.startswith(_HUNK_ANCHOR)
+    if anchored and chunks and (not (chunks[-1]['old'] or chunks[-1]['new'])):
+        _patch_refuse(state['number'], text, 'a hunk has no lines')
+    if anchored:
+        _patch_chunk(op, text[len(_HUNK_ANCHOR):] if text != _HUNK else None)
+        return True
+    if text != _EOF:
+        return False
+    if chunks and (not (chunks[-1]['old'] or chunks[-1]['new'])):
+        _patch_refuse(state['number'], text, 'a hunk has no lines')
+    if chunks:
+        chunks[-1]['eof'] = True
+    return True
+
+def _patch_change(op, line):
+    """A context, added or removed line of an update; False when `line` is none of those."""
+    kind = line[:1] if line else ' '
+    if kind not in (' ', '+', '-'):
+        return False
+    chunk = op['body'][-1] if op['body'] else _patch_chunk(op)
+    text = line[1:]
+    if kind == ' ':
+        chunk['pairs'].append((len(chunk['old']), len(chunk['new'])))
+    if kind != '+':
+        chunk['old'].append(text)
+    if kind != '-':
+        chunk['new'].append(text)
+    if kind == '+':
+        chunk['added'].append(text)
+    return True
+
+def _patch_update_line(state, op, line):
+    """One line of an update, read as Codex's UpdateFile mode reads it."""
+    text = line.rstrip(_PATCH_SPACE)
+    if _patch_header(state, text):
+        return
+    if op['body'] and op['body'][-1]['eof']:
+        if not text:
+            return
+        if text != _HUNK and (not text.startswith(_HUNK_ANCHOR)):
+            _patch_refuse(state['number'], line, 'expected an @@ hunk after End of File')
+    if not op['body'] and op['move'] is None and text.startswith(_MOVE):
+        op['move'] = text[len(_MOVE):]
+        return
+    if not (_patch_hunk_marker(state, op, text) or _patch_change(op, line)):
+        _patch_refuse(state['number'], line, "an update line must start with ' ', '+', '-' or @@")
+
+def _patch_line(state, line):
+    """Feed one patch line to the state machine."""
+    mode = state['mode']
+    trimmed = line.strip(_PATCH_SPACE)
+    if mode == 'update':
+        _patch_update_line(state, state['ops'][-1], line)
+    elif mode == 'begun' and trimmed.startswith(_ENVIRONMENT) and trimmed[len(_ENVIRONMENT):].strip(_PATCH_SPACE):
+        state['mode'] = 'begun:env'
+    elif _patch_header(state, trimmed):
+        pass
+    elif mode == 'add' and line.startswith('+'):
+        state['ops'][-1]['body'].append(line[1:])
     else:
-        if not current[3]:
-            current[3].append(['', [], False])
-        current[3][-1][1].append(line if line[:1] in (' ', '-', '+') else ' ' + line)
+        _patch_refuse(state['number'], line, 'not a file header (Add File, Delete File, Update File)')
+
+def _patch_lines(text):
+    """`text` split on "\\n" as Codex splits it: str::lines, then its parser, each drop one trailing "\\r"."""
+    lines = text.split('\n')
+    if lines and (not lines[-1]):
+        lines.pop()
+    return [line.removesuffix('\r').removesuffix('\r') for line in lines]
+
+def _patch_one(lines, start, operations):
+    """Read the patch whose Begin line is `lines[start]` into `operations`; the index after its End."""
+    if lines[start].strip(_PATCH_SPACE) != _BEGIN:
+        _patch_refuse(start + 1, lines[start], 'the Begin marker must stand alone on its line')
+    state = {'mode': 'begun', 'ops': operations, 'number': start + 1}
+    final = next((i for i in range(len(lines) - 1, start, -1) if lines[i].strip(_PATCH_SPACE)), None)
+    for index in range(start + 1, len(lines)):
+        state['number'] = index + 1
+        line = lines[index]
+        if index == final and line.strip(_PATCH_SPACE) == _END:
+            _patch_not_empty(state, _END)
+            return index + 1
+        _patch_line(state, line)
+        if state['mode'] == 'ended':
+            return index + 1
+    return _patch_refuse(len(lines), lines[-1], 'the patch has no End marker')
 
 def parse_patch(patch):
-    """[(op, path, moved_to, hunks)]: op is add/delete/update; a hunk is (anchor, lines, at_eof)."""
+    """[(op, path, moved_to, body)] for every patch in `patch`; ValueError when Codex would not parse one.
+
+    op is add/delete/update; an add's body is its lines, an update's its hunks (dicts: context, old,
+    new, pairs, eof, added).
+    """
+    lines = _patch_lines(patch)
     operations = []
-    for line in patch.replace('\r\n', '\n').split('\n')[1:]:
-        if line.startswith(_END):
-            break
-        opened = next(((op, marker) for op, marker in _OPS if line.startswith(marker)), None)
-        if opened is not None:
-            operations.append([opened[0], line[len(opened[1]):].strip(), None, []])
-        elif operations:
-            _body_line(operations[-1], line)
-    return [tuple(operation) for operation in operations]
-
-def _find(lines, wanted, start):
-    """Where `wanted` starts in `lines` at or after `start`, exactly or ignoring trailing space."""
-    for loose in (False, True):
-        for index in range(start, len(lines) - len(wanted) + 1):
-            window = lines[index:index + len(wanted)]
-            if window == wanted or (loose and [w.rstrip() for w in window] == [w.rstrip() for w in wanted]):
-                return index
-    return None
-
-def apply_hunks(text, hunks):
-    """`text` with the hunks applied in order, or None when one cannot be placed."""
-    lines = text.split('\n')
-    cursor = 0
-    for anchor, body, at_eof in hunks:
-        if anchor:
-            found = _find(lines, [anchor], cursor)
-            if found is None:
-                found = next((i for i in range(cursor, len(lines)) if anchor.strip() in lines[i]), None)
-            if found is None:
-                return None
-            cursor = found + 1
-        old = [line[1:] for line in body if line[:1] in (' ', '-')]
-        new = [line[1:] for line in body if line[:1] in (' ', '+')]
-        if not old:
-            at = len(lines) - (1 if lines and lines[-1] == '' else 0) if at_eof else cursor
+    index = 0
+    while index < len(lines):
+        if _BEGIN in lines[index]:
+            lines[index] = lines[index][lines[index].index(_BEGIN):]
+            index = _patch_one(lines, index, operations)
         else:
-            at = _find(lines, old, cursor)
-            if at is None:
-                return None
-        lines[at:at + len(old)] = new
-        cursor = at + len(new)
-    return '\n'.join(lines)
+            index += 1
+    return [(op['op'], op['path'], op['move'], op['body']) for op in operations]
+
+def _patch_key(event, path):
+    """`path` as the call names it: relative to the agent's working directory when the event has one."""
+    cwd = getattr(event, 'cwd', None)
+    return _chock_os.path.normpath(_chock_os.path.join(cwd, path)) if cwd else path
 
 def _read(root, path):
     target = _chock_Path(path)
     if not target.is_absolute():
         target = _chock_Path(root if root is not None else _chock_Path.cwd()) / target
     try:
-        return target.read_text(encoding='utf-8')
+        return target.read_bytes().decode('utf-8')
     except (OSError, UnicodeDecodeError):
         return None
 
@@ -1455,14 +2055,23 @@ def patched_files(event, root=None):
     if patch is None:
         return {}
     files = {}
+    disk = {}
     for op, path, moved_to, body in parse_patch(patch):
+        key = _patch_key(event, path)
         if op == 'add':
-            files[path] = '\n'.join(body) + '\n'
-        elif op == 'update':
-            before = _read(root, path)
+            disk[key] = files[key] = ''.join((line + '\n' for line in body))
+        elif op == 'delete':
+            disk[key] = None
+            files.pop(key, None)
+        else:
+            before = disk[key] if key in disk else _read(root, key)
             after = apply_hunks(before, body) if before is not None else None
             if after is not None:
-                files[moved_to or path] = after
+                target = _patch_key(event, moved_to) if moved_to else key
+                if target != key:
+                    disk[key] = None
+                    files.pop(key, None)
+                disk[target] = files[target] = after
     return files
 
 def patch_added(event):
@@ -1472,10 +2081,12 @@ def patch_added(event):
         return {}
     added = {}
     for op, path, moved_to, body in parse_patch(patch):
+        key = _patch_key(event, moved_to or path)
         if op == 'add':
-            added[path] = '\n'.join(body)
+            added[key] = '\n'.join(body)
         elif op == 'update':
-            added[moved_to or path] = '\n'.join((line[1:] for _, hunk, _ in body for line in hunk if line[:1] == '+'))
+            lines = [line for chunk in body for line in chunk['added']]
+            added[key] = '\n'.join(filter(None, (added.get(key, ''), *lines)))
     return added
 
 GATE_BLOCKED = 'blocked'
@@ -2051,6 +2662,116 @@ def workspace_root(event):
     path = getattr(event, 'path', None)
     return next((root for root in roots if path and _holds(root, path)), roots[0] if roots else None)
 
+_REPO_STOP_PROJECT_ENV = ('CLAUDE_PROJECT_DIR', 'GEMINI_PROJECT_DIR', 'OPENHANDS_PROJECT_DIR')
+
+_REPO_STOP_PROJECT_KEYS = ('workspacePaths',)
+
+_REPO_STOP_URI = 'file://'
+
+_REPO_STOP_PATH_MAX = 4096
+
+_REPO_STOP_ESCAPE_RE = _chock_re.compile('(?:%[0-9A-Fa-f]{2})+')
+
+_REPO_STOP_CAP_STRINGS = 256
+
+_REPO_STOP_CAP_CHARS = 64 * 1024
+
+_REPO_STOP_CAP_SECONDS = 2.0
+
+_REPO_STOP_OVER_CAP = f'{HALT_REASON}: a person stopped agents in a repository on this machine (`chock stop`), and this call names more paths than the stop check reads, so it cannot tell the call stays out of it. Split the call; `chock resume` lifts the stop.'
+
+def _repo_stop_unquote(text):
+    """`text` with each run of `%XX` escapes decoded as UTF-8, as a `file://` URI spells a path."""
+    return _REPO_STOP_ESCAPE_RE.sub(lambda found: bytes.fromhex(found.group(0).replace('%', '')).decode('utf-8', 'replace'), text)
+
+def _repo_stop_path(text):
+    """The path a string may name: a `file://` URI's path, else the string itself; None when it names none."""
+    if text[:len(_REPO_STOP_URI)].lower() == _REPO_STOP_URI:
+        rest = text[len(_REPO_STOP_URI):]
+        text = _repo_stop_unquote(rest[rest.find('/'):] if '/' in rest else '')
+    return text if 0 < len(text) <= _REPO_STOP_PATH_MAX and '\x00' not in text else None
+
+def _repo_stop_words(command):
+    """Each word of a shell command, and the value of each `--flag=value` word: best effort, never raises."""
+    lexer = _chock_shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        words = list(lexer)
+    except ValueError:
+        words = command.split()
+    return words + [word.split('=', 1)[1] for word in words if '=' in word]
+
+def _repo_stop_named(raw):
+    """Every string anywhere in a payload that may name a path (`file://` URIs decoded): each client nests and
+    spells its tool input its own way, so none is trusted to hold them all."""
+    pending, found = ([raw], [])
+    while pending:
+        value = pending.pop()
+        if isinstance(value, dict):
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+        elif isinstance(value, str):
+            found.append(_repo_stop_path(value))
+    return [path for path in found if path]
+
+def repo_stop_projects(event):
+    """The session's project roots as the client names them (its hook environment, its payload); [] for none."""
+    raw = getattr(event, 'raw', None)
+    listed = [raw.get(key) for key in _REPO_STOP_PROJECT_KEYS] if isinstance(raw, dict) else []
+    named = [_chock_os.environ.get(name) for name in _REPO_STOP_PROJECT_ENV] + workspace_roots(event)
+    named += [root for roots in listed if isinstance(roots, list) for root in roots]
+    return [root for root in named if isinstance(root, str) and root]
+
+def _repo_stop_cwd(event):
+    return getattr(event, 'cwd', None) or _chock_os.getcwd()
+
+def repo_stop_near(event, projects=()):
+    """The repositories the call works in, read without its payload: the runtime's own, the cwd's, the project's."""
+    runtime = globals().get('__file__') or sys.argv[0]
+    own = [_chock_Path(runtime).resolve().parent.parent.parent] if runtime_route(runtime) == DLOG_ROUTE_SYNC else []
+    return own + [repo for place in [_repo_stop_cwd(event), *projects] for repo in halt_repos(place)]
+
+def repo_stop_paths(event):
+    """Every distinct string the call's input may name a path with, the shell command's words included."""
+    command = getattr(event, 'command', None)
+    words = _repo_stop_words(command) if isinstance(command, str) else []
+    named = [getattr(event, 'path', None), *_repo_stop_named(getattr(event, 'raw', None))]
+    named += [_repo_stop_path(word) for word in words]
+    return list(dict.fromkeys((path for path in named if isinstance(path, str) and path)))
+
+def repo_stop_named_roots(event):
+    """The repositories above every path the call names, or None past the cap (too many, too long, too slow)."""
+    paths = repo_stop_paths(event)
+    if len(paths) > _REPO_STOP_CAP_STRINGS or sum(map(len, paths)) > _REPO_STOP_CAP_CHARS:
+        return None
+    cwd, deadline, roots = (_repo_stop_cwd(event), _chock_time.monotonic() + _REPO_STOP_CAP_SECONDS, [])
+    for path in paths:
+        if _chock_time.monotonic() > deadline:
+            return None
+        roots += halt_repos(_chock_os.path.join(cwd, path))
+    return roots
+
+def repo_stop_refusal(event):
+    """`stopped: <reason>` when a stop reaches this pre-tool call's agent, else None. An unreadable stop refuses."""
+    if getattr(event, 'event', None) != 'pre_tool':
+        return None
+    agent, projects = (getattr(event, 'agent', None), repo_stop_projects(event))
+    near = repo_stop_near(event, projects)
+    stop = halt_find(near, agent)
+    if stop is not None:
+        return halt_message(stop)
+    registered = halt_registry_find(agent)
+    if registered is None or not projects:
+        return None if registered is None else halt_message(registered)
+    named = repo_stop_named_roots(event)
+    if named is None:
+        return _REPO_STOP_OVER_CAP
+    roots = near + named
+    mains = [halt_main_root(root) for root in roots]
+    stop = halt_find(named, agent) or halt_registry_find(agent, [*roots, *filter(None, mains)])
+    return None if stop is None else halt_message(stop)
+
 _SEVERITY = (VERDICT_DENY, VERDICT_ESCALATE, VERDICT_WARN)
 
 _GIT_DIR = '.git'
@@ -2226,7 +2947,8 @@ def run_gate(gate, writes, event, run_in, deadline):
 
     `run_in` is (root, extra): the working directory, and the stdin keys `extra` adds: `added` (per
     edited path, only the text the edit introduces; a runner that predates it judges the whole file,
-    which only ever refuses more) and the script `session`. The runner gets what is left of `deadline`.
+    which only ever refuses more), the script `session`, and the decision line's `log` fields (session_id,
+    actor, target). The runner gets what is left of `deadline`.
     """
     root, extra = run_in
     runner = runner_for(gate)
@@ -2239,6 +2961,7 @@ def run_gate(gate, writes, event, run_in, deadline):
         return (GATE_ERRORED, f'the gate runner gave no verdict within {allowed_seconds(exc)}')
     except (OSError, _chock_subprocess.SubprocessError) as exc:
         return (GATE_ERRORED, str(exc))
+    GATE_LAST['code'] = proc.returncode
     return runner_outcome(proc.returncode, proc.stderr)
 
 _EVENT_ARG = {'pre_tool': 'pre-tool-use', 'stop': 'stop'}
@@ -2291,12 +3014,13 @@ def _gate_says(gate, event, name, deadline, root):
     added = {**patch_added(event), **added_from_event(event)} if event.event == PRE_TOOL else {}
     added = judged_files(added, root, outside, lambda path: repo_paths(path, root))
     added = {path: text for path, text in added.items() if path in writes}
-    extra = {**({'added': added} if added else {}), 'session': session_for(event, root)}
+    extra = {**({'added': added} if added else {}), 'session': session_for(event, root), 'log': dlog_fields(event, root)}
     outcome, message = run_gate(gate, writes, name, (root, extra), deadline)
     return (gate_decision(outcome, message, gate), writes)
 
 def evaluate_gate(argv, event):
     """The decision this event earns from a compiled gate, or None when it has nothing to say."""
+    GATE_LAST.clear()
     gate = gate_path_from_argv(argv)
     name = _EVENT_ARG.get(getattr(event, 'event', ''))
     if gate is None or name is None:
@@ -2463,6 +3187,8 @@ def _chock_declared():
     called = _flag_path(argv, TOOL_CALL_FLAG)
     if called is not None:
         actions.append(_chock_spec_action(called))
+    if HALT_HOOK_FLAG in argv and repo_stop_refusal(Event(AGENT, PRE_TOOL, raw={})) is not None:
+        actions.append("block")  # stopped: a payload nobody can read is still a call the stop refuses
     for action in ("block", "ask", "warn"):
         if action in actions:
             return action, event, gate
@@ -2542,6 +3268,10 @@ def _chock_timed(judged, stage, ask):
 
 
 def _judge(event, judged):
+    halted = repo_stop_refusal(event)
+    if halted is not None:
+        judged[0:2] = [HALT_REASON, ".chock/stop.json"]
+        return Decision.deny(halted)
     if event.event == "pre_tool" and event.command:
         verdict = _chock_timed(judged, "guard", lambda: evaluate(
             sys.argv[1:], event.command, event.tool or "", can_ask=_chock_can_ask(event.raw)

@@ -12,6 +12,9 @@
       },
       {
         "command": "git -c \"alias.chock-hook=!test -f .chock/bin/launch.sh || { echo chock: no .chock/bin/launch.sh here, run chock sync --repo . >&2; exit 2; }; sh .chock/bin/launch.sh\" chock-hook .chock/bin/windsurf.py --guard \".agents/policies/protect-commit-privacy/implementations/protect-commit-privacy.py\""
+      },
+      {
+        "command": "git -c \"alias.chock-hook=!test -f .chock/bin/launch.sh || { echo chock: no .chock/bin/launch.sh here, run chock sync --repo . >&2; exit 2; }; sh .chock/bin/launch.sh\" chock-hook .chock/bin/windsurf.py --stop-check"
       }
     ],
     "pre_mcp_tool_use": [
@@ -26,6 +29,9 @@
       },
       {
         "command": "git -c \"alias.chock-hook=!test -f .chock/bin/launch.sh || { echo chock: no .chock/bin/launch.sh here, run chock sync --repo . >&2; exit 2; }; sh .chock/bin/launch.sh\" chock-hook .chock/bin/windsurf.py --guard \".agents/policies/protect-commit-privacy/implementations/protect-commit-privacy.py\""
+      },
+      {
+        "command": "git -c \"alias.chock-hook=!test -f .chock/bin/launch.sh || { echo chock: no .chock/bin/launch.sh here, run chock sync --repo . >&2; exit 2; }; sh .chock/bin/launch.sh\" chock-hook .chock/bin/windsurf.py --stop-check"
       }
     ]
   }

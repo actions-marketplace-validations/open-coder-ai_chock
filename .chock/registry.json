@@ -216,7 +216,9 @@
         "trust_tier": "community",
         "lifecycle_status": "review",
         "dependencies": [],
-        "script_hashes": {}
+        "script_hashes": {
+          "traces.py": "35b040798c2f8207f0f5b3d7f87413fd1582d7b17b1cfec6fa9f16408f214ecb"
+        }
       }
     ],
     "pin-github-actions": [

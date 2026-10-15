@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from chock.emit import write_generated
+from chock.gate.build import vendor_runner
 from chock.hooks.autocompile import auto_compile
 from chock.hooks.ownership import (
     GENERATED_MARKER,
@@ -160,6 +161,9 @@ def install_policy_hooks(repo_root: Path, hooks_dir: Path) -> None:
         return
 
     auto_compile(repo_root)
+    # The dispatcher asks the runner whether a stop's committer is an agent: a repo with no policy has none otherwise.
+    if not (repo_root / ".chock" / "bin" / "gate.py").exists():
+        vendor_runner(repo_root / ".chock")
 
     events = {
         "pre-commit": "git-pre-commit.sh",

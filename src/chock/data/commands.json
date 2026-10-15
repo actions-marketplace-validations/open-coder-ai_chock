@@ -45,6 +45,10 @@
       "module": "chock.doctor.cli",
       "help": "Check each client's hooks on each route: present, current, and seen running (--client X)"
     },
+    "incident": {
+      "module": "chock.incident",
+      "help": "An ordered, redacted timeline from the local decision log (incident --since T [--until T] [--share])"
+    },
     "witness": {
       "module": "chock.witness_export",
       "help": "Export one client's redacted decision log for its agentseam evidence issue (witness export --client C)"

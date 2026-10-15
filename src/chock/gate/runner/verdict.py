@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .actor import _ask_answered, _ask_refusal, _judged_event, agent_signal, approval, rollout
+from .actor import _ask_answered, _ask_refusal, _judged_event, agent_signal, approval, rollout, stop_agent_signal
 from .constants import (
     _ACTION_RANK,
     _EVENT_NAME,
@@ -32,7 +32,7 @@ from .constants import (
     VERDICT_ERROR,
 )
 from .context import GateResult, ListingError
-from .halt import HALT_POLICY, HALT_REASON, halt_covers, halt_message, halt_read
+from .halt import HALT_POLICY, HALT_REASON, halt_find, halt_git_roots, halt_message
 from .kinds import KINDS
 from .log import _actor, _held_record, _log_halt, _log_outcome, _log_script_hook
 from .material import _context, _params, own_paths
@@ -115,11 +115,13 @@ def script_verdict(policy_id: str, event: str, code: int, repo_root: Path) -> in
 
 def halt_git(repo_root: Path, event: str, policy_id: str | None = None) -> tuple[int, str] | None:
     """An agent's commit or push while a stop reaches it: refused and logged with reason `stopped`, whatever
-    `CHOCK_ALLOW` or the rollout level say. A person's own commit or push is not the stop's: None."""
-    signal = agent_signal(repo_root)
-    stop = halt_read(repo_root) if signal is not None else None
+    `CHOCK_ALLOW`, `CHOCK_AGENT_COMMIT=0` or the rollout level say. A person's own commit or push is not the
+    stop's: None."""
+    signal = stop_agent_signal(repo_root)
     who = _actor(signal)
-    if stop is None or not halt_covers(stop, str(who["actor"]).removeprefix(ACTOR_AGENT_PREFIX)):
+    client = str(who["actor"]).removeprefix(ACTOR_AGENT_PREFIX)
+    stop = halt_find(halt_git_roots(repo_root), client) if signal is not None else None
+    if stop is None:
         return None
     print(f"gate: {halt_message(stop)}", file=sys.stderr)
     judged = _judged_event(_EVENT_NAME.get(event, event), agent=True)
