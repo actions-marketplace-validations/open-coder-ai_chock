@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-import subprocess
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -34,7 +32,7 @@ from .constants import (
     VERDICT_ERROR,
 )
 from .context import GateResult, ListingError
-from .halt import HALT_POLICY, HALT_REASON, halt_find, halt_message
+from .halt import HALT_POLICY, HALT_REASON, halt_find, halt_git_roots, halt_message
 from .kinds import KINDS
 from .log import _actor, _held_record, _log_halt, _log_outcome, _log_script_hook
 from .material import _context, _params, own_paths
@@ -113,32 +111,6 @@ def script_verdict(policy_id: str, event: str, code: int, repo_root: Path) -> in
     print(_ask_refusal(policy_id, signal), file=sys.stderr)
     _log_script_hook(policy_id, event, ACTION_ASK, repo_root, _actor(signal))
     return 1
-
-
-def halt_git_roots(repo_root: Path) -> list[Path]:
-    """Every folder whose stop reaches a git command, as the git dispatcher finds them: the work tree
-    (`GIT_WORK_TREE` too), the checkout of the git dir and of the common dir (a bare repository is its own),
-    and every folder above each, symlinks resolved."""
-    named = [
-        Path(repo_root),
-        *(Path(os.environ[name]) for name in ("GIT_WORK_TREE", "GIT_DIR") if os.environ.get(name)),
-    ]
-    try:
-        shown = subprocess.run(
-            ["git", "rev-parse", "--absolute-git-dir", "--git-common-dir"],  # noqa: S607
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=10,
-            check=False,
-        )
-        dirs = shown.stdout.splitlines() if shown.returncode == 0 else []
-    except (OSError, subprocess.SubprocessError, UnicodeError):
-        dirs = []
-    for found in (Path(os.path.realpath(line)) for line in dirs if line):
-        named.append(found.parent if found.name == ".git" else found)
-    heres = (Path(spelled(str(path))) for path in named for spelled in (os.path.abspath, os.path.realpath))
-    return list(dict.fromkeys(folder for here in heres for folder in (here, *here.parents)))
 
 
 def halt_git(repo_root: Path, event: str, policy_id: str | None = None) -> tuple[int, str] | None:

@@ -1213,6 +1213,21 @@ def halt_message(stop):
     reason = (reason or _HALT_NO_REASON)[:_HALT_REASON_CAP]
     return f'{HALT_REASON}: {reason}. A person stopped agents in this repository (`chock stop`); every tool call is refused until they run `chock resume`.'
 
+def halt_git_roots(repo_root: _chock_Path) -> list[_chock_Path]:
+    """Every folder whose stop reaches a git command, as the git dispatcher finds them: the work tree
+    (`GIT_WORK_TREE` too), the checkout of the git dir and of the common dir (a bare repository is its own),
+    and every folder above each, symlinks resolved."""
+    named = [_chock_Path(repo_root), *(_chock_Path(_chock_os.environ[name]) for name in ('GIT_WORK_TREE', 'GIT_DIR') if _chock_os.environ.get(name))]
+    try:
+        shown = _chock_subprocess.run(['git', 'rev-parse', '--absolute-git-dir', '--git-common-dir'], capture_output=True, text=True, encoding='utf-8', timeout=10, check=False)
+        dirs = shown.stdout.splitlines() if shown.returncode == 0 else []
+    except (OSError, _chock_subprocess.SubprocessError, UnicodeError):
+        dirs = []
+    for found in (_chock_Path(_chock_os.path.realpath(line)) for line in dirs if line):
+        named.append(found.parent if found.name == '.git' else found)
+    heres = (_chock_Path(spelled(str(path))) for path in named for spelled in (_chock_os.path.abspath, _chock_os.path.realpath))
+    return list(dict.fromkeys((folder for here in heres for folder in (here, *here.parents))))
+
 GUARD_VIOLATION = 1
 
 GUARD_ASK_EXIT = 3
