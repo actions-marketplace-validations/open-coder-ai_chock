@@ -1012,36 +1012,136 @@ HALT_POLICY = 'chock-stop'
 
 HALT_CLIENT_RE = _chock_re.compile('^[a-z0-9_]{1,32}$')
 
+HALT_HOOK_FLAG = '--stop-check'
+
+HALT_CLIENTS = ('antigravity', 'claude_code', 'codex_cli', 'cursor', 'devin', 'factory_droid', 'gemini_cli', 'goose', 'grok', 'mistral_vibe', 'openhands', 'tabnine', 'vscode_copilot', 'windsurf')
+
+HALT_REGISTRY_PARTS = ('.chock', 'stops')
+
+_HALT_REGISTRY_SUFFIX = '.json'
+
+_HALT_REGISTRY_UNREADABLE = '~/.chock/stops exists but cannot be read, so every agent is refused'
+
+_HALT_GITDIR = 'gitdir:'
+
 _HALT_REASON_CAP = 200
 
 _HALT_UNREADABLE = '.chock/stop.json exists but cannot be read, so every agent is refused'
 
 _HALT_NO_REASON = 'no reason given'
 
-def halt_read(repo_root):
-    """The stop in force for `repo_root` as {scope, reason, ...}, or None. A file that exists but cannot be
-    read or parsed, or names no valid scope, stops every agent: fail closed."""
-    if repo_root is None:
-        return None
-    path = _chock_Path(repo_root).joinpath(*HALT_PARTS)
+_HALT_CASELESS = ('darwin', 'win32', 'cygwin')
+
+def _halt_read_file(path, unreadable):
+    """The stop `path` holds as {scope, reason, ...}, or None when there is no file. A file that exists but
+    cannot be read or parsed, or names no valid scope, stops every agent: fail closed."""
+    stopped = {'scope': HALT_ALL, 'reason': unreadable, 'unreadable': True}
     try:
-        doc = json.loads(path.read_text(encoding='utf-8'))
+        doc = json.loads(_chock_Path(path).read_text(encoding='utf-8'))
     except (FileNotFoundError, NotADirectoryError):
-        return {'scope': HALT_ALL, 'reason': _HALT_UNREADABLE, 'unreadable': True} if _chock_os.path.lexists(path) else None
+        return stopped if _chock_os.path.lexists(path) else None
     except (OSError, UnicodeError, ValueError):
-        return {'scope': HALT_ALL, 'reason': _HALT_UNREADABLE, 'unreadable': True}
+        return stopped
     scope = doc.get('scope') if isinstance(doc, dict) else None
     if not isinstance(scope, str) or not (scope == HALT_ALL or HALT_CLIENT_RE.match(scope)):
-        return {'scope': HALT_ALL, 'reason': _HALT_UNREADABLE, 'unreadable': True}
+        return stopped
     reason = doc.get('reason')
     return {**doc, 'scope': scope, 'reason': reason if isinstance(reason, str) else ''}
 
+def halt_read(repo_root):
+    """The stop in force for `repo_root`, or None; read fail-closed."""
+    if repo_root is None:
+        return None
+    return _halt_read_file(_chock_Path(repo_root).joinpath(*HALT_PARTS), _HALT_UNREADABLE)
+
+def halt_registry_dir():
+    """`~/.chock/stops`: the machine-level registry of every stop in force."""
+    return _chock_Path(_chock_os.path.expanduser('~')).joinpath(*HALT_REGISTRY_PARTS)
+
+def halt_norm(path):
+    """`path`'s realpath, casefolded where the filesystem ignores case (realpath keeps the case it was typed in)."""
+    real = _chock_os.path.realpath(str(path))
+    return real.casefold() if sys.platform in _HALT_CASELESS else real
+
+def halt_registry_entry(repo_root):
+    """The registry entry for `repo_root`, named by the sha256 of its normalised realpath."""
+    key = _chock_hashlib.sha256(halt_norm(repo_root).encode('utf-8')).hexdigest()
+    return halt_registry_dir() / f'{key}{_HALT_REGISTRY_SUFFIX}'
+
+def halt_registry_find(client, repos=None):
+    """The first registry entry that reaches `client` (only those for `repos`, when given), or None.
+    A registry that exists but cannot be listed, or an entry that cannot be read, refuses: fail closed."""
+    folder = halt_registry_dir()
+    unreadable = {'scope': HALT_ALL, 'reason': _HALT_REGISTRY_UNREADABLE, 'unreadable': True}
+    try:
+        names = sorted(_chock_os.listdir(folder))
+    except (FileNotFoundError, NotADirectoryError):
+        return unreadable if _chock_os.path.lexists(folder) else None
+    except OSError:
+        return unreadable
+    wanted = None if repos is None else {halt_registry_entry(repo).name for repo in repos}
+    for name in names:
+        if not name.endswith(_HALT_REGISTRY_SUFFIX) or (wanted is not None and name not in wanted):
+            continue
+        stop = _halt_read_file(folder / name, _HALT_REGISTRY_UNREADABLE)
+        if stop is not None and halt_covers(stop, client):
+            return stop
+    return None
+
+def halt_main_root(repo_root):
+    """The main worktree of the linked worktree at `repo_root` (its `.git` is a file naming a gitdir whose
+    `commondir` leads to the main `.git`), or the bare repository itself that holds it, else None. Read from
+    disk: the runtime cannot wait on git."""
+    dot = _chock_Path(repo_root) / '.git'
+    try:
+        text = dot.read_text(encoding='utf-8').strip() if dot.is_file() else ''
+        if not text.startswith(_HALT_GITDIR):
+            return None
+        gitdir = _chock_Path(repo_root) / text[len(_HALT_GITDIR):].strip()
+        common = gitdir.joinpath('commondir').read_text(encoding='utf-8').strip()
+    except (OSError, UnicodeError):
+        return None
+    common_dir = _chock_Path(_chock_os.path.realpath(gitdir / common))
+    return common_dir.parent if common_dir.name == '.git' else common_dir
+
+def halt_repos(path):
+    """Every repository holding `path`, as spelled and with every symlink resolved, nearest first: each folder up
+    from it with a `.git`, nested ones included."""
+    try:
+        text = str(path)
+        heres = dict.fromkeys((_chock_Path(found) for found in (_chock_os.path.abspath(text), _chock_os.path.realpath(text))))
+    except (OSError, ValueError):
+        return []
+    folders = (folder for here in heres for folder in (here, *here.parents))
+    return [folder for folder in dict.fromkeys(folders) if _chock_os.path.lexists(folder / '.git')]
+
+def halt_find(roots, client):
+    """The first stop in force over `roots`, or in the main worktree of any of them, that reaches `client`."""
+    seen = []
+    for root in roots:
+        for folder in (root, halt_main_root(root)):
+            if folder is None or folder in seen:
+                continue
+            seen.append(folder)
+            stop = halt_read(folder)
+            if stop is not None and halt_covers(stop, client):
+                return stop
+    return None
+
+def _halt_client(name):
+    return str(name or '').strip().lower().replace('-', '_')
+
+def _halt_names(client, named):
+    """Whether `client` (from a marker or a bundle) names the client id `named`, or a shorter form of it."""
+    return client.startswith(named) or named.startswith(client + '_')
+
 def halt_covers(stop, client):
-    """Whether `stop` reaches `client`: every agent, or the one named. An agent naming no client is reached."""
-    scope = stop.get('scope')
-    if scope == HALT_ALL or not client or client == 'unknown':
+    """Whether `stop` reaches `client`: every agent, or the one named (`cursor_agent` is `cursor`'s; `codex` may
+    be `codex_cli`). An agent naming no client, or one no in-agent client id matches, is reached: fail closed."""
+    scope, client = (_halt_client(stop.get('scope')), _halt_client(client))
+    if scope == HALT_ALL or not client:
         return True
-    return client == scope or scope.startswith(str(client) + '_')
+    return _halt_names(client, scope) or not any((_halt_names(client, known) for known in HALT_CLIENTS))
 
 def halt_message(stop):
     """`stopped: <reason>`, the reason printable and capped, and the one way to lift it."""
@@ -1375,8 +1475,6 @@ _DLOG_TARGET_FLAGS = ('--guard', '--gate', '--tool-call', '--record')
 
 _DLOG_GATE_FLAG = '--gate'
 
-_DLOG_STOP_FLAG = '--stop-check'
-
 _DLOG_COMPILED = 'compiled'
 
 _DLOG_MANIFEST_DEPTH = 3
@@ -1501,7 +1599,7 @@ def log_decision(argv, event, decision, judged, context):
             return
         plugin_name, plugin_version = dlog_plugin_manifest(runtime, context.get('manifests', ())) if route == DLOG_ROUTE_PLUGIN else ('', '')
         target = next((v for v in (_dlog_flag_value(argv, f) for f in _DLOG_TARGET_FLAGS) if v), None)
-        record = {'route': route, 'agent': agent, 'event': _DLOG_EVENT_LOGGED.get(event.event, event.event), 'policy_id': HALT_POLICY if _DLOG_STOP_FLAG in argv else _dlog_policy_id(target, route, plugin_name), 'surface': _DLOG_SURFACE.get(event.event, str(event.event)), 'verdict': _DLOG_SPOKEN.get(outcome, 'allow'), 'reason': _dlog_reason(source, outcome), 'duration_ms': round((_chock_time.monotonic() - started) * 1000), 'can_ask': context.get('can_ask')}
+        record = {'route': route, 'agent': agent, 'event': _DLOG_EVENT_LOGGED.get(event.event, event.event), 'policy_id': HALT_POLICY if HALT_HOOK_FLAG in argv else _dlog_policy_id(target, route, plugin_name), 'surface': _DLOG_SURFACE.get(event.event, str(event.event)), 'verdict': _DLOG_SPOKEN.get(outcome, 'allow'), 'reason': _dlog_reason(source, outcome), 'duration_ms': round((_chock_time.monotonic() - started) * 1000), 'can_ask': context.get('can_ask')}
         version = _dlog_chock_version() if route == DLOG_ROUTE_SYNC else ''
         if version:
             record['chock_version'] = version
@@ -2522,21 +2620,115 @@ def workspace_root(event):
     path = getattr(event, 'path', None)
     return next((root for root in roots if path and _holds(root, path)), roots[0] if roots else None)
 
-def repo_stop_root(event):
-    """The repository whose stop applies: the runtime's own on the sync route, else the one the call works in."""
+_REPO_STOP_PROJECT_ENV = ('CLAUDE_PROJECT_DIR', 'GEMINI_PROJECT_DIR', 'OPENHANDS_PROJECT_DIR')
+
+_REPO_STOP_PROJECT_KEYS = ('workspacePaths',)
+
+_REPO_STOP_URI = 'file://'
+
+_REPO_STOP_PATH_MAX = 4096
+
+_REPO_STOP_ESCAPE_RE = _chock_re.compile('(?:%[0-9A-Fa-f]{2})+')
+
+_REPO_STOP_CAP_STRINGS = 256
+
+_REPO_STOP_CAP_CHARS = 64 * 1024
+
+_REPO_STOP_CAP_SECONDS = 2.0
+
+_REPO_STOP_OVER_CAP = f'{HALT_REASON}: a person stopped agents in a repository on this machine (`chock stop`), and this call names more paths than the stop check reads, so it cannot tell the call stays out of it. Split the call; `chock resume` lifts the stop.'
+
+def _repo_stop_unquote(text):
+    """`text` with each run of `%XX` escapes decoded as UTF-8, as a `file://` URI spells a path."""
+    return _REPO_STOP_ESCAPE_RE.sub(lambda found: bytes.fromhex(found.group(0).replace('%', '')).decode('utf-8', 'replace'), text)
+
+def _repo_stop_path(text):
+    """The path a string may name: a `file://` URI's path, else the string itself; None when it names none."""
+    if text[:len(_REPO_STOP_URI)].lower() == _REPO_STOP_URI:
+        rest = text[len(_REPO_STOP_URI):]
+        text = _repo_stop_unquote(rest[rest.find('/'):] if '/' in rest else '')
+    return text if 0 < len(text) <= _REPO_STOP_PATH_MAX and '\x00' not in text else None
+
+def _repo_stop_words(command):
+    """Each word of a shell command, and the value of each `--flag=value` word: best effort, never raises."""
+    lexer = _chock_shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        words = list(lexer)
+    except ValueError:
+        words = command.split()
+    return words + [word.split('=', 1)[1] for word in words if '=' in word]
+
+def _repo_stop_named(raw):
+    """Every string anywhere in a payload that may name a path (`file://` URIs decoded): each client nests and
+    spells its tool input its own way, so none is trusted to hold them all."""
+    pending, found = ([raw], [])
+    while pending:
+        value = pending.pop()
+        if isinstance(value, dict):
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+        elif isinstance(value, str):
+            found.append(_repo_stop_path(value))
+    return [path for path in found if path]
+
+def repo_stop_projects(event):
+    """The session's project roots as the client names them (its hook environment, its payload); [] for none."""
+    raw = getattr(event, 'raw', None)
+    listed = [raw.get(key) for key in _REPO_STOP_PROJECT_KEYS] if isinstance(raw, dict) else []
+    named = [_chock_os.environ.get(name) for name in _REPO_STOP_PROJECT_ENV] + workspace_roots(event)
+    named += [root for roots in listed if isinstance(roots, list) for root in roots]
+    return [root for root in named if isinstance(root, str) and root]
+
+def _repo_stop_cwd(event):
+    return getattr(event, 'cwd', None) or _chock_os.getcwd()
+
+def repo_stop_near(event, projects=()):
+    """The repositories the call works in, read without its payload: the runtime's own, the cwd's, the project's."""
     runtime = globals().get('__file__') or sys.argv[0]
-    if runtime_route(runtime) == DLOG_ROUTE_SYNC:
-        return _chock_Path(runtime).resolve().parent.parent.parent
-    return _dlog_repo_root(getattr(event, 'cwd', None) or workspace_root(event) or '.')
+    own = [_chock_Path(runtime).resolve().parent.parent.parent] if runtime_route(runtime) == DLOG_ROUTE_SYNC else []
+    return own + [repo for place in [_repo_stop_cwd(event), *projects] for repo in halt_repos(place)]
+
+def repo_stop_paths(event):
+    """Every distinct string the call's input may name a path with, the shell command's words included."""
+    command = getattr(event, 'command', None)
+    words = _repo_stop_words(command) if isinstance(command, str) else []
+    named = [getattr(event, 'path', None), *_repo_stop_named(getattr(event, 'raw', None))]
+    named += [_repo_stop_path(word) for word in words]
+    return list(dict.fromkeys((path for path in named if isinstance(path, str) and path)))
+
+def repo_stop_named_roots(event):
+    """The repositories above every path the call names, or None past the cap (too many, too long, too slow)."""
+    paths = repo_stop_paths(event)
+    if len(paths) > _REPO_STOP_CAP_STRINGS or sum(map(len, paths)) > _REPO_STOP_CAP_CHARS:
+        return None
+    cwd, deadline, roots = (_repo_stop_cwd(event), _chock_time.monotonic() + _REPO_STOP_CAP_SECONDS, [])
+    for path in paths:
+        if _chock_time.monotonic() > deadline:
+            return None
+        roots += halt_repos(_chock_os.path.join(cwd, path))
+    return roots
 
 def repo_stop_refusal(event):
     """`stopped: <reason>` when a stop reaches this pre-tool call's agent, else None. An unreadable stop refuses."""
     if getattr(event, 'event', None) != 'pre_tool':
         return None
-    stop = halt_read(repo_stop_root(event))
-    if stop is None or not halt_covers(stop, getattr(event, 'agent', None)):
-        return None
-    return halt_message(stop)
+    agent, projects = (getattr(event, 'agent', None), repo_stop_projects(event))
+    near = repo_stop_near(event, projects)
+    stop = halt_find(near, agent)
+    if stop is not None:
+        return halt_message(stop)
+    registered = halt_registry_find(agent)
+    if registered is None or not projects:
+        return None if registered is None else halt_message(registered)
+    named = repo_stop_named_roots(event)
+    if named is None:
+        return _REPO_STOP_OVER_CAP
+    roots = near + named
+    mains = [halt_main_root(root) for root in roots]
+    stop = halt_find(named, agent) or halt_registry_find(agent, [*roots, *filter(None, mains)])
+    return None if stop is None else halt_message(stop)
 
 _SEVERITY = (VERDICT_DENY, VERDICT_ESCALATE, VERDICT_WARN)
 
@@ -2953,6 +3145,8 @@ def _chock_declared():
     called = _flag_path(argv, TOOL_CALL_FLAG)
     if called is not None:
         actions.append(_chock_spec_action(called))
+    if HALT_HOOK_FLAG in argv and repo_stop_refusal(Event(AGENT, PRE_TOOL, raw={})) is not None:
+        actions.append("block")  # stopped: a payload nobody can read is still a call the stop refuses
     for action in ("block", "ask", "warn"):
         if action in actions:
             return action, event, gate
