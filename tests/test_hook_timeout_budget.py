@@ -126,7 +126,7 @@ def test_one_budget_feeds_every_engine_timer() -> None:
     assert f"ENGINE_BUDGET_SECONDS = {ENGINE_BUDGET}\n" in runner_source()
     assert "_SCRIPT_TIMEOUT_SECONDS = ENGINE_BUDGET_SECONDS" in runner_source()
     for vendor in vendors.in_agent_vendors():
-        rendered = runtime_bundle.render(vendor)
+        rendered = "".join(runtime_bundle.runtime_files(vendor).values())
         assert rendered.count(f"ENGINE_BUDGET_SECONDS = {ENGINE_BUDGET}\n") == 1, vendor
 
 

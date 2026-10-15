@@ -229,8 +229,11 @@ def verify(argv: list[str], payload: bytes) -> None:
     adapter, gate = _adapter(argv[0]), Path(argv[argv.index("--gate") + 1])
     wheres = _wheres(payload)
     ledger = next((root for root in map(repo_root, wheres) if root), wheres[0])
+    refuse = adapter.handle  # an entry whose shared runtime failed to load refuses every event itself
 
     def handle(event):
+        if getattr(adapter, "_CHOCK_RUNTIME_FAULT", None) is not None:
+            return refuse(event)
         lines = turn_end_drifted(wheres) if getattr(event, "event", "") == "stop" else []
         refusal = (
             f"chock: a guardrails toggle file was changed outside `chock bundle`: {'; '.join(lines)}. Only a person "

@@ -12,6 +12,7 @@ from chock.vendors import in_agent_vendors
 VENDORED_RUNTIMES = {
     "gate.py": ("assembled", None),
     "chock_session.py": ("static", ("chock.gate", "session_reader.py")),
+    runtime_bundle.SHARED_FILE: ("shared", None),
     **{f"{agent}.py": ("bundle", agent) for agent in in_agent_vendors()},
 }
 
@@ -28,6 +29,8 @@ def _expected_bytes(kind: str, source) -> bytes | None:
             return resources.files(package).joinpath(source_name).read_bytes()
         except (FileNotFoundError, ModuleNotFoundError, OSError):  # pragma: no cover - packaging failure
             return None
+    if kind == "shared":
+        return runtime_bundle.render_shared().encode("utf-8")
     return runtime_bundle.render(source).encode("utf-8")
 
 

@@ -2,6 +2,7 @@
   "files": [
     "hooks.json",
     "plugin.json",
+    "scripts/_chock_runtime.py",
     "scripts/antigravity.py",
     "scripts/chock-guardrails-protect/chock-guardrails-protect-gate.py",
     "scripts/chock-guardrails-protect/chock-guardrails-protect.py",
