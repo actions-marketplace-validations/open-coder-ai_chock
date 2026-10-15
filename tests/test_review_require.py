@@ -226,3 +226,15 @@ def test_a_branch_cannot_drop_the_bases_unattestable_path_to_dodge_the_floor(rep
     _write_evidence(repo, build(repo, "main", {"kind": "agent", "id": "t"}, ["validate"]))
     failures = require(repo, "main")
     assert any("infra/" in f for f in failures), failures
+
+
+def test_an_unattestable_path_is_seen_under_a_name_git_would_quote(repo: Path) -> None:
+    """`--name-only` C-quotes a newline or non-ASCII name; `-z` keeps it verbatim so its prefix still matches."""
+    from chock.review.evidence import _touched_unattestable_paths
+
+    _write_config(repo, {"unattestable_paths": ["infra/"]})
+    (repo / "infra").mkdir()
+    (repo / "infra" / "a b\né.tf").write_text("x\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "touch infra")
+    assert _touched_unattestable_paths(repo, "main") == ["infra/"]

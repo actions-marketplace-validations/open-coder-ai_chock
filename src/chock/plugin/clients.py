@@ -39,6 +39,8 @@ class Client:
     #: The store whose layout chock records itself, where agentseam's packaging records none (goose, grok,
     #: antigravity, openhands, kimi, droid).
     own_layout: str | None = None
+    #: Built by hook_dir: its hooks are agentseam's own rendering for the vendor, not the hooks-map dialect.
+    generic: bool = False
 
     def layout(self) -> tuple[str | None, str, str]:
         """(manifest, hooks file, skill template) inside the plugin; a manifest-less format has no manifest."""
@@ -75,8 +77,8 @@ CLIENTS: dict[str, Client] = {
         cursor.cursor_plugin_files, cursor.build_cursor_manifest, cursor.manifest_posture, "cursor", "cursor"
     ),
     "devin": Client(devin.devin_plugin_files, devin.build_devin_manifest, devin.manifest_posture, "devin", "devin"),
-    "goose": Client(goose.goose_plugin_files, None, None, "goose", "goose", own_layout="goose"),
-    "grok": Client(grok.grok_plugin_files, None, None, "grok", "grok", own_layout="grok"),
+    "goose": Client(goose.goose_plugin_files, None, None, "goose", "goose", own_layout="goose", generic=True),
+    "grok": Client(grok.grok_plugin_files, None, None, "grok", "grok", own_layout="grok", generic=True),
     "antigravity": Client(
         antigravity.antigravity_plugin_files,
         antigravity.build_antigravity_manifest,
@@ -84,6 +86,7 @@ CLIENTS: dict[str, Client] = {
         "antigravity",
         "antigravity",
         own_layout="antigravity",
+        generic=True,
     ),
     "gemini": Client(
         gemini.gemini_plugin_files,
@@ -91,6 +94,7 @@ CLIENTS: dict[str, Client] = {
         gemini.manifest_posture,
         "gemini_cli",
         "gemini_cli",
+        generic=True,
     ),
     "openhands": Client(
         openhands.openhands_plugin_files,
@@ -99,6 +103,7 @@ CLIENTS: dict[str, Client] = {
         "openhands",
         "openhands",
         own_layout="openhands",
+        generic=True,
     ),
     "kimi": Client(
         kimi_code.kimi_plugin_files,
@@ -107,6 +112,7 @@ CLIENTS: dict[str, Client] = {
         "kimi_code",
         "kimi_code",
         own_layout="kimi",
+        generic=True,
     ),
     "droid": Client(
         factory_droid.droid_plugin_files,
@@ -115,5 +121,6 @@ CLIENTS: dict[str, Client] = {
         "factory_droid",
         "factory_droid",
         own_layout="droid",
+        generic=True,
     ),
 }

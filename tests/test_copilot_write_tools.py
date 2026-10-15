@@ -109,6 +109,13 @@ def test_a_clean_copilot_write_passes(copilot: tuple, tool: str) -> None:
     assert not any(refused(p) for p in outcomes(commands, plugin, repo, payload, home)), tool
 
 
+def test_a_copilot_apply_patch_that_does_not_parse_is_refused(copilot: tuple) -> None:
+    """GAP-3e: the reader raises on a text Codex would not parse, and the runtime refuses rather than allow."""
+    plugin, repo, commands, home = copilot
+    patch = f"*** Begin Patch\nstray\n*** Add File: {WORKFLOW}\n+jobs: {{ok: {{}}}}\n*** End Patch"
+    assert any(refused(p) for p in outcomes(commands, plugin, repo, _payload(repo, "apply_patch", patch), home))
+
+
 def _event(tool_input: Any) -> SimpleNamespace:
     return SimpleNamespace(event="pre_tool", path=None, content=None, raw={"tool_input": tool_input})
 

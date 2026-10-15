@@ -60,6 +60,15 @@
         "command": "git -c \"alias.chock-hook=!test -f .chock/bin/launch.sh || { echo chock: no .chock/bin/launch.sh here, run chock sync --repo . >&2; exit 2; }; sh .chock/bin/launch.sh\" chock-hook .chock/bin/vscode_copilot.py --tool-call \".chock/compiled/token-efficiency/agent-hooks/tool-call-gate.json\"",
         "powershell": "& git -c \"alias.chock-hook=!test -f .chock/bin/launch.sh || { echo chock: no .chock/bin/launch.sh here, run chock sync --repo . >&2; exit 2; }; sh .chock/bin/launch.sh\" chock-hook .chock/bin/vscode_copilot.py --tool-call \".chock/compiled/token-efficiency/agent-hooks/tool-call-gate.json\"; if ($null -eq $LASTEXITCODE) { exit 2 }; exit $LASTEXITCODE",
         "windows": "& git -c \"alias.chock-hook=!test -f .chock/bin/launch.sh || { echo chock: no .chock/bin/launch.sh here, run chock sync --repo . >&2; exit 2; }; sh .chock/bin/launch.sh\" chock-hook .chock/bin/vscode_copilot.py --tool-call \".chock/compiled/token-efficiency/agent-hooks/tool-call-gate.json\"; if ($null -eq $LASTEXITCODE) { exit 2 }; exit $LASTEXITCODE"
+      },
+      {
+        "type": "command",
+        "timeout": 45,
+        "timeoutSec": 45,
+        "bash": "git -c \"alias.chock-hook=!test -f .chock/bin/launch.sh || { echo chock: no .chock/bin/launch.sh here, run chock sync --repo . >&2; exit 2; }; sh .chock/bin/launch.sh\" chock-hook .chock/bin/vscode_copilot.py --stop-check",
+        "command": "git -c \"alias.chock-hook=!test -f .chock/bin/launch.sh || { echo chock: no .chock/bin/launch.sh here, run chock sync --repo . >&2; exit 2; }; sh .chock/bin/launch.sh\" chock-hook .chock/bin/vscode_copilot.py --stop-check",
+        "powershell": "& git -c \"alias.chock-hook=!test -f .chock/bin/launch.sh || { echo chock: no .chock/bin/launch.sh here, run chock sync --repo . >&2; exit 2; }; sh .chock/bin/launch.sh\" chock-hook .chock/bin/vscode_copilot.py --stop-check; if ($null -eq $LASTEXITCODE) { exit 2 }; exit $LASTEXITCODE",
+        "windows": "& git -c \"alias.chock-hook=!test -f .chock/bin/launch.sh || { echo chock: no .chock/bin/launch.sh here, run chock sync --repo . >&2; exit 2; }; sh .chock/bin/launch.sh\" chock-hook .chock/bin/vscode_copilot.py --stop-check; if ($null -eq $LASTEXITCODE) { exit 2 }; exit $LASTEXITCODE"
       }
     ],
     "SessionStart": [

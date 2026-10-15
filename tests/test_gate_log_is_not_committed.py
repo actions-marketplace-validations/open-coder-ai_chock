@@ -95,3 +95,15 @@ def test_outside_a_repository_is_silent(tmp_path: Path) -> None:
     report = Report()
     check_gate_log_untracked(tmp_path, report)
     assert report.warnings == []
+
+
+def test_a_tracked_log_name_is_listed_verbatim(tmp_path: Path) -> None:
+    """`ls-files` C-quotes a newline or non-ASCII name and a whitespace split breaks one at its space."""
+    from chock.validation.checks_repo import _tracked_under
+
+    repo = init_repo(tmp_path)
+    name = ".chock/log/gate events\né.jsonl"
+    (repo / ".chock" / "log").mkdir(parents=True)
+    (repo / name).write_text("{}\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-f", "--", name], cwd=repo, check=True)
+    assert _tracked_under(repo, ".chock/log") == [name]

@@ -9,6 +9,7 @@ from typing import Any
 from agentseam import packaging
 
 from chock.compile.emitters.in_agent_hooks import cursor_hooks_file
+from chock.hooks import stop_check
 from chock.plugin import gate_package, guard_gate, posture, store
 from chock.plugin.build import (
     LICENSE_REL,
@@ -148,6 +149,7 @@ def cursor_plugin_files(policy_dir: Path, manifest: dict[str, Any], repo_root: P
         gate_package.gate_hooks_file("cursor", _gate_command()) if gate else None,
     )
     if hooks is not None:
+        hooks = guard_gate.merge_hooks(hooks, stop_check.plugin_doc("cursor", hooks, generic=False))
         files[Path(HOOKS_REL)] = json.dumps(hooks, indent=2) + "\n"
         files.update(_runtime_files("cursor"))
     if script:
