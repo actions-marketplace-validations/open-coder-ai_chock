@@ -28,6 +28,13 @@
     "method": "live probe of the chock plugin, every other chock plugin disabled: block-no-verify refused a Bash call and pin-github-actions refused a Write at PreToolUse, before either ran; Stop not exercised (org-plan witness/results/witness-claude-code-2026-10-12.md, 198694b)"
   },
   {
+    "agent": "devin",
+    "surface": "plugin-hook",
+    "client": "Devin CLI 3000.11.3 (local session), Windows",
+    "date": "2026-10-08",
+    "method": "live probe of a chock plugin installed with `devin plugins install --local`: block-no-verify and chock-guardrails-protect refused a shell command before it ran; pin-github-actions did not refuse the write, only at turn end (stop); self-protection held (org-plan witness/results/witness-devin-2026-10-08.md, 0f06113)"
+  },
+  {
     "agent": "claude_code",
     "surface": "git-hook-env",
     "client": "Claude Code, Bash tool (CLAUDECODE=1, AI_AGENT=claude-code_<version>_agent)",
