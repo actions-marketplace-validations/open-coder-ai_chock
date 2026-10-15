@@ -34,14 +34,15 @@ LAYOUTS = {
     "sync": (sync_layout, lambda repo, home: sync_log(repo)),
     "plugin": (plugin_layout, lambda repo, home: plugin_log(home)),
 }
-#: (level, guard) -> the (verdict, record level) lines one hook call writes.
+#: (level, guard) -> the (verdict, record level) lines one hook call writes. An allowed tool call is an
+#: info line too: its fingerprint says what the agent did (GAP-2, option B).
 EXPECTED = {
     ("off", BLOCKING_GUARD): [],
     ("off", CLEAN_GUARD): [],
     ("info", BLOCKING_GUARD): [("block", "info")],
-    ("info", CLEAN_GUARD): [],
+    ("info", CLEAN_GUARD): [("allow", "info")],
     ("debug", BLOCKING_GUARD): [("block", "info")],
-    ("debug", CLEAN_GUARD): [("allow", "debug")],
+    ("debug", CLEAN_GUARD): [("allow", "info")],
 }
 IMPL = protect_dir() / "implementations"
 
@@ -70,7 +71,8 @@ def test_each_level_on_each_route_writes_exactly_its_records(
     assert [(r["verdict"], r["level"]) for r in written] == EXPECTED[(level, guard_body)]
     for record in written:
         assert record["route"] == route
-        assert record["policy_id"] == POLICY
+        allowed = journal.log_plain_action(record)  # an allowed tool call's one line names no policy
+        assert record.get("policy_id") == (None if allowed else POLICY)
         assert {"ts", "agent", "event", "surface", "reason", "duration_ms", "can_ask"} <= set(record)
         if route == "sync":
             assert record["chock_version"], "the suite's Python has chock installed: the sync line names it"
@@ -79,7 +81,7 @@ def test_each_level_on_each_route_writes_exactly_its_records(
                 "a plugin runs its own Python, not chock: even a findable chock is not named"
             )
         assert ("trace" in record) == (level == "debug")
-        assert ("plugin_version" in record) == (route == "plugin")
+        assert ("plugin_version" in record) == (route == "plugin" and not allowed)
 
 
 def test_the_plugin_route_names_its_package_version_and_writes_nothing_into_the_repo(

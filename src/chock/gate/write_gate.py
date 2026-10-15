@@ -18,6 +18,8 @@ import sys
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from .budget import allowed_seconds, engine_deadline, time_left
+from .decision_log import GATE_LAST
+from .decision_target import dlog_fields
 from .edit_image import added_from_event, created_text, edited_text
 from .gate_outcome import GATE_ERRORED, gate_decision, runner_outcome
 from .outside_repo import judged_files, outside_globs
@@ -184,7 +186,8 @@ def run_gate(gate, writes, event, run_in, deadline):
 
     `run_in` is (root, extra): the working directory, and the stdin keys `extra` adds: `added` (per
     edited path, only the text the edit introduces; a runner that predates it judges the whole file,
-    which only ever refuses more) and the script `session`. The runner gets what is left of `deadline`.
+    which only ever refuses more), the script `session`, and the decision line's `log` fields (session_id,
+    actor, target). The runner gets what is left of `deadline`.
     """
     root, extra = run_in
     runner = runner_for(gate)
@@ -207,6 +210,7 @@ def run_gate(gate, writes, event, run_in, deadline):
         return GATE_ERRORED, f"the gate runner gave no verdict within {allowed_seconds(exc)}"
     except (OSError, subprocess.SubprocessError) as exc:
         return GATE_ERRORED, str(exc)
+    GATE_LAST["code"] = proc.returncode
     return runner_outcome(proc.returncode, proc.stderr)
 
 
@@ -272,13 +276,18 @@ def _gate_says(gate, event, name, deadline, root):
     added = {**patch_added(event), **added_from_event(event)} if event.event == PRE_TOOL else {}
     added = judged_files(added, root, outside, lambda path: repo_paths(path, root))
     added = {path: text for path, text in added.items() if path in writes}
-    extra = {**({"added": added} if added else {}), "session": session_for(event, root)}
+    extra = {
+        **({"added": added} if added else {}),
+        "session": session_for(event, root),
+        "log": dlog_fields(event, root),
+    }
     outcome, message = run_gate(gate, writes, name, (root, extra), deadline)
     return gate_decision(outcome, message, gate), writes
 
 
 def evaluate_gate(argv, event):
     """The decision this event earns from a compiled gate, or None when it has nothing to say."""
+    GATE_LAST.clear()
     gate = gate_path_from_argv(argv)
     name = _EVENT_ARG.get(getattr(event, "event", ""))
     if gate is None or name is None:

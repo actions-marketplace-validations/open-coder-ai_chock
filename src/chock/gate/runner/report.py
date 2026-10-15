@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sys
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,7 @@ def _reason(result: GateResult, spec: dict, event: str = "commit", policy_id: st
     matches = list(result.matches)
     if agent:
         policy, matches = _for_agent(policy), [_for_agent(m) for m in matches]
+    policy, matches = _inert_lines(policy), [inert(m) for m in matches]
     if "new_findings" not in result.detail:
         return "\n".join([policy, *(f"  - {m}" for m in matches)])
     if event == TOOL_USE_EVENT:
@@ -77,7 +79,12 @@ def _github_actions() -> bool:
 
 
 def _escape_data(text: str) -> str:
-    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    return (
+        _BREAKS_KEPT.sub(lambda run: inert(run.group()), text)
+        .replace("%", "%25")
+        .replace("\r", "%0D")
+        .replace("\n", "%0A")
+    )
 
 
 def _escape_property(text: str) -> str:
@@ -87,13 +94,43 @@ def _escape_property(text: str) -> str:
 def _cell(value: object) -> str:
     """Text that stays inside one markdown table cell or bullet, whatever a finding holds: no new row,
     no HTML, and no link, image or mention (a finding's text comes from the pull request)."""
-    text = " ".join(str(value).split())
+    text = inert(" ".join(str(value).split()))
     for char in "\\|[]!@":
         text = text.replace(char, "\\" + char)
     return text.replace("`", "'").replace("<", "&lt;")
 
 
 _LINE_BREAK = re.compile(r"\r\n|\r|\n")
+#: A run of text between line breaks.
+_BREAKS_KEPT = re.compile(r"[^\r\n]+")
+#: Control (C0, DEL, C1), surrogate, line/paragraph separator and format (bidi, invisible) characters.
+_UNSAFE_CATEGORIES = frozenset({"Cc", "Cs", "Zl", "Zp", "Cf"})
+#: Format characters that ordinary text needs: ZWNJ and ZWJ join Persian, Indic and emoji sequences.
+_KEPT = frozenset({"\u200c", "\u200d"})
+_NAMED = {"\t": "\\t", "\n": "\\n", "\r": "\\r"}
+
+
+def _shown(char: str) -> str:
+    if char in _KEPT or unicodedata.category(char) not in _UNSAFE_CATEGORIES:
+        return char
+    code = ord(char)
+    if char in _NAMED:
+        return _NAMED[char]
+    return f"\\x{code:02x}" if code < 0x100 else f"\\u{code:04x}" if code < 0x10000 else f"\\U{code:08x}"  # noqa: PLR2004
+
+
+def inert(value: object) -> str:
+    """`value` as one line of text, each unsafe character written as a visible escape (ESC as `\\x1b`).
+
+    The same rule as `chock.display.inert`, vendored so the runtime stays self-contained.
+    """
+    text = str(value)
+    return text if text.isprintable() else "".join(map(_shown, text))
+
+
+def _inert_lines(text: str) -> str:
+    """`text` made `inert` line by line: its lines stay lines (LF), nothing else unsafe reaches the terminal."""
+    return "\n".join(inert(line) for line in _LINE_BREAK.split(text))
 
 
 def ci_inert(text: str) -> str:

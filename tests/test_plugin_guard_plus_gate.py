@@ -125,12 +125,12 @@ def _claude_package(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def _decide(out: Path, repo: Path, tool: str, tool_input: dict, *, honour_matchers: bool = True) -> list[str]:
-    """Every PreToolUse entry Claude Code would run for `tool` (or all of them), and what each said."""
+    """Every PreToolUse entry Claude Code would run for `tool` (or all of them), and what each said; the stop check last."""
     hooks = json.loads((out / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]["PreToolUse"]
     payload = {"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": tool_input, "cwd": str(repo)}
     said = []
     for entry in hooks:
-        if honour_matchers and not re.fullmatch(entry["matcher"], tool):
+        if honour_matchers and entry.get("matcher") and not re.fullmatch(entry["matcher"], tool):
             continue
         command = entry["hooks"][0]["command"].replace("${CLAUDE_PLUGIN_ROOT}", out.as_posix())
         proc = run_hook_command(command, repo, json.dumps(payload))
@@ -142,25 +142,25 @@ def _decide(out: Path, repo: Path, tool: str, tool_input: dict, *, honour_matche
 def test_a_plugin_only_install_refuses_an_edit_and_a_shell_write(tmp_path: Path) -> None:
     out, repo = _claude_package(tmp_path)
     edit = {"file_path": str(repo / PROTECTED), "old_string": "{}", "new_string": '{"x": 1}'}
-    assert _decide(out, repo, "Edit", edit) == ["deny"]
+    assert _decide(out, repo, "Edit", edit) == ["deny", "allow"]
     write = {"file_path": str(repo / PROTECTED), "content": "{}"}
-    assert _decide(out, repo, "Write", write) == ["deny"]
-    assert _decide(out, repo, "Bash", {"command": f"echo '{{}}' > {PROTECTED}"}) == ["deny"]
+    assert _decide(out, repo, "Write", write) == ["deny", "allow"]
+    assert _decide(out, repo, "Bash", {"command": f"echo '{{}}' > {PROTECTED}"}) == ["deny", "allow"]
 
 
 def test_ordinary_work_passes_both_halves(tmp_path: Path) -> None:
     out, repo = _claude_package(tmp_path)
     edit = {"file_path": str(repo / "notes.md"), "old_string": "a", "new_string": "b"}
-    assert _decide(out, repo, "Edit", edit) == ["allow"]
-    assert _decide(out, repo, "Bash", {"command": "git status"}) == ["allow"]
+    assert _decide(out, repo, "Edit", edit) == ["allow", "allow"]
+    assert _decide(out, repo, "Bash", {"command": "git status"}) == ["allow", "allow"]
 
 
 def test_a_client_that_ignores_matchers_gets_no_cross_refusal(tmp_path: Path) -> None:
     """VS Code runs every entry for every tool: the guard must not judge an Edit, nor the gate a command."""
     out, repo = _claude_package(tmp_path)
     edit = {"file_path": str(repo / "notes.md"), "old_string": "a", "new_string": "b"}
-    assert _decide(out, repo, "Edit", edit, honour_matchers=False) == ["allow", "allow"]
-    assert _decide(out, repo, "Bash", {"command": "ls"}, honour_matchers=False) == ["allow", "allow"]
+    assert _decide(out, repo, "Edit", edit, honour_matchers=False) == ["allow", "allow", "allow"]
+    assert _decide(out, repo, "Bash", {"command": "ls"}, honour_matchers=False) == ["allow", "allow", "allow"]
     protected = {"file_path": str(repo / PROTECTED), "old_string": "{}", "new_string": "[]"}
     assert "deny" in _decide(out, repo, "Edit", protected, honour_matchers=False)
 

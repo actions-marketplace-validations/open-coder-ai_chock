@@ -170,23 +170,43 @@ _EVALUATORS = {
 RUNTIME_KINDS = tuple(sorted(_EVALUATORS))
 
 
-def evaluate(gates: list[dict[str, Any]], _tool_name: str, arguments: Any) -> str | None:
-    """First blocking message across all gates, or None to allow."""
+#: A finding no gate decided: the gate could not be read, run or judged, so the call is refused.
+FAULT = "fault"
+
+
+def judge(gates: list[dict[str, Any]], _tool_name: str, arguments: Any) -> list[tuple[str, str, str]]:
+    """(policy_id, action, message) for every gate that fires, in order; `fault` when a gate cannot judge."""
+    findings: list[tuple[str, str, str]] = []
     for spec in gates:
+        policy = str(spec.get("policy_id", "?"))
         kind = spec.get("kind")
         evaluator = _EVALUATORS.get(kind or "")
         if evaluator is None:
-            return f"[{spec.get('policy_id', '?')}] unevaluable gateway gate kind {kind!r}; refusing (fail closed)"
-        message = evaluator(spec, arguments)
-        if not message:
+            findings.append((policy, FAULT, f"unevaluable gateway gate kind {kind!r}; refusing (fail closed)"))
             continue
-        text = f"[{spec.get('policy_id', '?')}] {message}"
-        if spec.get("action") == "warn":
+        try:
+            message = evaluator(spec, arguments)
+        except Exception as exc:  # noqa: BLE001 -- a gate that cannot run refuses the call, never allows it
+            findings.append((policy, FAULT, f"gateway gate failed ({type(exc).__name__}); refusing (fail closed)"))
+            continue
+        if message:
+            findings.append((policy, str(spec.get("action") or "block"), message))
+    return findings
+
+
+def evaluate(gates: list[dict[str, Any]], tool_name: str, arguments: Any) -> str | None:
+    """First blocking message across all gates, or None to allow."""
+    return refusal(judge(gates, tool_name, arguments))
+
+
+def refusal(findings: list[tuple[str, str, str]]) -> str | None:
+    """The first finding that blocks, as the client reads it; each warn before it goes to stderr."""
+    for policy, action, message in findings:
+        text = f"[{policy}] {message}"
+        if action == "warn":
             # A warning never blocks: the call goes through and the operator's stderr has the words.
             sys.stderr.write(f"chock: warning: {text}\n")
             continue
         # `ask` blocks: a proxy on a pipe has no person to ask.
-        return (
-            f"{text} (asks a person; the gateway cannot prompt, so it blocks)" if spec.get("action") == "ask" else text
-        )
+        return f"{text} (asks a person; the gateway cannot prompt, so it blocks)" if action == "ask" else text
     return None

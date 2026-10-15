@@ -17,6 +17,7 @@ GOLDEN = Path(__file__).resolve().parent / "fixtures" / "runtime_goldens"
 
 def test_every_runtime_matches_its_frozen_fixture() -> None:
     rendered = {f"{agent}.py": runtime_bundle.render(agent) for agent in runtime_bundle.RUNTIME_AGENTS}
+    rendered[runtime_bundle.SHARED_FILE] = runtime_bundle.render_shared()
 
     if os.environ.get("CHOCK_REGEN_GOLDENS") == "1":
         if GOLDEN.exists():

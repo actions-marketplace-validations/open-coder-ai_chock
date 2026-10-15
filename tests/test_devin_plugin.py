@@ -69,6 +69,7 @@ def test_devin_guard_policy_layout_and_hook(policy, tmp_path: Path) -> None:
         Path("hooks.json"),
         Path("scripts/devin.py"),
         Path("scripts/launch.sh"),
+        Path("scripts/_chock_runtime.py"),
         Path("scripts/block-destructive-commands.sh"),
     }
 

@@ -1,8 +1,9 @@
 """One decision-log line per runtime hook call, on either route. Stdlib only: every vendored runtime carries it.
 
 Sync route (the runtime under `<repo>/.chock/bin/`): `<repo>/.chock/log/gate-events.jsonl`, where gate.py
-already writes each compiled gate's own record, so a `--gate` call is left to it. Plugin route (anywhere
-else): `~/.chock/log/<agent>/events.jsonl`. Never raises, never changes the decision, never logs contents.
+already writes each compiled gate's own record, so a `--gate` call it judged is left to it. Plugin route
+(anywhere else): `~/.chock/log/<agent>/events.jsonl`. Never raises, never changes the decision, never logs
+contents: a tool call's `target` is a fingerprint (decision_target.py).
 """
 
 from __future__ import annotations
@@ -14,7 +15,9 @@ import sys
 import time
 from pathlib import Path
 
+from .decision_target import _dlog_client, dlog_fields, dlog_session
 from .guard_runner import GUARD_LAST
+from .runner.halt import HALT_HOOK_FLAG, HALT_POLICY, HALT_REASON
 from .runner.journal import (
     LOG_DEBUG,
     LOG_SETTINGS_PARTS,
@@ -42,6 +45,10 @@ _DLOG_EVENT_LOGGED = {"pre_tool": "tool_use"}
 _DLOG_SURFACE = {"pre_tool": "pre-tool-use", "stop": "stop"}
 _DLOG_NO_RULE = "no rule matched"
 _DLOG_DIST_INFO = re.compile(r"^chock-([^-]+)\.dist-info$")
+#: The pre-tool exit codes of a gate.py run that wrote its own line (allow, block, ask, warn); 2 wrote none.
+_DLOG_GATE_LOGGED_CODES = (0, 1, 3, 4)
+#: Set by write_gate when this call ran gate.py: `code` is its exit code.
+GATE_LAST = {}
 
 
 def _dlog_flag_value(argv, flag):
@@ -106,19 +113,6 @@ def _dlog_repo_root(start):
     return next((folder for folder in (here, *here.parents) if (folder / ".git").exists()), None)
 
 
-def dlog_session(event, record):
-    """`record` with the client's session id, where the payload carries one: what groups a session's lines."""
-    session = getattr(event, "session_id", None)
-    if isinstance(session, str) and session:
-        record["session_id"] = session
-    return record
-
-
-def _dlog_client(raw):
-    named = raw.get("client_type") if isinstance(raw, dict) else None
-    return named if isinstance(named, str) else None
-
-
 def _dlog_trace(event, wire, rule, stages):
     """The debug-only fields: what was detected and matched, and how long each stage took. Never file contents."""
     trace = {"wire_event": wire, "tool": event.tool, "rule": rule or _DLOG_NO_RULE, "stages_ms": stages}
@@ -132,9 +126,11 @@ def _dlog_trace(event, wire, rule, stages):
 
 
 def _dlog_reason(source, outcome):
-    """A short code for why: `guard-blocked`, `guard-errored`, `gate-block`, `fault`, or `no-rule` for an allow."""
+    """A short code for why: `stopped`, `guard-blocked`, `guard-errored`, `gate-block`, `fault`, or `no-rule` (allow)."""
     if source is None:
         return "no-rule"
+    if source == HALT_REASON:
+        return HALT_REASON
     if source == "guard" and "outcome" in GUARD_LAST:
         return f"guard-{GUARD_LAST['outcome']}"
     return source if source == "fault" else f"{source}-{_DLOG_SPOKEN.get(outcome, 'allow')}"
@@ -158,13 +154,15 @@ def log_decision(argv, event, decision, judged, context):
         runtime = globals().get("__file__") or sys.argv[0]
         route = runtime_route(runtime)
         source, rule, started, stages = judged
-        if route == DLOG_ROUTE_SYNC and _DLOG_GATE_FLAG in argv and source in (None, "gate"):
+        gate_wrote = event.event != "pre_tool" or GATE_LAST.get("code") in _DLOG_GATE_LOGGED_CODES
+        if route == DLOG_ROUTE_SYNC and _DLOG_GATE_FLAG in argv and source in (None, "gate") and gate_wrote:
             return  # gate.py and the stop re-entry ledger write this call's line on the sync route
         agent = str(getattr(event, "agent", None) or "unknown")
         log_path, repo = _dlog_paths(route, runtime, agent, event)
         outcome = getattr(decision, "outcome", None) if decision is not None else None
         level = log_settings(repo)[0]
-        if not log_admits(level, log_record_level({"verdict": _DLOG_SPOKEN.get(outcome, "allow")})):
+        fields = dlog_fields(event, repo)
+        if not log_admits(level, log_record_level({"verdict": _DLOG_SPOKEN.get(outcome, "allow"), **fields})):
             return  # nothing to write: skip the manifest and version lookups on the hot path
         plugin_name, plugin_version = (
             dlog_plugin_manifest(runtime, context.get("manifests", ())) if route == DLOG_ROUTE_PLUGIN else ("", "")
@@ -174,7 +172,7 @@ def log_decision(argv, event, decision, judged, context):
             "route": route,
             "agent": agent,
             "event": _DLOG_EVENT_LOGGED.get(event.event, event.event),
-            "policy_id": _dlog_policy_id(target, route, plugin_name),
+            "policy_id": HALT_POLICY if HALT_HOOK_FLAG in argv else _dlog_policy_id(target, route, plugin_name),
             "surface": _DLOG_SURFACE.get(event.event, str(event.event)),
             "verdict": _DLOG_SPOKEN.get(outcome, "allow"),
             "reason": _dlog_reason(source, outcome),
@@ -184,7 +182,7 @@ def log_decision(argv, event, decision, judged, context):
         version = _dlog_chock_version() if route == DLOG_ROUTE_SYNC else ""  # a plugin runs no chock: never named
         if version:  # unknown is left out, never written empty
             record["chock_version"] = version
-        dlog_session(event, record)
+        record.update(fields)
         client = _dlog_client(event.raw)
         if client:
             record["client"] = client

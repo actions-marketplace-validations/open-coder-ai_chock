@@ -8,6 +8,8 @@ import subprocess
 from pathlib import Path
 
 from .constants import (
+    _ACTOR_CLIENT_CAP,
+    _ACTOR_UNSAFE,
     _CONFIG_ITEM_RE,
     _CONFIG_KEY_RE,
     _CONFIG_PATH,
@@ -15,6 +17,8 @@ from .constants import (
     _ENV_NAME_RE,
     _GIT_EVENTS,
     _HUMAN_ENV,
+    ACTOR_AGENT_PREFIX,
+    ACTOR_PERSON,
     AGENT_COMMIT_ENV,
     AGENT_COMMIT_EVENT,
     AI_AGENT_ENV,
@@ -79,6 +83,31 @@ def agent_signal(repo_root: Path | None = None) -> str | None:
         return AI_AGENT_ENV
     configured = _config_agent_env(repo_root) if repo_root is not None else []
     return next((name for name in configured if env.get(name)), None)
+
+
+def stop_agent_signal(repo_root: Path | None = None) -> str | None:
+    """The first agent marker set, for every stop check (commit, push, stop, resume): `CHOCK_AGENT_COMMIT=0`,
+    the commit rule's escape hatch for a person's git in an agent's terminal, clears nothing, since an agent can
+    set it too."""
+    env = os.environ
+    named = env.get(AGENT_COMMIT_ENV, "").strip().lower()
+    checks = (
+        (AGENT_COMMIT_ENV, bool(named) and named not in _HUMAN_ENV),
+        (f"{CLAUDECODE_ENV}=1", env.get(CLAUDECODE_ENV) == "1"),
+        (AI_AGENT_ENV, bool(env.get(AI_AGENT_ENV, "").strip())),
+        *((name, bool(env.get(name))) for name in (_config_agent_env(repo_root) if repo_root is not None else [])),
+    )
+    return next((signal for signal, present in checks if present), None)
+
+
+def actor_of(signal: str | None) -> str:
+    """Who acted, as a log record names it: `person`, or `agent:<client>` from the marker (`unknown` when it names none)."""
+    if signal is None:
+        return ACTOR_PERSON
+    client = "claude_code" if signal == f"{CLAUDECODE_ENV}=1" else ""
+    if signal == AI_AGENT_ENV:  # `claude-code_<version>_agent`: the client is the first word
+        client = _ACTOR_UNSAFE.sub("", os.environ.get(AI_AGENT_ENV, "").split("_")[0].replace("-", "_").lower())
+    return ACTOR_AGENT_PREFIX + (client[:_ACTOR_CLIENT_CAP] or "unknown")
 
 
 def agent_commit(repo_root: Path | None = None) -> bool:
@@ -168,6 +197,28 @@ def _honoured(pragma_re: re.Pattern[str] | None, text: str, head: frozenset[str]
 def allowed_ids() -> set[str]:
     """Policy ids a person named in `CHOCK_ALLOW`, comma separated."""
     return {name.strip() for name in os.environ.get(ALLOW_ENV, "").split(",") if name.strip()}
+
+
+def git_email(repo_root: Path | None = None) -> str:
+    """The person's git `user.email`, as their shell's git reads it; empty when git names none."""
+    where = ["-C", str(repo_root)] if repo_root is not None else []
+    try:
+        shown = subprocess.run(  # noqa: S603 -- reading one git setting
+            ["git", *where, "config", "user.email"],  # noqa: S607
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
+        return ""
+    return shown.stdout.strip() if shown.returncode == 0 else ""
+
+
+def approval(repo_root: Path | None = None) -> dict[str, str]:
+    """What an override's record keeps of who approved it: `CHOCK_ALLOW` and the person's git email. Local log only."""
+    return {"override": ALLOW_ENV, "approver": git_email(repo_root) or "unknown"}
 
 
 def _ask_refusal(policy_id: str | None, signal: str | None) -> str:

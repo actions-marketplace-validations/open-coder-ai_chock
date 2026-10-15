@@ -9,6 +9,8 @@ __all__ = [
     "ACTION_ASK",
     "ACTION_BLOCK",
     "ACTION_WARN",
+    "ACTOR_AGENT_PREFIX",
+    "ACTOR_PERSON",
     "AGENT_COMMIT_ENV",
     "AGENT_COMMIT_EVENT",
     "AGENT_EVENTS",
@@ -34,6 +36,8 @@ __all__ = [
     "WAIVABLE_EVENTS",
     "WRITE_PATH_KINDS",
     "_ACTION_RANK",
+    "_ACTOR_CLIENT_CAP",
+    "_ACTOR_UNSAFE",
     "_AGENT_COMMIT_NOTE",
     "_CONFIG_ITEM_RE",
     "_CONFIG_KEY_RE",
@@ -44,6 +48,8 @@ __all__ = [
     "_EVENT_NAME",
     "_GIT_EVENTS",
     "_HUMAN_ENV",
+    "_LOG_FIELDS",
+    "_LOG_FIELD_CAP",
     "_LOG_MATCH_CAP",
     "_LOG_MAX_BYTES",
     "_MIN_COMPILED_PATH_DEPTH",
@@ -77,6 +83,12 @@ AGENT_COMMIT_ENV = "CHOCK_AGENT_COMMIT"
 #: the environment of the git process). `AI_AGENT` is `claude-code_<version>_agent` there.
 CLAUDECODE_ENV = "CLAUDECODE"
 AI_AGENT_ENV = "AI_AGENT"
+
+#: Who acted, as a log record's `actor` names it: a person, or `agent:<client>`.
+ACTOR_PERSON = "person"
+ACTOR_AGENT_PREFIX = "agent:"
+_ACTOR_UNSAFE = re.compile(r"[^a-z0-9_]")
+_ACTOR_CLIENT_CAP = 32
 
 #: Top-level key of `.chock/config.yaml` naming further variables whose presence marks an agent.
 CONFIG_AGENT_ENV_KEY = "agent_commit_env"
@@ -121,6 +133,9 @@ _CONFIG_ROLLOUT_RE = re.compile(r"^rollout:[ \t]*(?P<rest>[^#\n]*)")
 GATE_LOG_ENV = "CHOCK_GATE_LOG"
 _LOG_MAX_BYTES = 1_048_576
 _LOG_MATCH_CAP = 20
+#: What an agent hook's runtime hands gate.py for its decision line (the `log` stdin key), each capped.
+_LOG_FIELDS = ("session_id", "actor", "target", "call")
+_LOG_FIELD_CAP = 512
 
 #: A pre-push stdin line is `<local ref> <local sha> <remote ref> <remote sha>`;
 #: at least 3 whitespace-separated parts to reach the remote ref at index 2.

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from agentseam import recordings
+from runtime_support import write_runtime
 
 import chock
 from chock.doctor import checks, cli
@@ -35,7 +36,7 @@ def home(tmp_path, monkeypatch):
 def _sync_repo(tmp_path: Path, agent: str = AGENT) -> Path:
     repo = tmp_path / "repo"
     (repo / ".chock" / "bin").mkdir(parents=True)
-    (repo / ".chock" / "bin" / f"{agent}.py").write_text(runtime_bundle.render(agent), encoding="utf-8")
+    write_runtime(repo / ".chock" / "bin" / f"{agent}.py", agent)
     (repo / launch.LAUNCHER_REL).write_text(launch.launcher_text(), encoding="utf-8")
     config = repo / {"claude_code": ".claude/settings.json", "windsurf": ".windsurf/hooks.json"}[agent]
     config.parent.mkdir(parents=True, exist_ok=True)
@@ -46,7 +47,7 @@ def _sync_repo(tmp_path: Path, agent: str = AGENT) -> Path:
 def _plugin(home: Path, *, version: str = chock.__version__) -> Path:
     folder = home / ".chock" / "marketplace" / CLIENT / "claude" / "obs-bundle"
     (folder / "scripts").mkdir(parents=True)
-    (folder / "scripts" / f"{AGENT}.py").write_text(runtime_bundle.render(AGENT), encoding="utf-8")
+    write_runtime(folder / "scripts" / f"{AGENT}.py", AGENT)
     (folder / "scripts" / launch.PLUGIN_LAUNCHER).write_text(launch.launcher_text(), encoding="utf-8")
     (folder / "hooks").mkdir()
     (folder / "hooks" / "hooks.json").write_text(json.dumps({"c": "scripts/claude_code.py"}), encoding="utf-8")
@@ -79,6 +80,20 @@ def test_a_runtime_from_another_engine_fails_with_the_sync_fix(tmp_path, home):
     [target] = sync_targets(repo)
     engine = _by_name(checks.run(target, repo))["engine"]
     assert engine.status == "FAIL"
+    assert "chock sync --repo" in engine.fix
+
+
+@pytest.mark.parametrize("stale", ["missing", "other-version"])
+def test_a_missing_or_stale_shared_runtime_fails_the_engine_check(tmp_path, home, stale):
+    repo = _sync_repo(tmp_path)
+    shared = repo / ".chock" / "bin" / runtime_bundle.SHARED_FILE
+    if stale == "missing":
+        shared.unlink()
+    else:
+        shared.write_text("# older engine\n", encoding="utf-8")
+    [target] = sync_targets(repo)
+    engine = _by_name(checks.run(target, repo))["engine"]
+    assert (engine.status, runtime_bundle.SHARED_FILE in engine.detail) == ("FAIL", True), engine
     assert "chock sync --repo" in engine.fix
 
 
@@ -132,14 +147,16 @@ def test_hook_records_without_a_heartbeat_warn(tmp_path, home):
     assert found["last fired"].detail == "stop 2026-10-13T00:00:01Z"
 
 
-@pytest.mark.parametrize(("level", "status"), [("debug", "WARN"), ("info", "INFO")])
-def test_heartbeats_with_no_hook_since_warn_only_where_debug_logs_allows(tmp_path, home, level, status):
+@pytest.mark.parametrize(("level", "status"), [("debug", "WARN"), ("info", "WARN"), ("off", "INFO")])
+def test_heartbeats_with_no_hook_since_warn_wherever_allows_are_logged(tmp_path, home, level, status):
     repo = _sync_repo(tmp_path)
     (repo / ".chock" / "chock-log.json").write_text(json.dumps({"level": level}), encoding="utf-8")
     beat = {"ts": "2026-10-13T00:00:02Z", "agent": AGENT, "event": "session_start", "route": "sync"}
     _log(repo / ".chock/log/gate-events.jsonl", {"ts": "2026-10-13T00:00:01Z", "agent": AGENT, "surface": "stop"}, beat)
     [target] = sync_targets(repo)
-    assert _by_name(checks.run(target, repo))["heartbeat"].status == status
+    beat = _by_name(checks.run(target, repo))["heartbeat"]
+    assert beat.status == status
+    assert "debug" not in f"{beat.detail} {beat.fix}"
 
 
 def test_a_hook_since_the_last_heartbeats_passes(tmp_path, home):

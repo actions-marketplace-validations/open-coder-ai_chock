@@ -17,9 +17,9 @@ import client_payloads
 import pytest
 from bundle_fixtures import ALL_ROOTS, BUNDLE_ID, bundle, judging_commands, make_members, project, write
 from conftest import run_hook_command
+from runtime_support import write_runtime
 from test_unreadable_stop import STOP_REFUSALS
 
-from chock.gate import runtime_bundle
 from chock.hooks import launch
 from chock.plugin.bundle_build import CLIENTS, merged_files
 
@@ -251,7 +251,7 @@ def runtime(tmp_path: Path):
     def _run_runtime(agent: str, payload: str, argv: tuple[str, ...] | None = None) -> subprocess.CompletedProcess:
         path = tmp_path / f"{agent}.py"
         if not path.exists():
-            path.write_text(runtime_bundle.render(agent), encoding="utf-8")
+            write_runtime(path, agent)
         args = ("--guard", str(guard)) if argv is None else argv
         return subprocess.run(
             [sys.executable, str(path), *args], cwd=tmp_path, input=payload, capture_output=True, text=True

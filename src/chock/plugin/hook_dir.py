@@ -22,7 +22,7 @@ from chock import vendors
 from chock.compile.emitters import in_agent_hooks
 from chock.compile.emitters.in_agent_hooks import generic_pre_tool_config, generic_stop_config
 from chock.gate.write_gate import STOP_FLAG
-from chock.hooks import launch
+from chock.hooks import launch, stop_check
 from chock.plugin import gate_package, guard_gate, store
 from chock.plugin.build import (
     LICENSE_REL,
@@ -142,6 +142,7 @@ def plugin_files(spec: Spec, policy_dir: Path, manifest: dict[str, Any], repo_ro
         gate_doc(spec.agent, hook_command(spec, "--gate", "gate.json")) if gate else None,
     )
     if hooks is not None:
+        hooks = guard_gate.merge_hooks(hooks, stop_check.plugin_doc(spec.agent, hooks, generic=True))
         files[Path(shape["hooks"])] = json.dumps(store_timeout(spec.store, hooks), indent=2) + "\n"
         files.update(_runtime_files(spec.agent))
     if script:

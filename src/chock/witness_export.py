@@ -18,6 +18,7 @@ from chock import __version__, vendors
 from chock.display import inert
 from chock.gate.runner import journal
 from chock.gatelog import SINCE_HELP, positive_days
+from chock.gatelog_chain import heads
 from chock.gatelog_read import read_events, record_route
 from chock.resources import package_data_dir
 
@@ -27,8 +28,15 @@ DATA: dict[str, Any] = json.loads(
 #: A plugin name a log line gives is only ever a folder name; anything else is not looked up.
 _PLUGIN_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _UNKNOWN = "unknown"
+#: A person's git email (an override's approver, a stop's author): kept in the local 0o600 log, never exported.
+LOCAL_ONLY = ("approver", "who")
 #: The only file type an export writes: it never replaces a config, a script or anything else.
 EXPORT_SUFFIX = ".json"
+
+
+def exported(record: dict[str, Any], agent: str) -> bool:
+    """Whether an export for `agent` carries `record`: the agent's own, or a person's override at a git hook."""
+    return record.get("agent") == agent or ("override" in record and not record.get("agent"))
 
 
 def install_agents() -> dict[str, str]:
@@ -115,7 +123,7 @@ def bundle(agent: str, records: list[dict[str, Any]], repo_root: Path, since: in
 
     home = os.path.expanduser("~")
     refs = redact(catalog_refs(agent, records, repo_root), home)
-    records = redact(records, home)
+    records = redact([{k: v for k, v in r.items() if k not in LOCAL_ONLY} for r in records], home)
     plugins = sorted({f"{r['plugin']} {r.get('plugin_version') or ''}".strip() for r in records if r.get("plugin")})
     return {
         "format": DATA["format"],
@@ -132,6 +140,7 @@ def bundle(agent: str, records: list[dict[str, Any]], repo_root: Path, since: in
         "events": sorted({str(r.get("event")) for r in records if r.get("event")}),
         "since_days": since,
         "exported": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "chain": redact(heads(repo_root, [agent]), home),
         "records": records,
     }
 
@@ -174,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write(f"chock witness: unknown client {args.client!r}\n")
         return 2
     repo_root = Path(args.repo).resolve()
-    records = [r for r in read_events(repo_root, args.since, heartbeats=True) if r.get("agent") == agent]
+    records = [r for r in read_events(repo_root, args.since, heartbeats=True) if exported(r, agent)]
     doc = bundle(agent, records, repo_root, args.since)
     out = out or default_out(agent)
     try:

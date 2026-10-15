@@ -17,6 +17,8 @@ from chock.gatelog_read import (
     PLUGIN_LOG_NAME,
     ROUTES,
     VERDICTS,
+    allowed_call,
+    allowed_calls,
     follow,
     keep,
     log_files,
@@ -44,6 +46,8 @@ def summarize(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Per (policy, surface) totals, most-active first."""
     totals: dict[tuple[str, str], dict[str, Any]] = {}
     for record in events:
+        if allowed_call(record):  # an allowed tool call is no policy's decision: `allowed_calls` counts it
+            continue
         key = (str(record.get("policy_id")), str(record.get("surface") or "unknown"))
         entry = totals.setdefault(
             key,
@@ -138,6 +142,8 @@ def group_events(events: list[dict[str, Any]], by: str) -> list[dict[str, Any]]:
     """
     groups: dict[str, dict[str, Any]] = {}
     for record in events:
+        if by == "policy" and allowed_call(record):
+            continue
         for name in _group_names(record, by):
             _tally(groups.setdefault(name, _new_group(name)), record, by)
     rows = []
@@ -161,7 +167,7 @@ def installed_policies(repo_root: Path) -> list[str]:
     )
 
 
-def render_text(summary: list[dict[str, Any]], silent: list[str]) -> str:
+def render_text(summary: list[dict[str, Any]], silent: list[str], allowed: int = 0) -> str:
     summary, silent = inert_all(summary), inert_all(silent)
     cols = ("events", "allow", "block", "ask", "warn") + (
         ("would_block",) if any(e["would_block"] for e in summary) else ()
@@ -174,6 +180,8 @@ def render_text(summary: list[dict[str, Any]], silent: list[str]) -> str:
             f"{str(entry['policy_id']).ljust(width)}  {entry['surface']:<13} {cells}  {entry['last_block'] or 'never'}"
         )
     lines = lines if summary else ["No gate outcomes recorded yet."]
+    if allowed:
+        lines += ["", f"Allowed tool calls: {allowed} (each counted once, never toward a policy)"]
     if silent:
         lines += ["", f"Never recorded ({len(silent)}): {', '.join(silent)}"]
         lines.append("Advisory policies emit no runtime event, so absence here is not evidence of a gap.")
@@ -242,9 +250,10 @@ def main(argv: list[str] | None = None, *, polls: int | None = None) -> int:
         silent = [p for p in silent if p == args.policy]
 
     if args.json:
-        print(json.dumps({"summary": summary, "silent": silent, "events": len(events)}, indent=2))
+        report = {"summary": summary, "silent": silent, "events": len(events), "allowed_calls": allowed_calls(events)}
+        print(json.dumps(report, indent=2))
     else:
-        print(render_text(summary, silent))
+        print(render_text(summary, silent, allowed_calls(events)))
     return 0
 
 
