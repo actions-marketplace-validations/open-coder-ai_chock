@@ -105,6 +105,7 @@ each call it refuses is a `block` line with `"reason": "stopped"` and the fields
 `session_id`, `target`). A pre-tool refusal names the hook's policy; a commit or push refused at
 the git dispatcher names `chock-stop`. `chock stop` and `chock resume` each write one `chock-stop`
 line, event `repo_stop` or `repo_resume`, with `scope`, `who` (git `user.email`) and `when`.
+With `--everywhere`, run inside a repository, the line also carries `"everywhere": true`.
 
 A person's `CHOCK_ALLOW` override is an `allow` line with `"override": "CHOCK_ALLOW"`, the
 `policy_id` it answered, and `approver`: the git `user.email` of the shell that ran it.

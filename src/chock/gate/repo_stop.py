@@ -4,7 +4,8 @@ Runs before every guard and gate, so neither `CHOCK_ALLOW` nor the rollout level
 A stop in any repository the call works in or touches counts: the session's project root as the client names it,
 the runtime's own, every repository above the call's cwd and above each path its input names (nested ones
 included, symlinks resolved), and the main worktree of each. A session whose client names no project root is
-refused while any stop on the machine reaches its agent (the `~/.chock/stops` registry): fail closed.
+refused while any stop on the machine reaches its agent (the `~/.chock/stops` registry): fail closed. The
+machine-wide stop there (`chock stop --everywhere`) refuses every call, whatever its repository or session.
 While no stop is near the call and none is registered, the payload is not scanned (the fast path); otherwise the
 scan is capped and a call past the cap is refused.
 """
@@ -141,7 +142,7 @@ def repo_stop_refusal(event):
     if stop is not None:
         return halt_message(stop)
     registered = halt_registry_find(agent)
-    if registered is None or not projects:
+    if registered is None or registered.get("everywhere") or not projects:
         return None if registered is None else halt_message(registered)
     named = repo_stop_named_roots(event)
     if named is None:

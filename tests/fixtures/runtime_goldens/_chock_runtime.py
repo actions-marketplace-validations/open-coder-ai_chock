@@ -22,7 +22,7 @@ from datetime import datetime as _chock_datetime, timezone as _chock_timezone
 from pathlib import Path as _chock_Path
 from pathlib import PurePosixPath as _chock_PurePosixPath, PureWindowsPath as _chock_PureWindowsPath
 
-CHOCK_RUNTIME_DIGEST = '99ef5ba20208cba7a83360be4d2edb52a0f2a8f847b604f9810f4ba5f666d437'
+CHOCK_RUNTIME_DIGEST = 'a2059af84a40b0a567de8f6d9bf7abcb7e7949159d016fdf19691fd2e0fef82a'
 
 
 ENGINE_BUDGET_SECONDS = 30
@@ -371,6 +371,10 @@ HALT_REGISTRY_PARTS = ('.chock', 'stops')
 
 _HALT_REGISTRY_SUFFIX = '.json'
 
+HALT_EVERYWHERE_NAME = '_everywhere.json'
+
+_HALT_EVERYWHERE_UNREADABLE = '~/.chock/stops/_everywhere.json exists but cannot be read, so every agent is refused'
+
 _HALT_REGISTRY_UNREADABLE = '~/.chock/stops exists but cannot be read, so every agent is refused'
 
 _HALT_GITDIR = 'gitdir:'
@@ -419,9 +423,24 @@ def halt_registry_entry(repo_root):
     key = _chock_hashlib.sha256(halt_norm(repo_root).encode('utf-8')).hexdigest()
     return halt_registry_dir() / f'{key}{_HALT_REGISTRY_SUFFIX}'
 
+def halt_everywhere_entry():
+    """`~/.chock/stops/_everywhere.json`: the machine-wide stop."""
+    return halt_registry_dir() / HALT_EVERYWHERE_NAME
+
+def halt_everywhere_read():
+    """The machine-wide stop, reaching every agent whatever its scope says, or None. A file there that is not a
+    regular one, or cannot be read or parsed, stops every agent: fail closed."""
+    path = halt_everywhere_entry()
+    if not _chock_os.path.lexists(path):
+        return None
+    unreadable = {'scope': HALT_ALL, 'reason': _HALT_EVERYWHERE_UNREADABLE, 'unreadable': True}
+    regular = _chock_os.path.isfile(path) and (not _chock_os.path.islink(path))
+    stop = _halt_read_file(path, _HALT_EVERYWHERE_UNREADABLE) if regular else unreadable
+    return {**(stop or unreadable), 'scope': HALT_ALL, 'everywhere': True}
+
 def halt_registry_find(client, repos=None):
-    """The first registry entry that reaches `client` (only those for `repos`, when given), or None.
-    A registry that exists but cannot be listed, or an entry that cannot be read, refuses: fail closed."""
+    """The machine-wide stop, else the first registry entry that reaches `client` (only those for `repos`, when
+    given), or None. A registry that exists but cannot be listed, or an entry that cannot be read, refuses."""
     folder = halt_registry_dir()
     unreadable = {'scope': HALT_ALL, 'reason': _HALT_REGISTRY_UNREADABLE, 'unreadable': True}
     try:
@@ -430,6 +449,9 @@ def halt_registry_find(client, repos=None):
         return unreadable if _chock_os.path.lexists(folder) else None
     except OSError:
         return unreadable
+    everywhere = halt_everywhere_read() if HALT_EVERYWHERE_NAME in names else None
+    if everywhere is not None:
+        return everywhere
     wanted = None if repos is None else {halt_registry_entry(repo).name for repo in repos}
     for name in names:
         if not name.endswith(_HALT_REGISTRY_SUFFIX) or (wanted is not None and name not in wanted):
@@ -498,6 +520,8 @@ def halt_message(stop):
     """`stopped: <reason>`, the reason printable and capped, and the one way to lift it."""
     reason = ''.join((ch for ch in str(stop.get('reason') or '') if ch.isprintable())).strip()
     reason = (reason or _HALT_NO_REASON)[:_HALT_REASON_CAP]
+    if stop.get('everywhere'):
+        return f'{HALT_REASON}: {reason}. A person stopped every agent on this machine (`chock stop --everywhere`); every tool call is refused until they run `chock resume --everywhere`.'
     return f'{HALT_REASON}: {reason}. A person stopped agents in this repository (`chock stop`); every tool call is refused until they run `chock resume`.'
 
 def halt_git_roots(repo_root: _chock_Path) -> list[_chock_Path]:
@@ -2086,7 +2110,7 @@ def repo_stop_refusal(event):
     if stop is not None:
         return halt_message(stop)
     registered = halt_registry_find(agent)
-    if registered is None or not projects:
+    if registered is None or registered.get('everywhere') or (not projects):
         return None if registered is None else halt_message(registered)
     named = repo_stop_named_roots(event)
     if named is None:
