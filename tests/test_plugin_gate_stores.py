@@ -18,11 +18,12 @@ from types import SimpleNamespace
 
 import pytest
 from conftest import init_repo
+from runtime_support import load_runtime
 from test_plugin_gate import POLICY_ID, SCRIPT, _manifest
 from test_plugin_gate import policy as shared_policy
 
-from chock.gate import runtime_bundle
 from chock.gate.stop_reentry import REENTRY_CAP
+from chock.hooks import stop_check
 from chock.plugin import codex, copilot, cursor, devin
 from chock.plugin.gate_package import gate_reach, gate_reaches
 
@@ -55,13 +56,14 @@ def test_the_gate_reaches_what_the_vendor_records(gate_policy, tmp_path: Path, s
         assert not (out / "scripts").exists()
         return
 
-    hooks = _hooks_doc(out, vendor, hooks_rel)
+    hooks = stop_check.without(_hooks_doc(out, vendor, hooks_rel))
     events = set(hooks)
     assert ("PreToolUse" in events or "preToolUse" in events) == (matcher is not None)
     assert ("Stop" in events or "stop" in events) == stop
     for entries in hooks.values():
         entry = entries[0]
         assert "--gate" in (entry["command"] if "command" in entry else entry["hooks"][0]["command"])
+    assert stop_check.STOP_CHECK_FLAG in (out / hooks_rel).read_text(encoding="utf-8")
     gate = json.loads((out / "scripts" / "gate.json").read_text(encoding="utf-8"))
     assert gate["script_base"] == "gate" and gate["params"]["script"] == f"implementations/{SCRIPT}"
     assert (out / "scripts" / "gate.py").exists()
@@ -176,8 +178,7 @@ def test_codex_s_packaged_gate_reads_the_turn_from_where_the_agent_works(gate_po
     repo.mkdir()
     init_repo(repo)
     (repo / "Leak.java").write_text("FORBIDDEN\n", encoding="utf-8")
-    ns: dict = {"__name__": "chock_runtime_under_test"}
-    exec(compile(runtime_bundle.render("codex_cli"), "<codex_cli bundle>", "exec"), ns)  # noqa: S102 -- the rendered runtime is the unit under test
+    ns = load_runtime(tmp_path / "runtime", "codex_cli")
     event = SimpleNamespace(event="stop", tool=None, command=None, path=None, content=None, cwd=str(repo), raw={})
     refused = ns["evaluate_gate"](["--gate", str(out / "scripts" / "gate.json")], event)
     assert refused is not None and "Leak.java" in refused[1]

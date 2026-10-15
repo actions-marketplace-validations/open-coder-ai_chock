@@ -11,11 +11,11 @@ from pathlib import Path
 import pytest
 from conftest import init_repo
 from decision_log_support import CLEAN_GUARD, hook_env, plugin_layout
+from runtime_support import write_runtime
 from test_repo_stop_git import AGENT, PERSON, _commit, _git
 from test_repo_stop_git import repo as git_repo  # noqa: F401 -- the fixture, under the name the tests use
 
 from chock import stop as chock_stop
-from chock.gate import runtime_bundle
 from chock.gate.runner.halt import HALT_CLIENTS
 from chock.vendors import in_agent_vendors
 
@@ -62,7 +62,7 @@ def test_a_stop_in_the_main_checkout_reaches_a_linked_worktree(git_repo: Path, t
     assert _git(git_repo, "worktree", "add", "-q", str(worktree)).returncode == 0
     runtime = worktree / ".chock" / "bin" / "claude_code.py"
     runtime.parent.mkdir(parents=True, exist_ok=True)
-    runtime.write_text(runtime_bundle.render("claude_code"), encoding="utf-8")
+    write_runtime(runtime, "claude_code")
     _stop(git_repo, "--reason", "main checkout")
 
     read = _hook(runtime, worktree, _call("Read", {"file_path": "a.txt"}, worktree), tmp_path, "--stop-check")
@@ -162,7 +162,7 @@ def test_an_unreadable_payload_is_refused_while_stopped_and_allowed_otherwise(tm
     init_repo(repo)
     runtime = repo / ".chock" / "bin" / "claude_code.py"
     runtime.parent.mkdir(parents=True)
-    runtime.write_text(runtime_bundle.render("claude_code"), encoding="utf-8")
+    write_runtime(runtime, "claude_code")
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     unstopped = _hook(runtime, repo, "not json {", home, "--stop-check")

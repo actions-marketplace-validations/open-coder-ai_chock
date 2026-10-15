@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -17,6 +18,7 @@ import client_payloads
 import pytest
 from bundle_fixtures import ALL_ROOTS, bundle, hook_commands, judging_commands, make_members, project, write
 from conftest import run_hook_command
+from runtime_support import write_runtime
 
 from chock.gate import runtime_bundle
 from chock.gate.stop_reentry import REENTRY_CAP
@@ -68,7 +70,7 @@ def _stop_command(package: Path) -> str:
     (command,) = [
         c
         for c in hook_commands(json.loads(next(package.rglob("hooks.json")).read_text("utf-8")))
-        if " --stop" in c and PROTECT_ID not in c
+        if re.search(r" --stop(?![\w-])", c) and PROTECT_ID not in c
     ]
     return command
 
@@ -194,7 +196,7 @@ def _stop_gate(tmp_path: Path) -> str:
 
 def test_the_repo_wiring_is_bounded_the_same_way(tmp_path: Path) -> None:
     runtime = tmp_path / "claude_code.py"
-    runtime.write_text(runtime_bundle.render("claude_code"), encoding="utf-8")
+    write_runtime(runtime, "claude_code")
     argv = [sys.executable, str(runtime), "--gate", _stop_gate(tmp_path)]
     runs = [
         subprocess.run(argv, cwd=tmp_path, input="", capture_output=True, text=True) for _ in range(REENTRY_CAP + 1)
