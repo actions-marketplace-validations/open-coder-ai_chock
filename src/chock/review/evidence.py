@@ -190,7 +190,7 @@ def _find_evidence(root: Path, base_ref: str) -> Path | None:
 def _touched_unattestable_paths(root: Path, base_ref: str) -> list[str]:
     """Which of the repo's unattestable prefixes the diff actually touches."""
     diff_range = f"{merge_base(root, base_ref)}...HEAD"
-    changed = [p for p in _git(root, "diff", "--no-color", "--name-only", diff_range).splitlines() if p.strip()]
+    changed = [p for p in _git(root, "diff", "--no-color", "--name-only", "-z", diff_range).split("\0") if p]
     prefixes = unattestable_paths(root, base_ref)
     return sorted({prefix for prefix in prefixes for path in changed if path.startswith(prefix)})
 

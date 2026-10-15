@@ -9,7 +9,7 @@ from typing import Any
 from agentseam import packaging
 
 from chock.compile.emitters.in_agent_hooks import hooks_map_file
-from chock.hooks import launch
+from chock.hooks import launch, stop_check
 from chock.plugin import gate_package, guard_gate, posture, store
 from chock.plugin.build import (
     LICENSE_REL,
@@ -150,6 +150,7 @@ def devin_plugin_files(policy_dir: Path, manifest: dict[str, Any], repo_root: Pa
         gate_package.gate_hooks_file("devin", _gate_command()) if gate else None,
     )
     if hooks is not None:
+        hooks = guard_gate.merge_hooks(hooks, stop_check.plugin_doc("devin", hooks, generic=False))
         files[Path(HOOKS_REL)] = json.dumps(hooks, indent=2) + "\n"
         files.update(_runtime_files("devin"))
     if script:

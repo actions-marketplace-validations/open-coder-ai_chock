@@ -9,7 +9,7 @@ from typing import Any
 
 import yaml
 
-from chock.gate.runner import journal
+from chock.gate.runner import chain, journal
 from chock.gate.write_gate import STOP_FLAG
 from chock.guardrails import chock_bundle_log, toggle
 from chock.plugin.store import SCRIPTS_TEMPLATE
@@ -21,6 +21,8 @@ WRAPPER = SCRIPTS_TEMPLATE.format(name="chock_bundle.py")
 #: The wrapper's log line and the gate's journal it writes through, beside it: no chock need be installed.
 WRAPPER_LOG = SCRIPTS_TEMPLATE.format(name="chock_bundle_log.py")
 WRAPPER_JOURNAL = SCRIPTS_TEMPLATE.format(name="chock_journal.py")
+WRAPPER_CHAIN = SCRIPTS_TEMPLATE.format(name="chock_chain.py")
+_CHAIN_IMPORT = "from .chain import "
 MEMBERS = SCRIPTS_TEMPLATE.format(name="chock_bundle.json")
 
 
@@ -92,13 +94,23 @@ def skill(bundle: str, rows: list[tuple[str, str]]) -> str:
     return template.replace("__MEMBERS__", table).replace("__BUNDLE__", bundle)
 
 
+def wrapper_journal() -> str:
+    """The gate's journal as the wrapper carries it: beside `chock_chain.py`, not inside the chock package."""
+    text = Path(journal.__file__).read_text(encoding="utf-8")
+    if _CHAIN_IMPORT not in text:
+        msg = f"the journal no longer imports its chain as {_CHAIN_IMPORT!r}: the wrapper's copy would not run"
+        raise WrapError(msg)
+    return text.replace(_CHAIN_IMPORT, "from chock_chain import ")
+
+
 def files(bundle: str, rows: list[tuple[str, str]], skill_template: str) -> dict[Path, str]:
     """The wrapper, the member list `chock bundle status` reads, and the skill, by path inside the plugin."""
     members = {"bundle": bundle, "members": [{"id": i, "label": label} for i, label in rows]}
     return {
         Path(WRAPPER): Path(toggle.__file__).read_text(encoding="utf-8"),
         Path(WRAPPER_LOG): Path(chock_bundle_log.__file__).read_text(encoding="utf-8"),
-        Path(WRAPPER_JOURNAL): Path(journal.__file__).read_text(encoding="utf-8"),
+        Path(WRAPPER_JOURNAL): wrapper_journal(),
+        Path(WRAPPER_CHAIN): Path(chain.__file__).read_text(encoding="utf-8"),
         Path(MEMBERS): json.dumps(members, indent=2) + "\n",
         Path(skill_template.format(name=SKILL_NAME)): skill(bundle, rows),
     }

@@ -17,6 +17,7 @@ from agentseam import matrix as _matrix
 from chock import __version__, vendors
 from chock.gate.runner import journal
 from chock.gatelog import SINCE_HELP, positive_days
+from chock.gatelog_chain import heads
 from chock.gatelog_read import read_events, record_route
 from chock.resources import package_data_dir
 
@@ -30,6 +31,11 @@ _UNKNOWN = "unknown"
 LOCAL_ONLY = ("approver", "who")
 #: The only file type an export writes: it never replaces a config, a script or anything else.
 EXPORT_SUFFIX = ".json"
+
+
+def exported(record: dict[str, Any], agent: str) -> bool:
+    """Whether an export for `agent` carries `record`: the agent's own, or a person's override at a git hook."""
+    return record.get("agent") == agent or ("override" in record and not record.get("agent"))
 
 
 def install_agents() -> dict[str, str]:
@@ -133,6 +139,7 @@ def bundle(agent: str, records: list[dict[str, Any]], repo_root: Path, since: in
         "events": sorted({str(r.get("event")) for r in records if r.get("event")}),
         "since_days": since,
         "exported": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "chain": redact(heads(repo_root, [agent]), home),
         "records": records,
     }
 
@@ -175,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write(f"chock witness: unknown client {args.client!r}\n")
         return 2
     repo_root = Path(args.repo).resolve()
-    records = [r for r in read_events(repo_root, args.since, heartbeats=True) if r.get("agent") == agent]
+    records = [r for r in read_events(repo_root, args.since, heartbeats=True) if exported(r, agent)]
     doc = bundle(agent, records, repo_root, args.since)
     out = out or default_out(agent)
     try:

@@ -54,26 +54,31 @@ def _commands(node: Any) -> list[str]:
     return [c for v in node for c in _commands(v)] if isinstance(node, list) else []
 
 
-def plugin_doc(agent: str, hooks: Any) -> Any:
-    """A plugin's heartbeat document: the launcher and runtime its own hooks already run, with no flags; or None."""
+def plugin_runtime(agent: str, hooks: Any) -> str | None:
+    """The launcher-and-runtime invocation a plugin's own hooks already run, with no flags; or None."""
     runtime = re.compile(
         rf'^(.*?{re.escape(PLUGIN_LAUNCHER)}" "[^"\s]*{re.escape(SCRIPTS_TEMPLATE.format(name=agent + ".py"))}")'
     )
-    found = next((m.group(1) for m in map(runtime.match, _commands(hooks)) if m), None)
+    return next((m.group(1) for m in map(runtime.match, _commands(hooks)) if m), None)
+
+
+def plugin_doc(agent: str, hooks: Any) -> Any:
+    """A plugin's heartbeat document: the launcher and runtime its own hooks already run, with no flags; or None."""
+    found = plugin_runtime(agent, hooks)
     if not found:
         return None
     doc = heartbeat_doc(agent, found)
-    if doc is None or _wrapped(doc) == _wrapped(hooks):
+    if doc is None or wrapped(doc) == wrapped(hooks):
         return doc
     # The package speaks the hooks-map dialect rather than the vendor's own (Copilot's Claude-format plugin).
     event_map = {vendors.wire_event(agent, "session_start"): [hook_entry(found)]}
     return event_map if vendors.hook_entry_bare(agent) else {"hooks": event_map}
 
 
-def _wrapped(node: Any) -> bool:
+def wrapped(node: Any) -> bool:
     """Whether the first hook entry under `node` wraps its commands in a `hooks` list (the hooks-map shape)."""
     if isinstance(node, dict):
         if isinstance(node.get("hooks"), list):
             return True
-        return any(_wrapped(v) for k, v in node.items() if k != "command" and isinstance(v, (dict, list)))
-    return any(_wrapped(v) for v in node) if isinstance(node, list) else False
+        return any(wrapped(v) for k, v in node.items() if k != "command" and isinstance(v, (dict, list)))
+    return any(wrapped(v) for v in node) if isinstance(node, list) else False

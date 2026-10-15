@@ -8,18 +8,18 @@ splice and the vendor dialect are under the same test.
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from runtime_support import load_runtime
 
-from chock.gate import runtime_bundle
 from chock.vendors import in_agent_vendors
 
 
-def _load(agent: str) -> dict:
-    namespace: dict = {"__name__": "chock_runtime_under_test"}
-    exec(compile(runtime_bundle.render(agent), f"<{agent} bundle>", "exec"), namespace)  # noqa: S102 -- the rendered runtime is the unit under test
-    return namespace
+@pytest.fixture
+def _load(tmp_path: Path):
+    return lambda agent: load_runtime(tmp_path, agent)
 
 
 def _event(**overrides) -> SimpleNamespace:
@@ -28,7 +28,7 @@ def _event(**overrides) -> SimpleNamespace:
 
 
 @pytest.mark.parametrize("agent", in_agent_vendors())
-def test_a_raise_inside_the_judge_becomes_a_deny_that_names_it(agent: str) -> None:
+def test_a_raise_inside_the_judge_becomes_a_deny_that_names_it(agent: str, _load) -> None:
     ns = _load(agent)
 
     def _blow_up(*_args, **_kwargs):
@@ -42,7 +42,7 @@ def test_a_raise_inside_the_judge_becomes_a_deny_that_names_it(agent: str) -> No
 
 
 @pytest.mark.parametrize("agent", in_agent_vendors())
-def test_the_gate_path_is_wrapped_too(agent: str) -> None:
+def test_the_gate_path_is_wrapped_too(agent: str, _load) -> None:
     """The write path and stop reach the judge through evaluate_gate; a raise there is the same."""
     ns = _load(agent)
 
@@ -55,7 +55,7 @@ def test_the_gate_path_is_wrapped_too(agent: str) -> None:
     assert "ValueError: gate spec is not a mapping" in decision.reason
 
 
-def test_a_clean_call_is_still_untouched() -> None:
+def test_a_clean_call_is_still_untouched(_load) -> None:
     """The mandate: the wrap must not turn a correct allow into anything else."""
     ns = _load("claude_code")
     ns["evaluate"] = lambda *_a, **_k: None

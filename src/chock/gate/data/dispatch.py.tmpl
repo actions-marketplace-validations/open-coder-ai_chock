@@ -60,6 +60,9 @@ def _judge(event, judged):
 
 
 def handle(event):
+    if _CHOCK_RUNTIME_FAULT is not None:
+        _report(_CHOCK_RUNTIME_FAULT + "\n")
+        return Decision.deny(_CHOCK_RUNTIME_FAULT)
     starting = event.event == "session_start"
     if starting:
         log_heartbeat(event, _CHOCK_PLUGIN_MANIFESTS)
