@@ -163,12 +163,12 @@ def test_status_propagates_rc(monkeypatch, rc):
     assert lifecycle.status_main(["--repo", "R"]) == rc
 
 
-def test_check_last_line_names_the_failing_section(monkeypatch, capsys):
+def test_check_last_line_is_fail_when_a_section_fails(monkeypatch, capsys):
     """A later section's PASS must not be the last word when an earlier one failed."""
     monkeypatch.setattr("chock.lock.main", Recorder(rc=1))
     monkeypatch.setattr("chock.eval.cli.main", Recorder(rc=0))
     assert lifecycle.check_main(["--repo", "R", "--only", "verify,evals"]) == 1
-    assert capsys.readouterr().out.splitlines()[-1] == "== result: FAIL (verify lockfile)"
+    assert capsys.readouterr().out.splitlines()[-1] == "== result: FAIL (exit 1; see the FAIL above)"
 
 
 def test_check_last_line_is_pass_when_all_pass(monkeypatch, capsys):
