@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 
 POLICY_ID_RE = re.compile(r"^[a-z][a-z0-9-]{2,63}$")
+#: Reserved for a person's own policies, so a catalog id never collides with one; added outside a catalog.
+CUSTOM_PREFIX = "my-"
 
 
 class InvalidPolicyIdError(ValueError):
