@@ -163,7 +163,8 @@ def cmd_new(argv: list[str] | None = None) -> int:
 
     print(f"Created {args.artifact} '{args.id}' at {root / '.agents'}")
     repo = shlex.quote(args.root)
-    print(f"Next:  python -m chock sync --repo {repo} && python -m chock check --repo {repo}")
+    print(f"Next:  python -m chock sync --repo {repo}")
+    print(f"       python -m chock check --repo {repo}")
     return 0
 
 
