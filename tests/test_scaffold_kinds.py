@@ -7,6 +7,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+import yaml
 
 from chock.lifecycle import check_main
 from chock.scaffold import new
@@ -80,3 +81,16 @@ def test_render_is_byte_stable_for_the_site(tmp_path: Path) -> None:
     first = new.render_kind("guard", "my-demo", "2026-10-06")
     assert first == new.render_kind("guard", "my-demo", "2026-10-06")
     assert 'created_at: "2026-10-06T00:00:00Z"' in first[Path("manifest.yaml")]
+
+
+def test_content_regex_scaffold_does_not_match_its_own_repo(tmp_path: Path) -> None:
+    """A fresh content_regex policy must not flag the files its own scaffold wrote (INDEX.md included)."""
+    assert new.cmd_new(["policy", "demo", "--kind", "content_regex", "--root", str(tmp_path)]) == 0
+    manifest = yaml.safe_load((tmp_path / ".agents" / "policies" / "my-demo" / "manifest.yaml").read_text("utf-8"))
+    pattern = re.compile(manifest["hook"]["gate"]["params"]["content_pattern"])
+    hits = [
+        p.relative_to(tmp_path).as_posix()
+        for p in tmp_path.rglob("*")
+        if p.is_file() and pattern.search(p.read_text(encoding="utf-8", errors="replace"))
+    ]
+    assert hits == []

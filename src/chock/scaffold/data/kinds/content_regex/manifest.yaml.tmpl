@@ -18,7 +18,7 @@ hook:
     "on": [commit, tool_use]
     action: block
     message: >
-      __ID__: this change adds a line marked DO NOT COMMIT. Remove the marker
+      __ID__: this change adds a line with a DO-NOT-COMMIT marker. Remove the marker
       or the line before committing.
     params:
       scan: added_lines

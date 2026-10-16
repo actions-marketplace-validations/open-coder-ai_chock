@@ -184,6 +184,7 @@ def check_main(argv: list[str] | None) -> int:
     rc = max(rc, _run_freshness_checks(selected, args.repo))
     if "baseline" in selected:
         rc = max(rc, _run_baseline(args))
+    print(f"== result: FAIL (exit {rc}; see the FAIL above)" if rc else "== result: PASS")
     return rc
 
 
