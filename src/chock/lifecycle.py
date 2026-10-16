@@ -11,10 +11,16 @@ from typing import TextIO
 from chock.gatelog import FORMATS, GROUP_KEYS, LEVELS, ROUTES, VERDICTS, positive_days
 from chock.stop import print_stop
 
+#: Labels of the `_run` sections that returned non-zero since `check_main` last cleared it.
+_FAILED: list[str] = []
+
 
 def _run(label: str, fn, argv: list[str]) -> int:
     print(f"== {label}")
-    return int(fn(argv) or 0)
+    rc = int(fn(argv) or 0)
+    if rc:
+        _FAILED.append(label)
+    return rc
 
 
 def sync_main(argv: list[str] | None) -> int:
@@ -166,6 +172,7 @@ def check_main(argv: list[str] | None) -> int:
     if selected is None:
         return 2
 
+    _FAILED.clear()
     rc = 0
     if "validate" in selected:
         rc = max(rc, _run_validate(args))
@@ -184,6 +191,7 @@ def check_main(argv: list[str] | None) -> int:
     rc = max(rc, _run_freshness_checks(selected, args.repo))
     if "baseline" in selected:
         rc = max(rc, _run_baseline(args))
+    print(f"== result: FAIL ({', '.join(_FAILED) or 'see above'})" if rc else "== result: PASS")
     return rc
 
 
