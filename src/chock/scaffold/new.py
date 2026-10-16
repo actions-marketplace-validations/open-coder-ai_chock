@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import shlex
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -161,7 +162,8 @@ def cmd_new(argv: list[str] | None = None) -> int:
     cmd_refresh(["--repo", str(root)])
 
     print(f"Created {args.artifact} '{args.id}' at {root / '.agents'}")
-    print(f"Next:  python -m chock check {args.root}")
+    repo = shlex.quote(args.root)
+    print(f"Next:  python -m chock sync --repo {repo} && python -m chock check --repo {repo}")
     return 0
 
 
