@@ -136,6 +136,23 @@ def test_verb_first_naming_int3(tmp_path):
     assert not any(f.check == "interface" for f in report.warnings)
 
 
+def test_verb_first_naming_int3_skips_custom_prefix(tmp_path):
+    """INT-3 reads the verb after the `my-` prefix `chock new` adds; a bare or empty remainder does not crash."""
+    skill_dir = tmp_path / "artifact"
+    skill_dir.mkdir()
+    manifest = {"provenance": {"trust_tier": "sandbox"}, "lifecycle": {"status": "draft"}}
+
+    def int3_warned(artifact_id):
+        report = validator.Report()
+        validator.check_verb_first_naming(skill_dir, {**manifest, "id": artifact_id}, "skill", report)
+        return any(f.check == "interface" for f in report.warnings)
+
+    assert not int3_warned("my-block-marker")
+    assert int3_warned("my-tf-destroy")
+    assert int3_warned("my-")
+    assert int3_warned("my--x")
+
+
 def test_workflow_requires_handoff_monitoring_and_bounded_fanout(tmp_path):
     """Workflow orchestration requires strong monitoring and handoff contracts."""
     art = tmp_path / "orchestrator"

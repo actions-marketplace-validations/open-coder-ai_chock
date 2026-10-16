@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from chock.manifest import CANONICAL_MANIFEST, DETERMINIZATION_REVIEWED_KEY, resolve_manifest_path
+from chock.policy_id import CUSTOM_PREFIX
 from chock.registry.core import is_shipped_file
 from chock.validation.checks_security import _is_script_file
 from chock.validation.patterns import (
@@ -32,7 +33,8 @@ def check_verb_first_naming(artifact_dir: Path, manifest: dict[str, Any], artifa
     if trust_tier not in {"sandbox"} and lifecycle_status not in {"draft", "review"}:
         return
 
-    first_token = artifact_id.split("-")[0].lower()
+    # `chock new` adds CUSTOM_PREFIX to a person's own policies; the verb is the token after it.
+    first_token = artifact_id.removeprefix(CUSTOM_PREFIX).split("-")[0].lower()
     if first_token not in _VERB_PREFIXES:
         report.add(
             Finding(

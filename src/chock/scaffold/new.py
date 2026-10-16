@@ -11,13 +11,11 @@ from pathlib import Path
 import chock
 from chock.index.cli import cmd_refresh
 from chock.output import error
-from chock.policy_id import POLICY_ID_RE
+from chock.policy_id import CUSTOM_PREFIX, POLICY_ID_RE
 from chock.registry.core import rescan_and_report
 
 #: `chock new policy <id> --kind <kind>`: one template folder each under data/kinds/, copied with __TOKEN__s replaced.
 KINDS = ("content_regex", "guard", "script", "rule", "skill")
-#: Reserved for a person's own policies, so a catalog id never collides with one; added outside a catalog.
-CUSTOM_PREFIX = "my-"
 _TEMPLATE_SUFFIX = ".tmpl"
 _CATALOG_REGISTRY = "registry.yaml"
 
