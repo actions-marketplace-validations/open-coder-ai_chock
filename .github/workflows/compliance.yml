@@ -25,7 +25,7 @@ jobs:
       - name: Install chock
         run: |
           python -m pip install --require-hashes --upgrade -r requirements/pip.txt
-          pip install .
+          python -m pip install --require-hashes -r requirements/runtime.txt && pip install -e . --no-deps
 
       - name: Compliance report (OWASP Agentic) on chock itself
         run: chock compliance report --repo . --framework owasp_asi

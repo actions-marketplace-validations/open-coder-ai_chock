@@ -190,7 +190,7 @@ class Gateway:
                     break
                 self.handle_line(line, sys.stdout)
         except (KeyboardInterrupt, BrokenPipeError, OSError, ValueError):
-            pass
+            pass  # client hung up or stdin closed: fall through to stop downstream
         finally:
             if self.process and self.process.poll() is None:
                 self.process.terminate()
