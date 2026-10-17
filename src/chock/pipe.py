@@ -60,4 +60,4 @@ def silence_interpreter_flush(writer: PipeTolerantWriter) -> None:
         os.dup2(devnull, sys.__stdout__.fileno())
         os.close(devnull)
     except OSError:
-        pass
+        pass  # best effort: the flush it guards against is only noise

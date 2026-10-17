@@ -11,6 +11,7 @@ EXEMPT = {
     "CHANGELOG.md",
     "requirements/semgrep.txt",
     "requirements/brand-assets.txt",
+    "requirements/dev.txt",
 }
 
 # .chock/bin/ is bundler output (generated, review lives at its sources); runtime_goldens

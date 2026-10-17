@@ -257,6 +257,7 @@ def recompile(repo_root: Path | str, agents: list[str], *, skip_hooks: bool = Fa
 
     write_generated_json(coverage_path, coverage)
 
+    unwired: list[str] = []
     if not skip_hooks:
         install_policy_hooks(repo_root, get_hooks_dir(repo_root))
 

@@ -11,8 +11,7 @@ from typing import Any, Callable
 
 from agentseam import tier_table
 
-import chock
-from chock import vendors
+from chock import __version__, vendors
 from chock.emit import write_generated
 from chock.gate import runtime_bundle
 from chock.plugin import bundle_build, bundle_grade, hook_dir
@@ -97,7 +96,7 @@ def marker(chosen: dict[str, Any], accepted: dict[str, str]) -> dict[str, Any]:
     """The install marker: the selection, plus its versioned block (engine version and commit, accepted local hashes)."""
     block = {
         "version": MARKER_VERSION,
-        "engine": {"version": chock.__version__, "commit": engine_commit()},
+        "engine": {"version": __version__, "commit": engine_commit()},
         "accepted_local": dict(sorted(accepted.items())),
     }
     return {**chosen, MARKER_KEY: block}
