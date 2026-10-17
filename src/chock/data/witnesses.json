@@ -46,7 +46,7 @@
     "surface": "plugin-hook",
     "client": "Grok Build 1.0.62, Windows 11",
     "date": "2026-10-17",
-    "method": "live probe of a chock plugin installed with `grok plugin install --trust` (no hook trust prompt) and enabled under Grok's generated name c--users-jothi--chock-marketplace-grok-chock-witness-481da8d4, not chock-witness: block-no-verify refused a `git commit --no-verify` shell command before it ran (\"`run_terminal_command` blocked by plugin/c--users-jothi--chock-marketplace-grok-chock-witness-481da8d4/hooks: Blocked by chock policy: block-no-verify\"); pin-github-actions is advisory on Grok and the workflow write landed, as labelled, so no gate refusal is claimed (org-plan witness/results/witness-grok-2026-10-17.md, f52c055)"
+    "method": "live probe of a chock plugin installed with `grok plugin install --trust` (no hook trust prompt) and enabled under Grok's generated name c--users-<user>--chock-marketplace-grok-chock-witness-481da8d4 (username redacted as <user>), not chock-witness: block-no-verify refused a `git commit --no-verify` shell command before it ran (\"`run_terminal_command` blocked by plugin/c--users-<user>--chock-marketplace-grok-chock-witness-481da8d4/hooks: Blocked by chock policy: block-no-verify\"); pin-github-actions is advisory on Grok and the workflow write landed, as labelled, so no gate refusal is claimed (org-plan witness/results/witness-grok-2026-10-17.md, f52c055)"
   },
   {
     "agent": "claude_code",
