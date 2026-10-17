@@ -274,9 +274,13 @@ def test_labels_come_from_the_tier_table_and_warnings_link_the_evidence_issue(
     lines = {line.split()[0]: line for line in out.splitlines() if line.startswith("  demo-")}
     assert f"{prefix}refuses a matched shell command" in lines[GUARD_ID]
     assert "advisory only" in lines[ADVISORY_ID] and prefix not in lines[ADVISORY_ID]
-    # Grok's plugin install is witnessed (witnesses.json, 2026-10-17); the others are not.
-    assert ("warning: Untested: chock has not witnessed an install in this client" in out) == (client != "grok")
-    assert evidence in out
+    # Grok's plugin install is witnessed (witnesses.json, 2026-10-17): no Untested or Evidence wanted warning,
+    # but its fail-open warning stays; the others are not witnessed.
+    witnessed = client == "grok"
+    assert ("warning: Untested: chock has not witnessed an install in this client" in out) != witnessed
+    assert ("Evidence wanted" in out) != witnessed
+    assert (evidence in out) != witnessed
+    assert not witnessed or "Grok's hooks fail open" in out
 
 
 def test_an_ask_gate_is_labelled_not_enforced_where_the_client_cannot_ask(catalog, tmp_path: Path) -> None:

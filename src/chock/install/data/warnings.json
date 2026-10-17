@@ -112,13 +112,6 @@
     {
       "kind": "client",
       "clients": [
-        "grok"
-      ],
-      "says": "Evidence wanted: what you see Grok do with this plugin, at https://github.com/open-coder-ai/agentseam/issues/188"
-    },
-    {
-      "kind": "client",
-      "clients": [
         "antigravity"
       ],
       "says": "Evidence wanted: what you see Antigravity do with this plugin, at https://github.com/open-coder-ai/agentseam/issues/129"
