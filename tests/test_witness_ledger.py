@@ -183,6 +183,16 @@ def test_devins_plugin_witness_cites_its_record_and_witnesses_no_repo_hook() -> 
     assert evidence.witness("devin", Surface.PRE_TOOL_USE.value) is None
 
 
+def test_copilots_plugin_witness_cites_its_record_and_names_what_it_did_not_cover() -> None:
+    """WIT-1: the Copilot CLI plugin route was witnessed; VS Code agent mode was not, and the row says so."""
+    row = evidence.witness("vscode_copilot", evidence.PLUGIN_HOOK)
+    assert row is not None
+    assert "witness/results/witness-copilot-2026-10-11.md" in row.method
+    assert "83f636d" in row.method
+    assert "VS Code agent mode" in row.method and "not covered" in row.method
+    assert "VS Code" not in row.client
+
+
 def test_the_shipped_ledger_is_the_file_on_disk() -> None:
     """The loader reads packaged data, so the check must be against that file, not a fixture."""
     rows = json.loads(evidence.WITNESSES_PATH.read_text(encoding="utf-8"))
