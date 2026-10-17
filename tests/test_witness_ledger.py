@@ -195,6 +195,19 @@ def test_copilots_plugin_witness_cites_its_record_and_names_what_it_did_not_cove
     assert "VS Code" not in row.client
 
 
+def test_groks_plugin_witness_cites_its_record_and_claims_no_gate() -> None:
+    """WIT-G: keyed `grok`, the agent chock's grok install client and a plugin-hook lookup use; guard only."""
+    row = evidence.witness("grok", evidence.PLUGIN_HOOK)
+    assert row is not None
+    assert row.client == "Grok Build 1.0.62, Windows 11"
+    assert "witness/results/witness-grok-2026-10-17.md" in row.method
+    assert "f52c055" in row.method
+    assert "Blocked by chock policy: block-no-verify" in row.method
+    assert "--trust" in row.method and "no hook trust prompt" in row.method
+    assert "no gate refusal is claimed" in row.method
+    assert evidence.witness("grok", Surface.PRE_TOOL_USE.value) is None
+
+
 def test_the_shipped_ledger_is_the_file_on_disk() -> None:
     """The loader reads packaged data, so the check must be against that file, not a fixture."""
     rows = json.loads(evidence.WITNESSES_PATH.read_text(encoding="utf-8"))
