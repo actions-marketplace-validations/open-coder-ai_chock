@@ -54,7 +54,8 @@ def test_every_bundle_carries_one_matcherless_stop_check(tmp_path: Path, client:
     stops = [c for c in hook_commands(doc) if STOP_CHECK_FLAG in c]
     assert len(stops) == 1, stops
     [group] = [g for g in _pre_tool_groups(client, doc) if any(STOP_CHECK_FLAG in c for c in hook_commands(g))]
-    assert "matcher" not in group
+    # No matcher, or the vendor's documented match-all default (antigravity's "*").
+    assert group.get("matcher") == vendors.entry(CLIENTS[client].agent).get("hook_entry", {}).get("default_match")
     runtime = SCRIPTS_TEMPLATE.format(name=f"{CLIENTS[client].agent}.py")
     assert stops[0].endswith(f'{runtime}" {STOP_CHECK_FLAG}'), stops[0]
 
