@@ -184,9 +184,11 @@ def test_devins_plugin_witness_cites_its_record_and_witnesses_no_repo_hook() -> 
 
 
 def test_copilots_plugin_witness_cites_its_record_and_names_what_it_did_not_cover() -> None:
-    """WIT-1: the Copilot CLI plugin route was witnessed; VS Code agent mode was not, and the row says so."""
-    row = evidence.witness("vscode_copilot", evidence.PLUGIN_HOOK)
+    """WIT-1: keyed by agentseam's bundle-format id `copilot`, the key a plugin-hook lookup for that client uses."""
+    row = evidence.witness("copilot", evidence.PLUGIN_HOOK)
     assert row is not None
+    assert evidence.witness("vscode_copilot", evidence.PLUGIN_HOOK) is None
+    assert evidence.witness("vscode_copilot", Surface.AGENT_HOOKS.value) is not None
     assert "witness/results/witness-copilot-2026-10-11.md" in row.method
     assert "83f636d" in row.method
     assert "VS Code agent mode" in row.method and "not covered" in row.method

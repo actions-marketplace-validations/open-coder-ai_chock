@@ -21,7 +21,7 @@
     "method": "live probe: an exit-2 deny blocked a matched command on both (chock 5d78831)"
   },
   {
-    "agent": "vscode_copilot",
+    "agent": "copilot",
     "surface": "plugin-hook",
     "client": "GitHub Copilot CLI 1.0.94, Windows",
     "date": "2026-10-11",
