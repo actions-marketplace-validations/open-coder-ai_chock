@@ -197,7 +197,6 @@
       "kind": "client",
       "clients": [
         "goose",
-        "grok",
         "antigravity",
         "gemini-cli",
         "openhands",
