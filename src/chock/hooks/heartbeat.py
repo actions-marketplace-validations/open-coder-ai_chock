@@ -57,7 +57,7 @@ def _commands(node: Any) -> list[str]:
 def plugin_runtime(agent: str, hooks: Any) -> str | None:
     """The launcher-and-runtime invocation a plugin's own hooks already run, with no flags; or None."""
     runtime = re.compile(
-        rf'^(.*?{re.escape(PLUGIN_LAUNCHER)}" "[^"\s]*{re.escape(SCRIPTS_TEMPLATE.format(name=agent + ".py"))}")'
+        rf'^(.*?{re.escape(PLUGIN_LAUNCHER)}"? "?[^"\s]*{re.escape(SCRIPTS_TEMPLATE.format(name=agent + ".py"))}"?)'
     )
     return next((m.group(1) for m in map(runtime.match, _commands(hooks)) if m), None)
 

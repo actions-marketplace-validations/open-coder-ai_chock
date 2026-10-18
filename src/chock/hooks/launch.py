@@ -66,6 +66,31 @@ def plugin_interpreter(launcher: str) -> str:
     return f"git -c 'alias.{PLUGIN_ALIAS}=!{_PLUGIN_MISSING}; sh' {PLUGIN_ALIAS} \"{launcher}\""
 
 
+#: The same refusal for a client whose Windows hook runner is cmd.exe passing `"` on as `\"` (store data
+#: `windows_hook_command: quote_free`): no quote or space anywhere, words split by `${IFS}` in git's sh, and
+#: every cmd.exe operator caret-escaped (cmd.exe strips the caret). `$1` is unquoted: the caller refuses a
+#: launcher path holding whitespace, glob or cmd.exe metacharacters (hook_dir.resolve_root).
+_QUOTE_FREE_MISSING = (
+    "test -f $1||(echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing.>&2;exit 2)&&sh"
+)
+
+#: cmd.exe operators the quote-free alias carries, each written `^<char>`.
+CMD_OPERATORS = "|&<>()"
+
+
+def cmd_escape(text: str) -> str:
+    """`text` as one cmd.exe word: every space as `${IFS}` (git's sh splits there) and every operator caret-escaped."""
+    text = text.replace(" ", "${IFS}")
+    for char in CMD_OPERATORS:
+        text = text.replace(char, f"^{char}")
+    return text
+
+
+def plugin_interpreter_quote_free(launcher: str) -> str:
+    """`plugin_interpreter` with no quote and no space in any argument: `launcher` must hold neither."""
+    return f"git -c alias.{PLUGIN_ALIAS}=!{cmd_escape(_QUOTE_FREE_MISSING)} {PLUGIN_ALIAS} {launcher}"
+
+
 def launcher_text() -> str:
     """The launcher script, with this chock's minimum Python filled in."""
     return _TEMPLATE.replace("__MIN_PYTHON_TEXT__", ".".join(map(str, MIN_PYTHON))).replace(
