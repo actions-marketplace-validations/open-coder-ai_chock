@@ -248,10 +248,17 @@ def event_keys_agree(raw):
         return False
     return snake == pascal or (snake.islower() and snake.replace("_", "") == pascal.lower())
 
+def event_keys_are_twins(raw):
+    """True when hookEventName is hook_event_name's snake_case twin, never the same text: Grok Build
+    writes both for every event (grok-build crates/codegen/xai-grok-hooks/src/event.rs, to_hook_json)."""
+    snake = raw.get("hookEventName") if isinstance(raw, dict) else None
+    return event_keys_agree(raw) and snake != raw.get("hook_event_name")
+
 PROBES = {
     "looks_like_claude_code": looks_like_claude_code,
     "names_a_single_underscore_mcp_tool": names_a_single_underscore_mcp_tool,
     "event_keys_agree": event_keys_agree,
+    "event_keys_are_twins": event_keys_are_twins,
 }
 
 UNREADABLE_NAME = ""
@@ -302,9 +309,16 @@ def _accepted_by_markers(c, raw, name):
         for event_name, required in c.get("accept_when_all", {}).items()
     )
 
+def _accepts_any_name(c, raw, name):
+    """An unmapped name is claimed once the payload self-identifies: always, or when a named probe says so."""
+    if not isinstance(name, str):
+        return False
+    probe = c.get("accept_any_name_when")
+    return bool(c.get("accept_any_name")) or (probe is not None and PROBES[probe](raw))
+
 def _disqualified(cfg, c, raw, name):
     """Every reason an entry declines a payload once its wire event name is known."""
-    if name not in cfg["events"] and not (c.get("accept_any_name") and isinstance(name, str)):
+    if name not in cfg["events"] and not _accepts_any_name(c, raw, name):
         return True
     if "client_types" in c and raw.get("client_type") not in c["client_types"]:
         return True
@@ -427,6 +441,8 @@ _ESCALATE_FROM_TRANSFORM = "escalate_from_transform"
 
 _TRANSFORM_MISSING_INPUT = "transform_missing_input"
 
+_TOP_LEVEL_INPUT_KEY = {"top_level_updated_input": "updatedInput", "top_level_overwrite": "overwrite"}
+
 def hj_reverse(cfg):
     """Canonical event -> wire name: the naive inverse, then the entry's pinned overrides.
 
@@ -510,12 +526,16 @@ def _g1_allow(v, decision, wire, name, words):
 
 def _g1_transform(v, decision, name, words):
     """None when the transform isn't representable here; `_g1` falls through to the block path."""
-    if v.get("transform_grammar") == "hook_specific_tool_input":
+    missing_blocks = decision.updated_input is None and _TRANSFORM_MISSING_INPUT in v.get("degrade_notes", {})
+    if v.get("transform_grammar") == "hook_specific_tool_input" and not missing_blocks:
         return _json.dumps({"hookSpecificOutput": {"tool_input": decision.updated_input}}), 0
     if decision.updated_input is None:
         return None
-    if v.get("transform_grammar") == "top_level_updated_input":
-        out = {"decision": words.get("transform", "allow"), "updatedInput": decision.updated_input}
+    if v.get("transform_grammar") == "hook_output_snake_tool_input":
+        return _json.dumps({"hook_specific_output": {"tool_input": decision.updated_input}}), 0
+    if v.get("transform_grammar") in _TOP_LEVEL_INPUT_KEY:
+        key = _TOP_LEVEL_INPUT_KEY[v["transform_grammar"]]
+        out = {"decision": words.get("transform", "allow"), key: decision.updated_input}
         if decision.reason:
             out["reason"] = decision.reason
         return _json.dumps(out), 0
@@ -609,6 +629,18 @@ def _flat_list_wrapper(hook_entry, reverse, canonical_events, command, matcher):
             rules.append(_flat_list_rule(hook_entry, ev, name, command, matcher))
     return rules
 
+def _flag_fail_closed(hook_entry, reverse, rules):
+    """Set the entry's opt-in fail-closed flag on the rules at its `fail_closed_rule` events."""
+    opt_in = hook_entry.get("fail_closed_rule")
+    if not opt_in:
+        return rules
+    event_key = hook_entry.get("rule_keys", {}).get("event", "event")
+    wires = {reverse[ev] for ev in opt_in["events"] if ev in reverse}
+    for rule in rules:
+        if rule[event_key] in wires:
+            rule[opt_in["key"]] = True
+    return rules
+
 def _cursor_wrapper(cfg, reverse, canonical_events, command, *, fail_closed):
     gates = cfg["verdicts"]["answer_events"]
     allow_silent = cfg["verdicts"].get("allow_silent_events", ())
@@ -646,27 +678,38 @@ def _default_wrapper(cfg, reverse, canonical_events, command, matcher):
         name = reverse.get(ev)
         if not name:
             continue
-        entry = {"hooks": [_hook_dict(cfg, command)]}
-        if matcher and hook_entry["matcher"] and ev in _MATCHER_EVENTS:
-            entry["matcher"] = matcher
-        hooks.setdefault(name, []).append(entry)
+        for wire in (name, hook_entry.get("also_wires", {}).get(ev)):
+            if not wire:
+                continue
+            if wire in hook_entry.get("flat_events", ()):
+                hooks.setdefault(wire, []).append(_hook_dict(cfg, command))
+                continue
+            entry = {"hooks": [_hook_dict(cfg, command)]}
+            wire_matcher = matcher or hook_entry.get("default_match")
+            if wire_matcher and hook_entry["matcher"] and ev in _MATCHER_EVENTS:
+                entry["matcher"] = wire_matcher
+            hooks.setdefault(wire, []).append(entry)
     if hook_entry.get("group"):
         return {hook_entry["group"]: hooks}
     return hooks if hook_entry.get("bare") else {"hooks": hooks}
 
-def hook_entry_config(cfg, canonical_events, command, matcher=None, *, fail_closed=True):
+def hook_entry_config(cfg, canonical_events, command, matcher=None, *, fail_closed=None):
     """The vendor's hooks-config fragment wiring `command` for these canonical events.
 
-    `fail_closed` is read only by the `cursor` wrapper, whose gates fail open unless the
-    entry says otherwise; a False installs an observer, not a gate.
+    `fail_closed` is read by the `cursor` wrapper, whose gates fail open unless the entry
+    says otherwise (None means True there; a False installs an observer, not a gate), and
+    by a `flat_list` entry's `fail_closed_rule`, which None leaves off: an opt-in.
     """
     hook_entry = cfg["hook_entry"]
     reverse = hj_reverse(cfg)
     wrapper = hook_entry["wrapper"]
     if wrapper == "flat_list":
-        return _flat_list_wrapper(hook_entry, reverse, canonical_events, command, matcher)
+        rules = _flat_list_wrapper(hook_entry, reverse, canonical_events, command, matcher)
+        return _flag_fail_closed(hook_entry, reverse, rules) if fail_closed else rules
     if wrapper == "cursor":
-        return _cursor_wrapper(cfg, reverse, canonical_events, command, fail_closed=fail_closed)
+        return _cursor_wrapper(
+            cfg, reverse, canonical_events, command, fail_closed=True if fail_closed is None else fail_closed
+        )
     if wrapper == "flat_entries":
         return _flat_entries_wrapper(hook_entry, reverse, canonical_events, command)
     if wrapper == "hook_dir":
@@ -679,7 +722,7 @@ def hook_entry_config(cfg, canonical_events, command, matcher=None, *, fail_clos
 
 AGENT = "devin"
 
-VENDOR = {'agent': 'devin', 'claims': {'accept_markers': ('prompt_id',), 'accept_names': ('PostCompaction',), 'event_key': ('hook_event_name',), 'mode': 'marker', 'notes': 'accept_names are names Claude Code never sends, claimed before any marker check -- except against a client_type that names another vendor. PermissionRequest is not one: Claude Code sends it too (code.claude.com/docs/en/hooks), so it takes the marker path; prompt_id is required alongside looks_like_claude_code(raw) being false.', 'reject_client_types': ('kimi_code_cli',), 'reject_probes': ('looks_like_claude_code',)}, 'config_format': 'json', 'config_path': '.devin/hooks.v1.json', 'display': 'Devin', 'events': {'PermissionRequest': 'pre_tool', 'PostToolUse': 'post_tool', 'PreToolUse': 'pre_tool', 'SessionEnd': 'session_end', 'SessionStart': 'session_start', 'Stop': 'stop', 'UserPromptSubmit': 'prompt_submit'}, 'evidence': {'claims': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_examples.py::test_each_payload_is_claimed_by_its_own_adapter'}, 'config_path': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_vendor_config.py::test_config_path_agrees_with_matrix'}, 'events': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_examples.py::test_each_payload_parses_to_the_event_it_is_filed_under'}, 'family': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_golden_fixtures.py::test_wire_output_matches_the_frozen_fixture'}, 'fields': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_vendor_config.py::test_entries_match_recount'}, 'hook_entry': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_golden_fixtures.py::test_hook_config_matches_the_frozen_fixture_on_both_matcher_paths'}, 'tools': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_vendor_config.py::test_entries_match_recount'}, 'verdicts': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_golden_fixtures.py::test_wire_output_matches_the_frozen_fixture'}}, 'family': 'hook_json', 'fields': {'command': ('tool_input.command',), 'content': ('tool_input.content', 'tool_input.new_string'), 'cwd': ('cwd',), 'output': ('tool_output',), 'path': ('tool_input.file_path', 'tool_input.path'), 'prompt': ('prompt',), 'session_id': ('session_id',), 'tool': ('tool_name',)}, 'hook_entry': {'bare': True, 'matcher': True, 'wrapper': 'hooks_map'}, 'needs_trust': False, 'tools': {}, 'verdicts': {'answer_events': ('PermissionRequest', 'PreToolUse', 'Stop', 'UserPromptSubmit'), 'bare_allow': 'unverified', 'context_events': ('PostToolUse', 'SessionStart', 'UserPromptSubmit'), 'context_source': 'reason', 'default_wire_event': 'PreToolUse', 'degrade_notes': {'escalate': 'Devin cannot prompt for confirmation, so this is a block', 'escalate_from_transform': '%s (Devin cannot modify the input at %s, so this is a block)'}, 'echo': 'payload', 'gates': {'PermissionRequest': {'grammar': 'G1', 'honours_escalate': False, 'honours_transform': False}, 'PreToolUse': {'grammar': 'G1', 'honours_escalate': False, 'honours_transform': True}, 'Stop': {'grammar': 'G1', 'honours_escalate': False, 'honours_transform': False}, 'UserPromptSubmit': {'grammar': 'G1', 'honours_escalate': False, 'honours_transform': False}}, 'note_style': 'suffix', 'reason_defaults': {'transform': 'input requires modification'}, 'transform_grammar': 'hook_specific_updated_input', 'vocabulary': ('approve', 'block'), 'vocabulary_basis': 'verified', 'words': {'allow': 'approve', 'block': 'block'}}, 'wire_events': {'pre_tool': 'PreToolUse'}}
+VENDOR = {'agent': 'devin', 'claims': {'accept_markers': ('prompt_id',), 'accept_names': ('PostCompaction',), 'event_key': ('hook_event_name',), 'mode': 'marker', 'notes': 'accept_names are names Claude Code never sends, claimed before any marker check -- except against a client_type that names another vendor. PermissionRequest is not one: Claude Code sends it too (code.claude.com/docs/en/hooks), so it takes the marker path; prompt_id is required alongside looks_like_claude_code(raw) being false.', 'reject_client_types': ('kimi_code_cli',), 'reject_probes': ('looks_like_claude_code',)}, 'config_format': 'json', 'config_path': '.devin/hooks.v1.json', 'display': 'Devin', 'events': {'PermissionRequest': 'pre_tool', 'PostToolUse': 'post_tool', 'PreToolUse': 'pre_tool', 'SessionEnd': 'session_end', 'SessionStart': 'session_start', 'Stop': 'stop', 'UserPromptSubmit': 'prompt_submit'}, 'evidence': {'claims': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_examples.py::test_each_payload_is_claimed_by_its_own_adapter'}, 'config_path': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_vendor_config.py::test_config_path_agrees_with_matrix'}, 'events': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_examples.py::test_each_payload_parses_to_the_event_it_is_filed_under'}, 'family': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_golden_fixtures.py::test_wire_output_matches_the_frozen_fixture'}, 'fields': {'basis': 'vendor-docs', 'date': '2026-10-13', 'test': 'tests/test_adapter_devin.py::test_post_tool_output_is_read_from_the_documented_tool_response'}, 'hook_entry': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_golden_fixtures.py::test_hook_config_matches_the_frozen_fixture_on_both_matcher_paths'}, 'tools': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_vendor_config.py::test_entries_match_recount'}, 'verdicts': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_golden_fixtures.py::test_wire_output_matches_the_frozen_fixture'}}, 'family': 'hook_json', 'fields': {'command': ('tool_input.command',), 'content': ('tool_input.content', 'tool_input.new_string'), 'cwd': ('cwd',), 'output': ('tool_response.error', 'tool_response.output'), 'path': ('tool_input.file_path', 'tool_input.path'), 'prompt': ('prompt',), 'session_id': ('session_id',), 'tool': ('tool_name',)}, 'hook_entry': {'bare': True, 'matcher': True, 'wrapper': 'hooks_map'}, 'needs_trust': False, 'tools': {}, 'verdicts': {'answer_events': ('PermissionRequest', 'PreToolUse', 'Stop', 'UserPromptSubmit'), 'bare_allow': 'unverified', 'context_events': ('PostToolUse', 'SessionStart', 'UserPromptSubmit'), 'context_source': 'reason', 'default_wire_event': 'PreToolUse', 'degrade_notes': {'escalate': 'Devin cannot prompt for confirmation, so this is a block', 'escalate_from_transform': '%s (Devin cannot modify the input at %s, so this is a block)'}, 'echo': 'payload', 'gates': {'PermissionRequest': {'grammar': 'G1', 'honours_escalate': False, 'honours_transform': False}, 'PreToolUse': {'grammar': 'G1', 'honours_escalate': False, 'honours_transform': True}, 'Stop': {'grammar': 'G1', 'honours_escalate': False, 'honours_transform': False}, 'UserPromptSubmit': {'grammar': 'G1', 'honours_escalate': False, 'honours_transform': False}}, 'note_style': 'suffix', 'reason_defaults': {'transform': 'input requires modification'}, 'transform_grammar': 'hook_specific_updated_input', 'vocabulary': ('approve', 'block'), 'vocabulary_basis': 'verified', 'words': {'allow': 'approve', 'block': 'block'}}, 'wire_events': {'pre_tool': 'PreToolUse'}}
 
 
 def claims(raw):

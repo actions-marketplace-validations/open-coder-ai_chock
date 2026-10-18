@@ -10,6 +10,7 @@ from agentseam import recordings
 from runtime_support import write_runtime
 
 import chock
+from chock import vendors
 from chock.doctor import checks, cli
 from chock.doctor.targets import Target, plugin_targets, sync_targets
 from chock.gate import runtime_bundle
@@ -38,7 +39,7 @@ def _sync_repo(tmp_path: Path, agent: str = AGENT) -> Path:
     (repo / ".chock" / "bin").mkdir(parents=True)
     write_runtime(repo / ".chock" / "bin" / f"{agent}.py", agent)
     (repo / launch.LAUNCHER_REL).write_text(launch.launcher_text(), encoding="utf-8")
-    config = repo / {"claude_code": ".claude/settings.json", "windsurf": ".windsurf/hooks.json"}[agent]
+    config = repo / {"claude_code": ".claude/settings.json", "windsurf": vendors.config_path("windsurf")}[agent]
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text(json.dumps({"hooks": {"X": [{"command": f".chock/bin/{agent}.py"}]}}), encoding="utf-8")
     return repo

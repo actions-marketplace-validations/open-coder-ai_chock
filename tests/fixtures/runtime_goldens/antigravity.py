@@ -341,6 +341,8 @@ _ESCALATE_FROM_TRANSFORM = "escalate_from_transform"
 
 _TRANSFORM_MISSING_INPUT = "transform_missing_input"
 
+_TOP_LEVEL_INPUT_KEY = {"top_level_updated_input": "updatedInput", "top_level_overwrite": "overwrite"}
+
 def hj_reverse(cfg):
     """Canonical event -> wire name: the naive inverse, then the entry's pinned overrides.
 
@@ -424,12 +426,16 @@ def _g1_allow(v, decision, wire, name, words):
 
 def _g1_transform(v, decision, name, words):
     """None when the transform isn't representable here; `_g1` falls through to the block path."""
-    if v.get("transform_grammar") == "hook_specific_tool_input":
+    missing_blocks = decision.updated_input is None and _TRANSFORM_MISSING_INPUT in v.get("degrade_notes", {})
+    if v.get("transform_grammar") == "hook_specific_tool_input" and not missing_blocks:
         return _json.dumps({"hookSpecificOutput": {"tool_input": decision.updated_input}}), 0
     if decision.updated_input is None:
         return None
-    if v.get("transform_grammar") == "top_level_updated_input":
-        out = {"decision": words.get("transform", "allow"), "updatedInput": decision.updated_input}
+    if v.get("transform_grammar") == "hook_output_snake_tool_input":
+        return _json.dumps({"hook_specific_output": {"tool_input": decision.updated_input}}), 0
+    if v.get("transform_grammar") in _TOP_LEVEL_INPUT_KEY:
+        key = _TOP_LEVEL_INPUT_KEY[v["transform_grammar"]]
+        out = {"decision": words.get("transform", "allow"), key: decision.updated_input}
         if decision.reason:
             out["reason"] = decision.reason
         return _json.dumps(out), 0
@@ -523,6 +529,18 @@ def _flat_list_wrapper(hook_entry, reverse, canonical_events, command, matcher):
             rules.append(_flat_list_rule(hook_entry, ev, name, command, matcher))
     return rules
 
+def _flag_fail_closed(hook_entry, reverse, rules):
+    """Set the entry's opt-in fail-closed flag on the rules at its `fail_closed_rule` events."""
+    opt_in = hook_entry.get("fail_closed_rule")
+    if not opt_in:
+        return rules
+    event_key = hook_entry.get("rule_keys", {}).get("event", "event")
+    wires = {reverse[ev] for ev in opt_in["events"] if ev in reverse}
+    for rule in rules:
+        if rule[event_key] in wires:
+            rule[opt_in["key"]] = True
+    return rules
+
 def _cursor_wrapper(cfg, reverse, canonical_events, command, *, fail_closed):
     gates = cfg["verdicts"]["answer_events"]
     allow_silent = cfg["verdicts"].get("allow_silent_events", ())
@@ -560,27 +578,38 @@ def _default_wrapper(cfg, reverse, canonical_events, command, matcher):
         name = reverse.get(ev)
         if not name:
             continue
-        entry = {"hooks": [_hook_dict(cfg, command)]}
-        if matcher and hook_entry["matcher"] and ev in _MATCHER_EVENTS:
-            entry["matcher"] = matcher
-        hooks.setdefault(name, []).append(entry)
+        for wire in (name, hook_entry.get("also_wires", {}).get(ev)):
+            if not wire:
+                continue
+            if wire in hook_entry.get("flat_events", ()):
+                hooks.setdefault(wire, []).append(_hook_dict(cfg, command))
+                continue
+            entry = {"hooks": [_hook_dict(cfg, command)]}
+            wire_matcher = matcher or hook_entry.get("default_match")
+            if wire_matcher and hook_entry["matcher"] and ev in _MATCHER_EVENTS:
+                entry["matcher"] = wire_matcher
+            hooks.setdefault(wire, []).append(entry)
     if hook_entry.get("group"):
         return {hook_entry["group"]: hooks}
     return hooks if hook_entry.get("bare") else {"hooks": hooks}
 
-def hook_entry_config(cfg, canonical_events, command, matcher=None, *, fail_closed=True):
+def hook_entry_config(cfg, canonical_events, command, matcher=None, *, fail_closed=None):
     """The vendor's hooks-config fragment wiring `command` for these canonical events.
 
-    `fail_closed` is read only by the `cursor` wrapper, whose gates fail open unless the
-    entry says otherwise; a False installs an observer, not a gate.
+    `fail_closed` is read by the `cursor` wrapper, whose gates fail open unless the entry
+    says otherwise (None means True there; a False installs an observer, not a gate), and
+    by a `flat_list` entry's `fail_closed_rule`, which None leaves off: an opt-in.
     """
     hook_entry = cfg["hook_entry"]
     reverse = hj_reverse(cfg)
     wrapper = hook_entry["wrapper"]
     if wrapper == "flat_list":
-        return _flat_list_wrapper(hook_entry, reverse, canonical_events, command, matcher)
+        rules = _flat_list_wrapper(hook_entry, reverse, canonical_events, command, matcher)
+        return _flag_fail_closed(hook_entry, reverse, rules) if fail_closed else rules
     if wrapper == "cursor":
-        return _cursor_wrapper(cfg, reverse, canonical_events, command, fail_closed=fail_closed)
+        return _cursor_wrapper(
+            cfg, reverse, canonical_events, command, fail_closed=True if fail_closed is None else fail_closed
+        )
     if wrapper == "flat_entries":
         return _flat_entries_wrapper(hook_entry, reverse, canonical_events, command)
     if wrapper == "hook_dir":
@@ -615,7 +644,7 @@ def antigravity_respond(cfg, decision, event):
 
 AGENT = "antigravity"
 
-VENDOR = {'agent': 'antigravity', 'claims': {'mode': 'shape_inferred'}, 'config_format': 'json', 'config_path': '.agents/hooks.json', 'display': 'Antigravity', 'events': {}, 'evidence': {'claims': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_examples.py::test_each_payload_is_claimed_by_its_own_adapter'}, 'config_path': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_vendor_config.py::test_config_path_agrees_with_matrix'}, 'events': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_examples.py::test_each_payload_parses_to_the_event_it_is_filed_under'}, 'family': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_golden_fixtures.py::test_wire_output_matches_the_frozen_fixture'}, 'fields': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_vendor_config.py::test_entries_match_recount'}, 'hook_entry': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_golden_fixtures.py::test_hook_config_matches_the_frozen_fixture_on_both_matcher_paths'}, 'tools': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_vendor_config.py::test_entries_match_recount'}, 'verdicts': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_golden_fixtures.py::test_wire_output_matches_the_frozen_fixture'}}, 'family': 'antigravity', 'fields': {'command': ('toolCall.args.CommandLine',), 'content': ('toolCall.args.CodeContent', 'toolCall.args.ReplacementContent', 'toolCall.args.ReplacementChunks[].ReplacementContent'), 'cwd': ('toolCall.args.Cwd', 'workspacePaths[0]'), 'output': ('error',), 'path': ('toolCall.args.TargetFile', 'toolCall.args.AbsolutePath'), 'session_id': ('conversationId',), 'stringify': ('tool_use_id',), 'tool': ('toolCall.name',), 'tool_use_id': ('stepIdx',)}, 'hook_entry': {'group': 'agentseam', 'matcher': True, 'wrapper': 'hooks_map'}, 'needs_trust': False, 'tools': {}, 'verdicts': {'answer_events': ('PreToolUse', 'Stop'), 'bare_allow': 'unverified', 'default_wire_event': 'PreToolUse', 'degrade_notes': {'escalate': 'Antigravity cannot prompt at Stop', 'escalate_from_transform': 'Antigravity cannot modify a tool call', 'transform': 'Antigravity cannot modify a tool call'}, 'empty_object_events': ('PostToolUse',), 'gate_reason_defaults': {'Stop': 'policy requires more work'}, 'gates': {'PreToolUse': {'grammar': 'G1', 'honours_escalate': True, 'honours_transform': False}, 'Stop': {'grammar': 'G1', 'honours_escalate': False, 'honours_transform': False}}, 'note_style': 'because', 'reason_defaults': {'escalate': 'confirmation required'}, 'vocabulary': ('allow', 'ask', 'continue', 'deny', 'deny_unless_prior_grant', 'force_ask', 'stop'), 'vocabulary_basis': 'verified', 'words': {'allow': 'allow', 'block': 'deny', 'escalate': 'ask'}, 'words_at': {'Stop': {'allow': 'stop', 'block': 'continue'}}}, 'wire_events': {'post_tool': 'PostToolUse', 'pre_tool': 'PreToolUse', 'stop': 'Stop'}}
+VENDOR = {'agent': 'antigravity', 'claims': {'mode': 'shape_inferred'}, 'config_format': 'json', 'config_path': '.agents/hooks.json', 'display': 'Antigravity', 'events': {}, 'evidence': {'claims': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_examples.py::test_each_payload_is_claimed_by_its_own_adapter'}, 'config_path': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_vendor_config.py::test_config_path_agrees_with_matrix'}, 'events': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_examples.py::test_each_payload_parses_to_the_event_it_is_filed_under'}, 'family': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_golden_fixtures.py::test_wire_output_matches_the_frozen_fixture'}, 'fields': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_vendor_config.py::test_entries_match_recount'}, 'hook_entry': {'basis': 'vendor-docs', 'date': '2026-10-17', 'test': 'tests/test_adapter_antigravity.py::test_hook_config_lists_stop_handlers_bare_as_documented'}, 'tools': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_vendor_config.py::test_entries_match_recount'}, 'verdicts': {'basis': 'vendor-docs', 'date': '2026-08-26', 'test': 'tests/test_golden_fixtures.py::test_wire_output_matches_the_frozen_fixture'}}, 'family': 'antigravity', 'fields': {'command': ('toolCall.args.CommandLine',), 'content': ('toolCall.args.CodeContent', 'toolCall.args.ReplacementContent', 'toolCall.args.ReplacementChunks[].ReplacementContent'), 'cwd': ('toolCall.args.Cwd', 'workspacePaths[0]'), 'output': ('error',), 'path': ('toolCall.args.TargetFile', 'toolCall.args.AbsolutePath'), 'session_id': ('conversationId',), 'stringify': ('tool_use_id',), 'tool': ('toolCall.name',), 'tool_use_id': ('stepIdx',)}, 'hook_entry': {'default_match': '*', 'flat_events': ('Stop',), 'group': 'agentseam', 'matcher': True, 'wrapper': 'hooks_map'}, 'needs_trust': False, 'tools': {}, 'verdicts': {'answer_events': ('PreToolUse', 'Stop'), 'bare_allow': 'unverified', 'default_wire_event': 'PreToolUse', 'degrade_notes': {'escalate': 'Antigravity cannot prompt at Stop', 'escalate_from_transform': 'Antigravity can modify tool arguments only at PreToolUse', 'transform': 'Antigravity can modify tool arguments only at PreToolUse', 'transform_missing_input': 'no replacement arguments were supplied'}, 'empty_object_events': ('PostToolUse',), 'gate_reason_defaults': {'Stop': 'policy requires more work'}, 'gates': {'PreToolUse': {'grammar': 'G1', 'honours_escalate': True, 'honours_transform': True}, 'Stop': {'grammar': 'G1', 'honours_escalate': False, 'honours_transform': False}}, 'note_style': 'because', 'reason_defaults': {'escalate': 'confirmation required'}, 'transform_grammar': 'top_level_overwrite', 'vocabulary': ('allow', 'ask', 'auto_approve', 'continue', 'deny', 'deny_unless_prior_grant', 'force_ask', 'stop'), 'vocabulary_basis': 'verified', 'words': {'allow': 'allow', 'block': 'deny', 'escalate': 'ask', 'transform': 'allow'}, 'words_at': {'Stop': {'allow': 'stop', 'block': 'continue'}}}, 'wire_events': {'post_tool': 'PostToolUse', 'pre_tool': 'PreToolUse', 'stop': 'Stop'}}
 
 
 def claims(raw):
@@ -639,7 +668,7 @@ def hook_config(canonical_events, command, matcher=None):
 
 _VOUCH_SPEAKS = False
 _WARN_SPEAKS = False
-_TRANSFORM_EVENTS = frozenset(())
+_TRANSFORM_EVENTS = frozenset(('pre_tool',))
 
 
 def degrade(decision, event):

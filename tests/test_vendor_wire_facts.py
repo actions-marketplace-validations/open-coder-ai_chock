@@ -122,7 +122,8 @@ def test_cursor_fail_closed_is_set_only_where_a_gate_must_refuse() -> None:
     (entry,) = rendered["hooks"]["preToolUse"]
     assert entry.get("failClosed") is True
     assert ours.get("failClosed") is True
-    rendered = adapters.get("cursor").hook_config(("pre_tool",), "CMD", fail_closed=None)
+    # agentseam 0ae9980: None now means on for cursor; False is its observer (not a gate) form.
+    rendered = adapters.get("cursor").hook_config(("pre_tool",), "CMD", fail_closed=False)
     (entry,) = rendered["hooks"]["preToolUse"]
     assert "failClosed" not in entry
 

@@ -265,9 +265,16 @@ def _accepted_by_markers(c, raw, name):
         for event_name, required in c.get("accept_when_all", {}).items()
     )
 
+def _accepts_any_name(c, raw, name):
+    """An unmapped name is claimed once the payload self-identifies: always, or when a named probe says so."""
+    if not isinstance(name, str):
+        return False
+    probe = c.get("accept_any_name_when")
+    return bool(c.get("accept_any_name")) or (probe is not None and PROBES[probe](raw))
+
 def _disqualified(cfg, c, raw, name):
     """Every reason an entry declines a payload once its wire event name is known."""
-    if name not in cfg["events"] and not (c.get("accept_any_name") and isinstance(name, str)):
+    if name not in cfg["events"] and not _accepts_any_name(c, raw, name):
         return True
     if "client_types" in c and raw.get("client_type") not in c["client_types"]:
         return True
@@ -390,6 +397,8 @@ _ESCALATE_FROM_TRANSFORM = "escalate_from_transform"
 
 _TRANSFORM_MISSING_INPUT = "transform_missing_input"
 
+_TOP_LEVEL_INPUT_KEY = {"top_level_updated_input": "updatedInput", "top_level_overwrite": "overwrite"}
+
 def hj_reverse(cfg):
     """Canonical event -> wire name: the naive inverse, then the entry's pinned overrides.
 
@@ -473,12 +482,16 @@ def _g1_allow(v, decision, wire, name, words):
 
 def _g1_transform(v, decision, name, words):
     """None when the transform isn't representable here; `_g1` falls through to the block path."""
-    if v.get("transform_grammar") == "hook_specific_tool_input":
+    missing_blocks = decision.updated_input is None and _TRANSFORM_MISSING_INPUT in v.get("degrade_notes", {})
+    if v.get("transform_grammar") == "hook_specific_tool_input" and not missing_blocks:
         return _json.dumps({"hookSpecificOutput": {"tool_input": decision.updated_input}}), 0
     if decision.updated_input is None:
         return None
-    if v.get("transform_grammar") == "top_level_updated_input":
-        out = {"decision": words.get("transform", "allow"), "updatedInput": decision.updated_input}
+    if v.get("transform_grammar") == "hook_output_snake_tool_input":
+        return _json.dumps({"hook_specific_output": {"tool_input": decision.updated_input}}), 0
+    if v.get("transform_grammar") in _TOP_LEVEL_INPUT_KEY:
+        key = _TOP_LEVEL_INPUT_KEY[v["transform_grammar"]]
+        out = {"decision": words.get("transform", "allow"), key: decision.updated_input}
         if decision.reason:
             out["reason"] = decision.reason
         return _json.dumps(out), 0
@@ -603,6 +616,18 @@ def _flat_list_wrapper(hook_entry, reverse, canonical_events, command, matcher):
             rules.append(_flat_list_rule(hook_entry, ev, name, command, matcher))
     return rules
 
+def _flag_fail_closed(hook_entry, reverse, rules):
+    """Set the entry's opt-in fail-closed flag on the rules at its `fail_closed_rule` events."""
+    opt_in = hook_entry.get("fail_closed_rule")
+    if not opt_in:
+        return rules
+    event_key = hook_entry.get("rule_keys", {}).get("event", "event")
+    wires = {reverse[ev] for ev in opt_in["events"] if ev in reverse}
+    for rule in rules:
+        if rule[event_key] in wires:
+            rule[opt_in["key"]] = True
+    return rules
+
 def _cursor_wrapper(cfg, reverse, canonical_events, command, *, fail_closed):
     gates = cfg["verdicts"]["answer_events"]
     allow_silent = cfg["verdicts"].get("allow_silent_events", ())
@@ -640,27 +665,38 @@ def _default_wrapper(cfg, reverse, canonical_events, command, matcher):
         name = reverse.get(ev)
         if not name:
             continue
-        entry = {"hooks": [_hook_dict(cfg, command)]}
-        if matcher and hook_entry["matcher"] and ev in _MATCHER_EVENTS:
-            entry["matcher"] = matcher
-        hooks.setdefault(name, []).append(entry)
+        for wire in (name, hook_entry.get("also_wires", {}).get(ev)):
+            if not wire:
+                continue
+            if wire in hook_entry.get("flat_events", ()):
+                hooks.setdefault(wire, []).append(_hook_dict(cfg, command))
+                continue
+            entry = {"hooks": [_hook_dict(cfg, command)]}
+            wire_matcher = matcher or hook_entry.get("default_match")
+            if wire_matcher and hook_entry["matcher"] and ev in _MATCHER_EVENTS:
+                entry["matcher"] = wire_matcher
+            hooks.setdefault(wire, []).append(entry)
     if hook_entry.get("group"):
         return {hook_entry["group"]: hooks}
     return hooks if hook_entry.get("bare") else {"hooks": hooks}
 
-def hook_entry_config(cfg, canonical_events, command, matcher=None, *, fail_closed=True):
+def hook_entry_config(cfg, canonical_events, command, matcher=None, *, fail_closed=None):
     """The vendor's hooks-config fragment wiring `command` for these canonical events.
 
-    `fail_closed` is read only by the `cursor` wrapper, whose gates fail open unless the
-    entry says otherwise; a False installs an observer, not a gate.
+    `fail_closed` is read by the `cursor` wrapper, whose gates fail open unless the entry
+    says otherwise (None means True there; a False installs an observer, not a gate), and
+    by a `flat_list` entry's `fail_closed_rule`, which None leaves off: an opt-in.
     """
     hook_entry = cfg["hook_entry"]
     reverse = hj_reverse(cfg)
     wrapper = hook_entry["wrapper"]
     if wrapper == "flat_list":
-        return _flat_list_wrapper(hook_entry, reverse, canonical_events, command, matcher)
+        rules = _flat_list_wrapper(hook_entry, reverse, canonical_events, command, matcher)
+        return _flag_fail_closed(hook_entry, reverse, rules) if fail_closed else rules
     if wrapper == "cursor":
-        return _cursor_wrapper(cfg, reverse, canonical_events, command, fail_closed=fail_closed)
+        return _cursor_wrapper(
+            cfg, reverse, canonical_events, command, fail_closed=True if fail_closed is None else fail_closed
+        )
     if wrapper == "flat_entries":
         return _flat_entries_wrapper(hook_entry, reverse, canonical_events, command)
     if wrapper == "hook_dir":
