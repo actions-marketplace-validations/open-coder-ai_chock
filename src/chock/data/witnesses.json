@@ -49,6 +49,13 @@
     "method": "live probe of a chock plugin installed with `grok plugin install --trust` (no hook trust prompt) and enabled under Grok's generated name c--users-<user>--chock-marketplace-grok-chock-witness-481da8d4 (username redacted as <user>), not chock-witness: block-no-verify refused a `git commit --no-verify` shell command before it ran (\"`run_terminal_command` blocked by plugin/c--users-<user>--chock-marketplace-grok-chock-witness-481da8d4/hooks: Blocked by chock policy: block-no-verify\"); pin-github-actions is advisory on Grok and the workflow write landed, as labelled, so no gate refusal is claimed (org-plan witness/results/witness-grok-2026-10-17.md, f52c055)"
   },
   {
+    "agent": "goose",
+    "surface": "plugin-hook",
+    "client": "goose 1.55.0 CLI, Windows 11",
+    "date": "2026-10-18",
+    "method": "live probe of a chock plugin auto-discovered from ~/.agents/plugins/chock-witness, with Git for Windows' sh on PATH (goose runs every hook with `sh -c`; without sh every tool call, a benign `git status` too, was denied with \"the hook command failed to run\", on_failure: block): block-no-verify refused a `git commit --no-verify` shell command before it ran (\"Tool call denied by policy hook `chock-witness`: Blocked by chock policy: block-no-verify\") and pin-github-actions refused a write to .github/workflows/witness.yml at the write (\"Unpinned GitHub Action detected\"); a benign `git status` ran (org-plan witness/results/witness-goose-2026-10-18.md, 6316fd3)"
+  },
+  {
     "agent": "claude_code",
     "surface": "git-hook-env",
     "client": "Claude Code, Bash tool (CLAUDECODE=1, AI_AGENT=claude-code_<version>_agent)",
