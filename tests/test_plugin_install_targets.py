@@ -1,4 +1,4 @@
-"""goose, grok, antigravity, gemini and openhands plugins: the documented layout, each runtime's grammar, a local install."""
+"""goose, grok, antigravity and openhands plugins: the documented layout, each runtime's grammar, a local install."""
 
 from __future__ import annotations
 
@@ -26,20 +26,17 @@ from chock.plugin.bundle_build import CLIENTS, merged_files
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git required")
 
-TARGETS = ("goose", "grok", "antigravity", "gemini", "openhands")
-#: The install client id of each format, where they differ.
-CLIENT_ID = {"gemini": "gemini-cli"}
-INSTALL_CLIENTS = tuple(CLIENT_ID.get(fmt, fmt) for fmt in TARGETS)
+TARGETS = ("goose", "grok", "antigravity", "openhands")
+INSTALL_CLIENTS = TARGETS
 GOLDEN = Path(__file__).parent / "fixtures" / "plugin_targets"
 #: (manifest, hooks file) each vendor page documents (src/chock/plugin/data/stores/<format>.json cites them).
 LAYOUT = {
     "goose": (None, "hooks/hooks.json"),
     "grok": (None, "hooks/hooks.json"),
     "antigravity": ("plugin.json", "hooks.json"),
-    "gemini": ("gemini-extension.json", "hooks/hooks.json"),
     "openhands": (".plugin/plugin.json", "hooks/hooks.json"),
 }
-BINARY = {"grok": "grok", "antigravity": "agy", "gemini-cli": "gemini"}
+BINARY = {"grok": "grok", "antigravity": "agy"}
 
 
 def snapshot(fmt: str, root: Path) -> dict:
@@ -261,7 +258,6 @@ def test_antigravity_install_names_its_final_folder_not_the_staging_one(catalog,
         ("goose", "best-effort, fail mode configurable (agentseam vendor-docs): ", "agentseam/issues/177"),
         ("grok", "best-effort, fail mode open (agentseam vendor-docs): ", "agentseam/issues/188"),
         ("antigravity", "best-effort, fail mode open (agentseam vendor-docs): ", "agentseam/issues/129"),
-        ("gemini-cli", "best-effort, fail mode open (agentseam vendor-source): ", "agentseam/issues/132"),
         ("openhands", "best-effort, fail mode open (agentseam vendor-docs): ", "agentseam/issues/181"),
     ],
 )
@@ -279,6 +275,19 @@ def test_labels_come_from_the_tier_table_and_warnings_link_the_evidence_issue(
     assert ("warning: Untested: chock has not witnessed an install in this client" in out) != witnessed
     assert {"Evidence wanted" in out, evidence in out} == {not witnessed}
     assert kept.get(client, "") in out
+
+
+@pytest.mark.parametrize("extra", [(), ("--client", "gemini-cli")])
+def test_gemini_cli_is_retired_and_install_points_to_antigravity(
+    catalog, tmp_path: Path, home: Path, capsys, extra: tuple
+) -> None:
+    """A selection naming gemini-cli, or the flag, exits non-zero with one line naming the antigravity client."""
+    root, ref = catalog
+    assert _install(tmp_path, root, ref, "goose" if extra else "gemini-cli", *extra) == 1
+    err = capsys.readouterr().err.splitlines()
+    assert len(err) == 1 and "--client antigravity" in err[0], err
+    assert _tree(home) == set()
+    assert "gemini-cli" not in cli.CLIENTS and "gemini" not in CLIENTS and "gemini" not in plugin_cli.FORMATS
 
 
 def test_an_ask_gate_is_labelled_not_enforced_where_the_client_cannot_ask(catalog, tmp_path: Path) -> None:

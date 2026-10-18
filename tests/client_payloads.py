@@ -1,10 +1,10 @@
-"""goose, grok, antigravity, gemini, openhands, kimi and droid payloads, for suites over every plugin client.
+"""goose, grok, antigravity, openhands, kimi and droid payloads, for suites over every plugin client.
 
 Shapes follow agentseam's vendor fields (and each vendor's hooks page): goose names the event under
 `event` and the folder under `working_dir`; grok sends both event keys; antigravity names no event,
-nests the call under `toolCall` and lists `workspacePaths`; gemini sends BeforeTool/AfterAgent under
-`hook_event_name`; openhands names the event under `event_type` and the folder under `working_dir`;
-kimi marks itself by `client_type`; droid sends Claude's keys with its own `permission_mode` values.
+nests the call under `toolCall` and lists `workspacePaths`; openhands names the event under
+`event_type` and the folder under `working_dir`; kimi marks itself by `client_type`; droid sends
+Claude's keys with its own `permission_mode` values.
 """
 
 from __future__ import annotations
@@ -43,10 +43,6 @@ def _named_pre_tool(client: str, repo: Path, tool: str, tool_input: dict[str, An
         )
         call = {"name": "write_to_file" if write else "run_command", "args": args}
         return {"toolCall": call, "stepIdx": 1, "conversationId": "c", "workspacePaths": [str(repo)]}
-    if client == "gemini":
-        args = {"file_path": tool_input["file_path"], "content": tool_input["content"]} if write else tool_input
-        body = {"hook_event_name": "BeforeTool", "session_id": "s", "cwd": str(repo)}
-        return {**body, "tool_name": "write_file" if write else "run_shell_command", "tool_input": args}
     if client == "openhands":
         args = (
             {"command": "create", "path": tool_input["file_path"], "file_text": tool_input["content"]}
@@ -91,9 +87,6 @@ def _named_stop(client: str, repo: Path) -> dict[str, Any] | None:
     if client == "antigravity":
         body = {"executionNum": 1, "terminationReason": "model_stop", "error": "", "fullyIdle": True}
         return {**body, "conversationId": "c", "workspacePaths": [str(repo)]}
-    if client == "gemini":
-        body = {"hook_event_name": "AfterAgent", "session_id": "s", "cwd": str(repo), "prompt": "p"}
-        return {**body, "prompt_response": "done", "stop_hook_active": False}
     if client == "openhands":
         return {"event_type": "Stop", "session_id": "s", "working_dir": str(repo)}
     return None

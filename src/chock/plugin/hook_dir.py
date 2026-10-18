@@ -1,9 +1,9 @@
-"""Hook-folder plugins (goose, grok, antigravity, gemini, openhands, kimi, droid): one builder, the layout from data.
+"""Hook-folder plugins (goose, grok, antigravity, openhands, kimi, droid): one builder, the layout from data.
 
 The hook documents are agentseam's own rendering for the vendor (`vendors.*_hook_config`), so the
 event spelling, matcher, wrapper, hook group and entry extras (goose's `on_failure`) are never
 typed here. The folder layout and the plugin-root token are agentseam's packaging record where it
-has one (gemini_cli), else chock's store data, each with the vendor page it was read from
+has one, else chock's store data, each with the vendor page it was read from
 (data/stores/<store>.json). A layout with `hooks_key` (kimi) ships the hooks document inside
 its manifest: it is built at `hooks` like every other, then folded in when the package is written.
 """

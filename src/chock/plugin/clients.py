@@ -16,7 +16,6 @@ from chock.plugin import (
     cursor,
     devin,
     factory_droid,
-    gemini,
     goose,
     grok,
     kimi_code,
@@ -86,14 +85,6 @@ CLIENTS: dict[str, Client] = {
         "antigravity",
         "antigravity",
         own_layout="antigravity",
-        generic=True,
-    ),
-    "gemini": Client(
-        gemini.gemini_plugin_files,
-        gemini.build_gemini_manifest,
-        gemini.manifest_posture,
-        "gemini_cli",
-        "gemini_cli",
         generic=True,
     ),
     "openhands": Client(
