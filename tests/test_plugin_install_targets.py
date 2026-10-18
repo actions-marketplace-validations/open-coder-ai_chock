@@ -1,4 +1,4 @@
-"""goose, grok, antigravity, gemini and openhands plugins: the documented layout, each runtime's grammar, a local install."""
+"""goose, grok, antigravity and openhands plugins: the documented layout, each runtime's grammar, a local install."""
 
 from __future__ import annotations
 
@@ -26,20 +26,17 @@ from chock.plugin.bundle_build import CLIENTS, merged_files
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git required")
 
-TARGETS = ("goose", "grok", "antigravity", "gemini", "openhands")
-#: The install client id of each format, where they differ.
-CLIENT_ID = {"gemini": "gemini-cli"}
-INSTALL_CLIENTS = tuple(CLIENT_ID.get(fmt, fmt) for fmt in TARGETS)
+TARGETS = ("goose", "grok", "antigravity", "openhands")
+INSTALL_CLIENTS = TARGETS
 GOLDEN = Path(__file__).parent / "fixtures" / "plugin_targets"
 #: (manifest, hooks file) each vendor page documents (src/chock/plugin/data/stores/<format>.json cites them).
 LAYOUT = {
     "goose": (None, "hooks/hooks.json"),
     "grok": (None, "hooks/hooks.json"),
     "antigravity": ("plugin.json", "hooks.json"),
-    "gemini": ("gemini-extension.json", "hooks/hooks.json"),
     "openhands": (".plugin/plugin.json", "hooks/hooks.json"),
 }
-BINARY = {"grok": "grok", "antigravity": "agy", "gemini-cli": "gemini"}
+BINARY = {"grok": "grok", "antigravity": "agy"}
 
 
 def snapshot(fmt: str, root: Path) -> dict:
@@ -261,7 +258,6 @@ def test_antigravity_install_names_its_final_folder_not_the_staging_one(catalog,
         ("goose", "best-effort, fail mode configurable (agentseam vendor-docs): ", "agentseam/issues/177"),
         ("grok", "best-effort, fail mode open (agentseam vendor-docs): ", "agentseam/issues/188"),
         ("antigravity", "best-effort, fail mode open (agentseam vendor-docs): ", "agentseam/issues/129"),
-        ("gemini-cli", "best-effort, fail mode open (agentseam vendor-source): ", "agentseam/issues/132"),
         ("openhands", "best-effort, fail mode open (agentseam vendor-docs): ", "agentseam/issues/181"),
     ],
 )

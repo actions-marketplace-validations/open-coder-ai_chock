@@ -136,20 +136,6 @@
         {"note": "Antigravity 2.0 and the IDE read plugin folders from ~/.gemini/config/plugins/ instead: copy __PLUGIN_DIR__ there. Its hooks name __PLUGIN_DIR__ by absolute path (Antigravity documents no plugin-root variable), so keep that folder where it is; re-run the install command after a rebuild."}
       ]
     },
-    "gemini-cli": {
-      "name": "Gemini CLI",
-      "format": "gemini",
-      "layout": "plugin-dir",
-      "dest": "~/.chock/marketplace/gemini-cli",
-      "binary": "gemini",
-      "index": [],
-      "tier_label": true,
-      "gate_turn_end_only": false,
-      "steps": [
-        {"command": ["gemini", "extensions", "install", "__PLUGIN_DIR__"]},
-        {"note": "Gemini CLI copies the extension and asks you to confirm, because it carries hooks. After a rebuild run `gemini extensions update __PLUGIN__`; or run `gemini extensions link __PLUGIN_DIR__` once instead of install, to load the folder in place. Extension hooks run only while hooksConfig.enabled is true in your settings (the default). Google is sunsetting Gemini CLI for consumer tiers in favor of Antigravity CLI: there, use `chock install --client antigravity`."}
-      ]
-    },
     "openhands": {
       "name": "OpenHands",
       "format": "openhands",

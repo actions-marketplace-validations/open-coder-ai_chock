@@ -20,6 +20,8 @@ from chock.scaffold.pin import PinError, fetch_catalog
 
 #: The client ids, in the order data/install.json lists them.
 CLIENTS = tuple(package.settings()["clients"])
+#: No longer built for: Antigravity CLI replaced Gemini CLI for unpaid users. Accepted only to say so.
+RETIRED = "gemini-cli"
 
 
 def _report(client_id: str, labels: list[package.Label], lines: list[str]) -> None:
@@ -148,7 +150,12 @@ def main(argv: list[str] | None = None) -> int:
         allow_abbrev=False,
     )
     parser.add_argument("--selection", required=True, help="chock.selection.yaml, a URL with #s=..., or the bare code")
-    parser.add_argument("--client", choices=CLIENTS, help="The agent to build for (default: the selection's client)")
+    parser.add_argument(
+        "--client",
+        choices=(*CLIENTS, RETIRED),
+        metavar="{" + ",".join(CLIENTS) + "}",
+        help="The agent to build for (default: the selection's client)",
+    )
     parser.add_argument("--dest", help="Install folder (default: the client's own, e.g. ~/.chock/marketplace/<client>)")
     parser.add_argument("--apply", action="store_true", help="Also run the client's own install commands, if any")
     parser.add_argument(
@@ -170,6 +177,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         chosen = selection.load(args.selection)
         chosen = {**chosen, "client": args.client or chosen["client"]}
+        if chosen["client"] == RETIRED:
+            print(
+                "chock install: gemini-cli is retired, Antigravity CLI replaces it: use --client antigravity",
+                file=sys.stderr,
+            )
+            return 1
         client_id, name = chosen["client"], chosen["bundle"]["name"]
         dest = (Path(args.dest).expanduser() if args.dest else place.default_dest(client_id)).resolve()
         if "catalog" in chosen:
