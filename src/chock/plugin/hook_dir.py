@@ -11,6 +11,7 @@ its manifest: it is built at `hooks` like every other, then folded in when the p
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path, PurePath
@@ -81,11 +82,28 @@ def _ref(spec: Spec, rel: str) -> str:
     return f"{layout(spec.store, spec.agent)['plugin_root'] or ROOT_TOKEN}/{rel}"
 
 
+#: The store-data value naming a Windows hook runner (cmd.exe, `"` passed on as `\"`) no quoting survives.
+QUOTE_FREE = "quote_free"
+
+
+def build_windows() -> bool:
+    """Whether this build runs on Windows, where the package it writes is installed."""
+    return os.name == "nt"
+
+
+def quote_free(store_name: str | None) -> bool:
+    """Whether this build's hook commands carry no quote or space: on Windows, for a store whose data says so."""
+    return build_windows() and store_name is not None and store.windows_hook_command(store_name) == QUOTE_FREE
+
+
 def hook_command(spec: Spec, flag: str, target: str) -> str:
     """One interpreter invocation of the agent's runtime, handed `--guard <script>` or `--gate <gate.json>`."""
     adapter = _ref(spec, SCRIPTS_TEMPLATE.format(name=f"{spec.agent}.py"))
-    launcher = launch.plugin_interpreter(_ref(spec, SCRIPTS_TEMPLATE.format(name=launch.PLUGIN_LAUNCHER)))
-    return f'{launcher} "{adapter}" {flag} "{_ref(spec, SCRIPTS_TEMPLATE.format(name=target))}"'
+    launcher_ref = _ref(spec, SCRIPTS_TEMPLATE.format(name=launch.PLUGIN_LAUNCHER))
+    target_ref = _ref(spec, SCRIPTS_TEMPLATE.format(name=target))
+    if quote_free(spec.store):
+        return f"{launch.plugin_interpreter_quote_free(launcher_ref)} {adapter} {flag} {target_ref}"
+    return f'{launch.plugin_interpreter(launcher_ref)} "{adapter}" {flag} "{target_ref}"'
 
 
 def guard_doc(agent: str, command: str) -> Any:
@@ -158,11 +176,24 @@ def root_path(folder: PurePath) -> str:
     return (path if path.is_absolute() else Path(path).absolute()).as_posix()
 
 
-def resolve_root(files: dict[Path, str], folder: PurePath) -> dict[Path, str]:
+#: What a quote-free command's paths may not hold: whitespace, quotes, cmd.exe metacharacters, and what git's sh
+#: would expand or split in the launcher's unquoted `$1` (`$`, backquote, backslash, glob characters).
+_QUOTE_FREE_UNSAFE = re.compile(r"""[\s"'|&<>^%()$`\\*?\[!]""")
+
+
+def resolve_root(files: dict[Path, str], folder: PurePath, store_name: str | None = None) -> dict[Path, str]:
     """`files` with every `ROOT_TOKEN` naming `folder`; a folder whose path a hook command cannot carry is refused."""
     root = root_path(folder)
+    carried = any(ROOT_TOKEN in content for content in files.values())
+    if carried and quote_free(store_name) and _QUOTE_FREE_UNSAFE.search(root):
+        msg = (
+            f"{root}: this client runs hook commands through cmd.exe on Windows, where no quoting reaches git, so "
+            "the plugin folder's path may not hold spaces or other whitespace, quotes, any of | & < > ^ % ( ) ! $ "
+            "backquote backslash * ? [; choose another --dest"
+        )
+        raise ValueError(msg)
     # A plain space is literal inside the command's double quotes; every other whitespace is refused.
-    if any(ROOT_TOKEN in content for content in files.values()) and re.search(r'[^\S ]|["$`\\]', root):
+    if carried and re.search(r'[^\S ]|["$`\\]', root):
         msg = (
             f"{root}: this client names the plugin folder by absolute path inside a quoted hook command, "
             "so the path may not hold tabs, line breaks or other non-space whitespace, quotes, `$`, backquotes "
@@ -190,7 +221,7 @@ def bind(spec: Spec, out_dir: Path | None = None) -> store.FilesFn:
 
     def files_fn(policy_dir: Path, manifest: dict[str, Any], repo_root: Path) -> dict[Path, str]:
         files = plugin_files(spec, policy_dir, manifest, repo_root)
-        return fold(resolve_root(files, out_dir) if out_dir is not None else files, spec.store)
+        return fold(resolve_root(files, out_dir, spec.store) if out_dir is not None else files, spec.store)
 
     return files_fn
 

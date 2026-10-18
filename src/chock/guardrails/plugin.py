@@ -39,18 +39,26 @@ def protect_manifest() -> dict[str, Any]:
     return yaml.safe_load((protect_dir() / "manifest.yaml").read_text(encoding="utf-8"))
 
 
+def _quote(command: str) -> str:
+    """How `command` quotes its paths: `"`, or nothing in a quote-free command (cmd.exe on Windows, hook_dir.quote_free)."""
+    return '"' if '"' in command else ""
+
+
 def wrap(command: str, agent: str, bundle: str, member: str) -> str:
     """`command` with the toggle wrapper put in front of the client's adapter, so the member checks its own entry first."""
     if not (toggle.NAME_RE.fullmatch(bundle) and toggle.NAME_RE.fullmatch(member)):
         msg = f"bundle {bundle!r} and member {member!r} must match {toggle.NAME_RE.pattern} to sit in a hook command"
         raise WrapError(msg)
     adapter = re.escape(SCRIPTS_TEMPLATE.format(name=f"{agent}.py"))
-    pattern = re.compile(rf'"([^"\s]*){adapter}"(?= --(?:guard|gate) )')
+    q = _quote(command)
+    pattern = re.compile(rf'{q}([^"\s]*){adapter}{q}(?= --(?:guard|gate) )')
     found = pattern.findall(command)
     if len(found) != 1:
         msg = f"hook command for {member} runs the {agent} adapter {len(found)} times, not once: {command!r}"
         raise WrapError(msg)
-    return pattern.sub(lambda m: f'"{m.group(1)}{WRAPPER}" --bundle {bundle} --member {member} {m.group(0)}', command)
+    return pattern.sub(
+        lambda m: f"{q}{m.group(1)}{WRAPPER}{q} --bundle {bundle} --member {member} {m.group(0)}", command
+    )
 
 
 def wrap_doc(doc: Any, agent: str, bundle: str, member: str) -> Any:
@@ -71,10 +79,13 @@ def verify_at_stop(doc: Any, agent: str) -> Any:
     The adapter keeps its `--gate ... --stop` arguments, so an unreadable Stop payload is still refused in its grammar.
     """
     adapter = re.escape(SCRIPTS_TEMPLATE.format(name=f"{agent}.py"))
-    pattern = re.compile(rf'"([^"\s]*)({adapter}" --gate "[^"]*" {re.escape(STOP_FLAG)})$')
 
     def swap(command: str) -> str:
-        return pattern.sub(lambda m: f'"{m.group(1)}{WRAPPER}" {toggle.VERIFY} "{m.group(1)}{m.group(2)}', command)
+        q = _quote(command)
+        pattern = re.compile(rf'{q}([^"\s]*)({adapter}{q} --gate {q}[^"]*{q} {re.escape(STOP_FLAG)})$')
+        return pattern.sub(
+            lambda m: f"{q}{m.group(1)}{WRAPPER}{q} {toggle.VERIFY} {q}{m.group(1)}{m.group(2)}", command
+        )
 
     if isinstance(doc, dict):
         return {

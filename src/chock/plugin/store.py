@@ -61,6 +61,14 @@ def hook_timeout_field(store: str) -> str | None:
     return json.loads(path.read_text(encoding="utf-8")).get("hook_timeout_field")
 
 
+def windows_hook_command(store: str) -> str | None:
+    """The command form `store`'s Windows hook runner needs (`quote_free`), where chock's store data records one; else None."""
+    path = _DATA / f"{store}.json"
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8")).get("windows_hook_command")
+
+
 def _owned_candidates(out_dir: Path, sub: str) -> list[Path]:
     """Files an owned-subtree entry can name: everything under a directory, or itself.
 

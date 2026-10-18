@@ -138,7 +138,7 @@ def stage(
 
     def files_fn(_dir: Path, _manifest: dict[str, Any], root: Path) -> dict[Path, str]:
         merged = bundle_build.merged_files(fmt, record, members, root, aggregate=False)
-        return hook_dir.fold(hook_dir.resolve_root(merged, final), fmt)
+        return hook_dir.fold(hook_dir.resolve_root(merged, final, fmt), fmt)
 
     def build(into: Path) -> None:
         build_store_plugin(fmt, files_fn, Path(record["id"]), {"id": record["id"]}, catalog, into)
