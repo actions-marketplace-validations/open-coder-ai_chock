@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from chock.plugin import gate_package, guard_gate, hook_dir
+from chock.plugin import gate_package, guard_gate, hook_dir, posture
 from chock.plugin.build import PluginNameError, _one_line, plugin_name
 from chock.plugin.claude import POSTURE_ADVISORY
 
@@ -20,8 +20,8 @@ _CAVEAT = (
     "plugin's folder by absolute path: moving the folder stops the hook."
 )
 POSTURE_BESTEFFORT = (
-    "Best-effort in Antigravity by a PreToolUse hook in the plugin's hooks.json (documented by the vendor; "
-    f"not witnessed by chock). {_CAVEAT} {hook_dir.POSTURE_TAIL}"
+    "Best-effort in Antigravity by a PreToolUse hook in the plugin's hooks.json "
+    f"({posture.witness_clause('antigravity')}). {_CAVEAT} {hook_dir.POSTURE_TAIL}"
 )
 POSTURE_GATE = gate_package.gate_posture("antigravity", _CAVEAT)
 
