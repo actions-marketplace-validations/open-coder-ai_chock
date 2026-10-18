@@ -54,7 +54,6 @@ def test_every_client_merges_including_claude(tmp_path: Path) -> None:
         "cursor",
         "devin",
         "droid",
-        "gemini",
         "goose",
         "grok",
         "kimi",

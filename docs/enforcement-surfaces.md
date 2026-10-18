@@ -233,7 +233,7 @@ A guard that fails refuses or asks; it never reports an allow it never establish
 | :--- | :--- | :--- |
 | In-agent (`chock sync`: `.claude/`, `.cursor/`, `.codex/`, `.github/hooks/`, ...) | Claude Code, Codex, Copilot, Cursor, Devin, Antigravity, Gemini CLI, Grok, Tabnine | yes, every hook entry |
 | In-agent | Windsurf | **no key**: its documented hook entry takes `command`, `powershell`, `show_output` and `working_directory` only, so its own default (not documented) applies |
-| Plugin package (`hooks.json`) | Claude Code, Codex, Copilot, Cursor, Devin, goose, Grok, Antigravity, Gemini CLI, OpenHands, Kimi Code, Factory Droid | yes, every hook entry |
+| Plugin package (`hooks.json`) | Claude Code, Codex, Copilot, Cursor, Devin, goose, Grok, Antigravity, OpenHands, Kimi Code, Factory Droid | yes, every hook entry |
 
 | Client | Field | Unit | Written | Client default when the key is absent |
 | :--- | :--- | :--- | :--- | :--- |

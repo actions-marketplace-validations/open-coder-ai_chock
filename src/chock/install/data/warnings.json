@@ -112,30 +112,9 @@
     {
       "kind": "client",
       "clients": [
-        "gemini-cli"
-      ],
-      "says": "Gemini CLI treats a hook that exits with any code other than 0 or 2 as a warning and lets the call through, and Google is sunsetting Gemini CLI for consumer tiers in favor of Antigravity CLI (use the antigravity client there)."
-    },
-    {
-      "kind": "client",
-      "clients": [
         "openhands"
       ],
       "says": "OpenHands documents no plugin-root variable: the hooks name the plugin folder by absolute path, and its hook runner blocks only on exit code 2 or a deny, so any other hook failure lets the call through."
-    },
-    {
-      "kind": "client",
-      "clients": [
-        "gemini-cli"
-      ],
-      "says": "On Windows, the shell Gemini CLI runs hooks with is unmeasured, and `${extensionPath}` carries backslashes; this path is not tested there."
-    },
-    {
-      "kind": "client",
-      "clients": [
-        "gemini-cli"
-      ],
-      "says": "Evidence wanted: what you see Gemini CLI do with this extension, at https://github.com/open-coder-ai/agentseam/issues/132"
     },
     {
       "kind": "client",
@@ -182,7 +161,6 @@
     {
       "kind": "client",
       "clients": [
-        "gemini-cli",
         "openhands",
         "kimi-code",
         "factory-droid"

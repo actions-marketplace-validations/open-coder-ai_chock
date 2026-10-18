@@ -106,7 +106,7 @@ def test_issue_url_falls_back_to_chocks_install_warnings() -> None:
         ("goose", "issues/177"),
         ("grok", "issues/188"),
         ("antigravity", "issues/new?template=evidence-report.yml"),  # witnessed: no Evidence wanted warning
-        ("gemini-cli", "issues/132"),
+        ("gemini", "issues/new?template=evidence-report.yml"),
         ("kimi-code", "issues/135"),
         ("factory-droid", "issues/184"),
         ("openhands", "issues/181"),
