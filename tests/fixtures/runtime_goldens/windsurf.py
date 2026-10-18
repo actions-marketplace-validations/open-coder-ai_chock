@@ -433,6 +433,18 @@ def _flat_list_wrapper(hook_entry, reverse, canonical_events, command, matcher):
             rules.append(_flat_list_rule(hook_entry, ev, name, command, matcher))
     return rules
 
+def _flag_fail_closed(hook_entry, reverse, rules):
+    """Set the entry's opt-in fail-closed flag on the rules at its `fail_closed_rule` events."""
+    opt_in = hook_entry.get("fail_closed_rule")
+    if not opt_in:
+        return rules
+    event_key = hook_entry.get("rule_keys", {}).get("event", "event")
+    wires = {reverse[ev] for ev in opt_in["events"] if ev in reverse}
+    for rule in rules:
+        if rule[event_key] in wires:
+            rule[opt_in["key"]] = True
+    return rules
+
 def _cursor_wrapper(cfg, reverse, canonical_events, command, *, fail_closed):
     gates = cfg["verdicts"]["answer_events"]
     allow_silent = cfg["verdicts"].get("allow_silent_events", ())
@@ -470,27 +482,38 @@ def _default_wrapper(cfg, reverse, canonical_events, command, matcher):
         name = reverse.get(ev)
         if not name:
             continue
-        entry = {"hooks": [_hook_dict(cfg, command)]}
-        if matcher and hook_entry["matcher"] and ev in _MATCHER_EVENTS:
-            entry["matcher"] = matcher
-        hooks.setdefault(name, []).append(entry)
+        for wire in (name, hook_entry.get("also_wires", {}).get(ev)):
+            if not wire:
+                continue
+            if wire in hook_entry.get("flat_events", ()):
+                hooks.setdefault(wire, []).append(_hook_dict(cfg, command))
+                continue
+            entry = {"hooks": [_hook_dict(cfg, command)]}
+            wire_matcher = matcher or hook_entry.get("default_match")
+            if wire_matcher and hook_entry["matcher"] and ev in _MATCHER_EVENTS:
+                entry["matcher"] = wire_matcher
+            hooks.setdefault(wire, []).append(entry)
     if hook_entry.get("group"):
         return {hook_entry["group"]: hooks}
     return hooks if hook_entry.get("bare") else {"hooks": hooks}
 
-def hook_entry_config(cfg, canonical_events, command, matcher=None, *, fail_closed=True):
+def hook_entry_config(cfg, canonical_events, command, matcher=None, *, fail_closed=None):
     """The vendor's hooks-config fragment wiring `command` for these canonical events.
 
-    `fail_closed` is read only by the `cursor` wrapper, whose gates fail open unless the
-    entry says otherwise; a False installs an observer, not a gate.
+    `fail_closed` is read by the `cursor` wrapper, whose gates fail open unless the entry
+    says otherwise (None means True there; a False installs an observer, not a gate), and
+    by a `flat_list` entry's `fail_closed_rule`, which None leaves off: an opt-in.
     """
     hook_entry = cfg["hook_entry"]
     reverse = hj_reverse(cfg)
     wrapper = hook_entry["wrapper"]
     if wrapper == "flat_list":
-        return _flat_list_wrapper(hook_entry, reverse, canonical_events, command, matcher)
+        rules = _flat_list_wrapper(hook_entry, reverse, canonical_events, command, matcher)
+        return _flag_fail_closed(hook_entry, reverse, rules) if fail_closed else rules
     if wrapper == "cursor":
-        return _cursor_wrapper(cfg, reverse, canonical_events, command, fail_closed=fail_closed)
+        return _cursor_wrapper(
+            cfg, reverse, canonical_events, command, fail_closed=True if fail_closed is None else fail_closed
+        )
     if wrapper == "flat_entries":
         return _flat_entries_wrapper(hook_entry, reverse, canonical_events, command)
     if wrapper == "hook_dir":
@@ -503,9 +526,16 @@ def _tool_info(raw):
     info = raw.get("tool_info") if isinstance(raw, dict) else None
     return info if isinstance(info, dict) else {}
 
-def windsurf_wire(raw):
+def _named(cfg, raw):
+    for key in cfg["claims"]["event_key"]:
+        name = wire_name_of(raw, key)
+        if name is not None:
+            return name
+    return None
+
+def windsurf_wire(cfg, raw):
     """The wire event name, inferred from `tool_info` when the payload names none."""
-    name = wire_name_of(raw, "hook_event_name")
+    name = _named(cfg, raw)
     if name is not None or not isinstance(raw, dict):
         return name
     return "pre_run_command" if _tool_info(raw).get("command_line") else "pre_user_prompt"
@@ -513,17 +543,18 @@ def windsurf_wire(raw):
 def windsurf_claims(cfg, raw):
     if not isinstance(raw, dict):
         return False
-    if wire_name_of(raw, "hook_event_name") in cfg["events"]:
+    if _named(cfg, raw) in cfg["events"]:
         return True
     return "trajectory_id" in raw and isinstance(raw.get("tool_info"), dict)
 
 def windsurf_parse(cfg, raw):
-    name = windsurf_wire(raw)
+    name = windsurf_wire(cfg, raw)
     event = hj_parse(cfg, raw, wire=name)
     info = _tool_info(raw)
     if name in _MCP_EVENTS:
-        joined = "%s/%s" % (info["server"], info["tool"]) if info.get("server") and info.get("tool") else None
-        event.tool = joined or info.get("tool")
+        server = info.get("mcp_server_name") or info.get("server")
+        tool = info.get("mcp_tool_name") or info.get("tool")
+        event.tool = "%s/%s" % (server, tool) if server and tool else tool
     else:
         event.tool = name
     return event
@@ -533,7 +564,7 @@ def windsurf_respond(cfg, decision, event):
     v = cfg["verdicts"]
     if decision.outcome not in (DENY, ESCALATE, TRANSFORM):
         return "", 0
-    wire = windsurf_wire(event.raw) if event.raw else ""
+    wire = windsurf_wire(cfg, event.raw) if event.raw else ""
     if wire not in v["gates"]:
         return v["flag_note"] % (wire, decision.reason or v["flag_note_default"]), 0
     return _refusal_text(v, decision, at_gate=False, wire=wire), 2
@@ -544,7 +575,7 @@ def windsurf_respond(cfg, decision, event):
 
 AGENT = "windsurf"
 
-VENDOR = {'agent': 'windsurf', 'claims': {'mode': 'shape_inferred'}, 'config_format': 'json', 'config_path': '.windsurf/hooks.json', 'display': 'Windsurf (Cascade)', 'events': {'post_cascade_response': 'stop', 'post_mcp_tool_use': 'post_tool', 'pre_mcp_tool_use': 'pre_tool', 'pre_run_command': 'pre_tool', 'pre_user_prompt': 'prompt_submit'}, 'evidence': {'claims': {'basis': 'third-party-install', 'date': '2026-08-26', 'test': 'tests/test_examples.py::test_each_payload_is_claimed_by_its_own_adapter'}, 'config_path': {'basis': 'third-party-install', 'date': '2026-08-26', 'test': 'tests/test_vendor_config.py::test_config_path_agrees_with_matrix'}, 'events': {'basis': 'third-party-install', 'date': '2026-08-26', 'test': 'tests/test_examples.py::test_each_payload_parses_to_the_event_it_is_filed_under'}, 'family': {'basis': 'third-party-install', 'date': '2026-08-26', 'test': 'tests/test_golden_fixtures.py::test_wire_output_matches_the_frozen_fixture'}, 'fields': {'basis': 'third-party-install', 'date': '2026-08-26', 'test': 'tests/test_vendor_config.py::test_entries_match_recount'}, 'hook_entry': {'basis': 'third-party-install', 'date': '2026-08-26', 'test': 'tests/test_golden_fixtures.py::test_hook_config_matches_the_frozen_fixture_on_both_matcher_paths'}, 'tools': {'basis': 'third-party-install', 'date': '2026-08-26', 'test': 'tests/test_vendor_config.py::test_entries_match_recount'}, 'verdicts': {'basis': 'third-party-install', 'date': '2026-08-26', 'test': 'tests/test_golden_fixtures.py::test_wire_output_matches_the_frozen_fixture'}}, 'family': 'windsurf', 'fields': {'command': ('tool_info.command_line',), 'cwd': ('cwd',), 'output': ('output', 'result'), 'path': ('path', 'tool_info.path'), 'prompt': ('query', 'prompt'), 'session_id': ('trajectory_id',)}, 'hook_entry': {'also_wires': {'pre_tool': 'pre_mcp_tool_use'}, 'matcher': False, 'wrapper': 'flat_entries'}, 'needs_trust': False, 'tools': {}, 'verdicts': {'answer_events': ('pre_mcp_tool_use', 'pre_run_command', 'pre_user_prompt'), 'bare_allow': 'silent', 'degrade_notes': {'escalate': 'this agent cannot prompt for confirmation; blocking instead', 'escalate_from_transform': 'this agent cannot rewrite tool input; blocking instead', 'transform': 'this agent cannot rewrite tool input; blocking instead'}, 'flag_note': 'windsurf: flagged after the fact (%s cannot block): %s', 'flag_note_default': 'policy violation', 'gates': {'pre_mcp_tool_use': {'grammar': 'G5', 'honours_escalate': False, 'honours_transform': False}, 'pre_run_command': {'grammar': 'G5', 'honours_escalate': False, 'honours_transform': False}, 'pre_user_prompt': {'grammar': 'G5', 'honours_escalate': False, 'honours_transform': False}}, 'note_style': 'suffix', 'reason_defaults': {'escalate': 'confirmation required', 'transform': 'input requires modification'}, 'vocabulary': (), 'vocabulary_basis': 'verified'}, 'wire_events': {'pre_tool': 'pre_run_command'}}
+VENDOR = {'agent': 'windsurf', 'claims': {'event_key': ('agent_action_name', 'hook_event_name'), 'mode': 'shape_inferred'}, 'config_format': 'json', 'config_path': '.devin/hooks.json', 'display': 'Windsurf (Cascade)', 'events': {'post_cascade_response': 'stop', 'post_mcp_tool_use': 'post_tool', 'pre_mcp_tool_use': 'pre_tool', 'pre_run_command': 'pre_tool', 'pre_user_prompt': 'prompt_submit'}, 'evidence': {'claims': {'basis': 'vendor-docs', 'date': '2026-10-13', 'test': 'tests/test_adapter_windsurf.py::test_the_documented_payloads_parse_by_their_named_event'}, 'config_path': {'basis': 'vendor-docs', 'date': '2026-10-13', 'test': 'tests/test_install_legacy.py::test_windsurf_wires_devin_hooks_json_and_cleans_the_legacy_file'}, 'events': {'basis': 'third-party-install', 'date': '2026-08-26', 'test': 'tests/test_examples.py::test_each_payload_parses_to_the_event_it_is_filed_under'}, 'family': {'basis': 'third-party-install', 'date': '2026-08-26', 'test': 'tests/test_golden_fixtures.py::test_wire_output_matches_the_frozen_fixture'}, 'fields': {'basis': 'vendor-docs', 'date': '2026-10-13', 'test': 'tests/test_adapter_windsurf.py::test_the_documented_payloads_parse_by_their_named_event'}, 'hook_entry': {'basis': 'third-party-install', 'date': '2026-08-26', 'test': 'tests/test_golden_fixtures.py::test_hook_config_matches_the_frozen_fixture_on_both_matcher_paths'}, 'legacy_config_paths': {'basis': 'vendor-docs', 'date': '2026-10-13', 'test': 'tests/test_install_legacy.py::test_windsurf_wires_devin_hooks_json_and_cleans_the_legacy_file'}, 'tools': {'basis': 'third-party-install', 'date': '2026-08-26', 'test': 'tests/test_vendor_config.py::test_entries_match_recount'}, 'verdicts': {'basis': 'third-party-install', 'date': '2026-08-26', 'test': 'tests/test_golden_fixtures.py::test_wire_output_matches_the_frozen_fixture'}}, 'family': 'windsurf', 'fields': {'command': ('tool_info.command_line',), 'cwd': ('tool_info.cwd', 'cwd'), 'output': ('tool_info.mcp_result', 'output', 'result'), 'path': ('path', 'tool_info.path'), 'prompt': ('tool_info.user_prompt', 'query', 'prompt'), 'session_id': ('trajectory_id',)}, 'hook_entry': {'also_wires': {'pre_tool': 'pre_mcp_tool_use'}, 'matcher': False, 'wrapper': 'flat_entries'}, 'legacy_config_paths': ('.windsurf/hooks.json',), 'needs_trust': False, 'tools': {}, 'verdicts': {'answer_events': ('pre_mcp_tool_use', 'pre_run_command', 'pre_user_prompt'), 'bare_allow': 'silent', 'degrade_notes': {'escalate': 'this agent cannot prompt for confirmation; blocking instead', 'escalate_from_transform': 'this agent cannot rewrite tool input; blocking instead', 'transform': 'this agent cannot rewrite tool input; blocking instead'}, 'flag_note': 'windsurf: flagged after the fact (%s cannot block): %s', 'flag_note_default': 'policy violation', 'gates': {'pre_mcp_tool_use': {'grammar': 'G5', 'honours_escalate': False, 'honours_transform': False}, 'pre_run_command': {'grammar': 'G5', 'honours_escalate': False, 'honours_transform': False}, 'pre_user_prompt': {'grammar': 'G5', 'honours_escalate': False, 'honours_transform': False}}, 'note_style': 'suffix', 'reason_defaults': {'escalate': 'confirmation required', 'transform': 'input requires modification'}, 'vocabulary': (), 'vocabulary_basis': 'verified'}, 'wire_events': {'pre_tool': 'pre_run_command'}}
 
 
 def claims(raw):
@@ -635,7 +666,7 @@ _CHOCK_UNREADABLE = (
 )
 
 #: A payload naming only this vendor's own wire event, so `respond` picks that event's grammar.
-_CHOCK_WIRE_RAW = {PRE_TOOL: {'hook_event_name': 'pre_run_command'}, STOP: {'hook_event_name': 'post_cascade_response'}}
+_CHOCK_WIRE_RAW = {PRE_TOOL: {'agent_action_name': 'pre_run_command'}, STOP: {'agent_action_name': 'post_cascade_response'}}
 
 #: The words a client reads as a refusal, in any of the answer fields a vendor grammar uses.
 _CHOCK_REFUSING = ("deny", "block", "ask", "continue")
@@ -721,7 +752,7 @@ def _chock_unreadable():
     return (text, code) if _chock_refuses(text, code) else ("", 2)
 #: Per wire event mapped to pre_tool: whether the client shows a guard's ask as a prompt.
 _CHOCK_CAN_ASK = {'pre_mcp_tool_use': False, 'pre_run_command': False}
-_CHOCK_EVENT_KEYS = ('hook_event_name', 'hookEventName', 'agent_action_name')
+_CHOCK_EVENT_KEYS = ('agent_action_name', 'hook_event_name', 'hookEventName')
 #: Where a plugin package's manifest may sit, relative to its root: the decision log reads its version.
 _CHOCK_PLUGIN_MANIFESTS = ('.claude-plugin/plugin.json', '.codex-plugin/plugin.json', '.cursor-plugin/plugin.json', '.devin-plugin/plugin.json', 'gemini-extension.json', 'plugin.json', '.factory-plugin/plugin.json', 'kimi.plugin.json', '.plugin/plugin.json')
 

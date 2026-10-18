@@ -396,6 +396,18 @@ def _flat_list_wrapper(hook_entry, reverse, canonical_events, command, matcher):
             rules.append(_flat_list_rule(hook_entry, ev, name, command, matcher))
     return rules
 
+def _flag_fail_closed(hook_entry, reverse, rules):
+    """Set the entry's opt-in fail-closed flag on the rules at its `fail_closed_rule` events."""
+    opt_in = hook_entry.get("fail_closed_rule")
+    if not opt_in:
+        return rules
+    event_key = hook_entry.get("rule_keys", {}).get("event", "event")
+    wires = {reverse[ev] for ev in opt_in["events"] if ev in reverse}
+    for rule in rules:
+        if rule[event_key] in wires:
+            rule[opt_in["key"]] = True
+    return rules
+
 def _cursor_wrapper(cfg, reverse, canonical_events, command, *, fail_closed):
     gates = cfg["verdicts"]["answer_events"]
     allow_silent = cfg["verdicts"].get("allow_silent_events", ())
@@ -433,27 +445,38 @@ def _default_wrapper(cfg, reverse, canonical_events, command, matcher):
         name = reverse.get(ev)
         if not name:
             continue
-        entry = {"hooks": [_hook_dict(cfg, command)]}
-        if matcher and hook_entry["matcher"] and ev in _MATCHER_EVENTS:
-            entry["matcher"] = matcher
-        hooks.setdefault(name, []).append(entry)
+        for wire in (name, hook_entry.get("also_wires", {}).get(ev)):
+            if not wire:
+                continue
+            if wire in hook_entry.get("flat_events", ()):
+                hooks.setdefault(wire, []).append(_hook_dict(cfg, command))
+                continue
+            entry = {"hooks": [_hook_dict(cfg, command)]}
+            wire_matcher = matcher or hook_entry.get("default_match")
+            if wire_matcher and hook_entry["matcher"] and ev in _MATCHER_EVENTS:
+                entry["matcher"] = wire_matcher
+            hooks.setdefault(wire, []).append(entry)
     if hook_entry.get("group"):
         return {hook_entry["group"]: hooks}
     return hooks if hook_entry.get("bare") else {"hooks": hooks}
 
-def hook_entry_config(cfg, canonical_events, command, matcher=None, *, fail_closed=True):
+def hook_entry_config(cfg, canonical_events, command, matcher=None, *, fail_closed=None):
     """The vendor's hooks-config fragment wiring `command` for these canonical events.
 
-    `fail_closed` is read only by the `cursor` wrapper, whose gates fail open unless the
-    entry says otherwise; a False installs an observer, not a gate.
+    `fail_closed` is read by the `cursor` wrapper, whose gates fail open unless the entry
+    says otherwise (None means True there; a False installs an observer, not a gate), and
+    by a `flat_list` entry's `fail_closed_rule`, which None leaves off: an opt-in.
     """
     hook_entry = cfg["hook_entry"]
     reverse = hj_reverse(cfg)
     wrapper = hook_entry["wrapper"]
     if wrapper == "flat_list":
-        return _flat_list_wrapper(hook_entry, reverse, canonical_events, command, matcher)
+        rules = _flat_list_wrapper(hook_entry, reverse, canonical_events, command, matcher)
+        return _flag_fail_closed(hook_entry, reverse, rules) if fail_closed else rules
     if wrapper == "cursor":
-        return _cursor_wrapper(cfg, reverse, canonical_events, command, fail_closed=fail_closed)
+        return _cursor_wrapper(
+            cfg, reverse, canonical_events, command, fail_closed=True if fail_closed is None else fail_closed
+        )
     if wrapper == "flat_entries":
         return _flat_entries_wrapper(hook_entry, reverse, canonical_events, command)
     if wrapper == "hook_dir":
@@ -518,7 +541,7 @@ def _wire_of(cfg, event):
 
 def _flag_payload(v, decision, name):
     """POST_TOOL/TOOL_FAILURE: a flag can only be raised as additional context, never blocked."""
-    if decision.outcome not in (DENY, ESCALATE):
+    if decision.outcome not in (DENY, ESCALATE) or name not in v["flag_events"]:
         return "", 0
     note = v["flag_note"] % (name, decision.reason or v["flag_note_default"])
     return _json.dumps({"additional_context": note}), 0
@@ -593,7 +616,7 @@ def cursor_respond(cfg, decision, event):
 
 AGENT = "cursor"
 
-VENDOR = {'agent': 'cursor', 'claims': {'mode': 'shape_inferred'}, 'config_format': 'json', 'config_path': '.cursor/hooks.json', 'display': 'Cursor', 'events': {'afterFileEdit': 'file_changed', 'afterMCPExecution': 'post_tool', 'afterShellExecution': 'post_tool', 'afterTabFileEdit': 'file_changed', 'beforeMCPExecution': 'pre_tool', 'beforeReadFile': 'pre_tool', 'beforeShellExecution': 'pre_tool', 'beforeSubmitPrompt': 'prompt_submit', 'beforeTabFileRead': 'pre_tool', 'postToolUse': 'post_tool', 'postToolUseFailure': 'tool_failure', 'preCompact': 'pre_compact', 'preToolUse': 'pre_tool', 'sessionEnd': 'session_end', 'sessionStart': 'session_start', 'stop': 'stop', 'subagentStart': 'subagent_start', 'subagentStop': 'subagent_stop'}, 'evidence': {'claims': {'basis': 'live-run-partial', 'date': '2026-09-23', 'test': 'tests/test_examples.py::test_each_payload_is_claimed_by_its_own_adapter'}, 'config_path': {'basis': 'live-run-partial', 'date': '2026-09-23', 'test': 'tests/test_vendor_config.py::test_config_path_agrees_with_matrix'}, 'events': {'basis': 'live-run-partial', 'date': '2026-09-23', 'test': 'tests/test_examples.py::test_each_payload_parses_to_the_event_it_is_filed_under'}, 'family': {'basis': 'live-run-partial', 'date': '2026-09-23', 'test': 'tests/test_golden_fixtures.py::test_wire_output_matches_the_frozen_fixture'}, 'fields': {'basis': 'live-run-partial', 'date': '2026-09-23', 'test': 'tests/test_vendor_config.py::test_entries_match_recount'}, 'hook_entry': {'basis': 'live-run-partial', 'date': '2026-09-23', 'test': 'tests/test_golden_fixtures.py::test_hook_config_matches_the_frozen_fixture_on_both_matcher_paths'}, 'tools': {'basis': 'live-run-partial', 'date': '2026-09-23', 'test': 'tests/test_vendor_lookups.py::test_cursor_write_tools_are_recorded_from_the_live_witness'}, 'verdicts': {'basis': 'live-run-partial', 'date': '2026-09-23', 'test': 'tests/test_golden_fixtures.py::test_wire_output_matches_the_frozen_fixture'}}, 'family': 'cursor', 'fields': {'command': ('command', 'tool_input.command'), 'content': ('edits[].new_string', 'tool_input.content', 'tool_input.new_string', 'content'), 'cwd': ('cwd',), 'output': ('tool_output', 'output', 'result_json'), 'path': ('file_path', 'tool_input.file_path', 'tool_input.path'), 'prompt': ('prompt',), 'session_id': ('conversation_id',), 'tool': ('tool_name',), 'tool_use_id': ('tool_use_id',)}, 'hook_entry': {'matcher': False, 'wrapper': 'cursor'}, 'needs_trust': False, 'tools': {'write': ('Write',)}, 'verdicts': {'allow_silent_events': ('stop',), 'answer_events': ('beforeMCPExecution', 'beforeReadFile', 'beforeShellExecution', 'beforeSubmitPrompt', 'beforeTabFileRead', 'preToolUse', 'stop'), 'bare_allow': 'required', 'default_wire_event': 'beforeShellExecution', 'degrade_notes': {'escalate': '%s cannot prompt for confirmation, so this is a block', 'escalate_from_transform': '%s cannot modify the input, so this is a block', 'transform': 'input requires modification, which this gate cannot express', 'transform_missing_input': 'no replacement input was supplied'}, 'flag_note': 'observed after the fact (%s cannot prevent it): %s', 'flag_note_default': 'policy violation', 'gates': {'beforeMCPExecution': {'grammar': 'G4', 'honours_escalate': True, 'honours_transform': False}, 'beforeReadFile': {'grammar': 'G4', 'honours_escalate': False, 'honours_transform': False}, 'beforeShellExecution': {'grammar': 'G4', 'honours_escalate': True, 'honours_transform': False}, 'beforeSubmitPrompt': {'grammar': 'G4', 'honours_escalate': False, 'honours_transform': False}, 'beforeTabFileRead': {'grammar': 'G4', 'honours_escalate': False, 'honours_transform': False}, 'preToolUse': {'grammar': 'G4', 'honours_escalate': False, 'honours_transform': True}, 'stop': {'grammar': 'G6', 'honours_escalate': False, 'honours_transform': False}}, 'transform_grammar': 'permission_updated_input', 'vocabulary': ('allow', 'ask', 'deny'), 'vocabulary_basis': 'verified', 'words': {'allow': 'allow', 'block': 'deny', 'escalate': 'ask'}}, 'wire_events': {'file_changed': 'afterFileEdit', 'post_tool': 'postToolUse', 'pre_tool': 'preToolUse'}}
+VENDOR = {'agent': 'cursor', 'claims': {'mode': 'shape_inferred'}, 'config_format': 'json', 'config_path': '.cursor/hooks.json', 'display': 'Cursor', 'events': {'afterFileEdit': 'file_changed', 'afterMCPExecution': 'post_tool', 'afterShellExecution': 'post_tool', 'afterTabFileEdit': 'file_changed', 'beforeMCPExecution': 'pre_tool', 'beforeReadFile': 'pre_tool', 'beforeShellExecution': 'pre_tool', 'beforeSubmitPrompt': 'prompt_submit', 'beforeTabFileRead': 'pre_tool', 'postToolUse': 'post_tool', 'postToolUseFailure': 'tool_failure', 'preCompact': 'pre_compact', 'preToolUse': 'pre_tool', 'sessionEnd': 'session_end', 'sessionStart': 'session_start', 'stop': 'stop', 'subagentStart': 'subagent_start', 'subagentStop': 'subagent_stop'}, 'evidence': {'claims': {'basis': 'live-run-partial', 'date': '2026-09-23', 'test': 'tests/test_examples.py::test_each_payload_is_claimed_by_its_own_adapter'}, 'config_path': {'basis': 'live-run-partial', 'date': '2026-09-23', 'test': 'tests/test_vendor_config.py::test_config_path_agrees_with_matrix'}, 'events': {'basis': 'live-run-partial', 'date': '2026-09-23', 'test': 'tests/test_examples.py::test_each_payload_parses_to_the_event_it_is_filed_under'}, 'family': {'basis': 'live-run-partial', 'date': '2026-09-23', 'test': 'tests/test_golden_fixtures.py::test_wire_output_matches_the_frozen_fixture'}, 'fields': {'basis': 'live-run-partial', 'date': '2026-09-23', 'test': 'tests/test_vendor_config.py::test_entries_match_recount'}, 'hook_entry': {'basis': 'live-run-partial', 'date': '2026-09-23', 'test': 'tests/test_golden_fixtures.py::test_hook_config_matches_the_frozen_fixture_on_both_matcher_paths'}, 'tools': {'basis': 'live-run-partial', 'date': '2026-09-23', 'test': 'tests/test_vendor_lookups.py::test_cursor_write_tools_are_recorded_from_the_live_witness'}, 'verdicts': {'basis': 'live-run-partial', 'date': '2026-09-23', 'test': 'tests/test_golden_fixtures.py::test_wire_output_matches_the_frozen_fixture'}}, 'family': 'cursor', 'fields': {'command': ('command', 'tool_input.command'), 'content': ('edits[].new_string', 'tool_input.content', 'tool_input.new_string', 'content'), 'cwd': ('cwd',), 'output': ('tool_output', 'output', 'result_json'), 'path': ('file_path', 'tool_input.file_path', 'tool_input.path'), 'prompt': ('prompt',), 'session_id': ('conversation_id',), 'tool': ('tool_name',), 'tool_use_id': ('tool_use_id',)}, 'hook_entry': {'matcher': False, 'wrapper': 'cursor'}, 'needs_trust': False, 'tools': {'write': ('Write',)}, 'verdicts': {'allow_silent_events': ('stop',), 'answer_events': ('beforeMCPExecution', 'beforeReadFile', 'beforeShellExecution', 'beforeSubmitPrompt', 'beforeTabFileRead', 'preToolUse', 'stop'), 'bare_allow': 'required', 'default_wire_event': 'beforeShellExecution', 'degrade_notes': {'escalate': '%s cannot prompt for confirmation, so this is a block', 'escalate_from_transform': '%s cannot modify the input, so this is a block', 'transform': 'input requires modification, which this gate cannot express', 'transform_missing_input': 'no replacement input was supplied'}, 'flag_events': ('postToolUse', 'postToolUseFailure'), 'flag_note': 'observed after the fact (%s cannot prevent it): %s', 'flag_note_default': 'policy violation', 'gates': {'beforeMCPExecution': {'grammar': 'G4', 'honours_escalate': True, 'honours_transform': False}, 'beforeReadFile': {'grammar': 'G4', 'honours_escalate': False, 'honours_transform': False}, 'beforeShellExecution': {'grammar': 'G4', 'honours_escalate': True, 'honours_transform': False}, 'beforeSubmitPrompt': {'grammar': 'G4', 'honours_escalate': False, 'honours_transform': False}, 'beforeTabFileRead': {'grammar': 'G4', 'honours_escalate': False, 'honours_transform': False}, 'preToolUse': {'grammar': 'G4', 'honours_escalate': False, 'honours_transform': True}, 'stop': {'grammar': 'G6', 'honours_escalate': False, 'honours_transform': False}}, 'transform_grammar': 'permission_updated_input', 'vocabulary': ('allow', 'ask', 'deny'), 'vocabulary_basis': 'verified', 'words': {'allow': 'allow', 'block': 'deny', 'escalate': 'ask'}}, 'wire_events': {'file_changed': 'afterFileEdit', 'post_tool': 'postToolUse', 'pre_tool': 'preToolUse'}}
 
 
 def claims(raw):
