@@ -208,6 +208,19 @@ def test_groks_plugin_witness_cites_its_record_and_claims_no_gate() -> None:
     assert evidence.witness("grok", Surface.PRE_TOOL_USE.value) is None
 
 
+def test_gooses_plugin_witness_cites_its_record_and_the_sh_it_needed() -> None:
+    """WIT-GOOSE: keyed `goose`, the agent chock's goose install client and a plugin-hook lookup use; guard and gate."""
+    row = evidence.witness("goose", evidence.PLUGIN_HOOK)
+    assert row is not None
+    assert row.client == "goose 1.55.0 CLI, Windows 11"
+    assert "witness/results/witness-goose-2026-10-18.md" in row.method
+    assert "6316fd3" in row.method
+    assert "Blocked by chock policy: block-no-verify" in row.method
+    assert "Unpinned GitHub Action detected" in row.method
+    assert "sh on PATH" in row.method and "`sh -c`" in row.method
+    assert evidence.witness("goose", Surface.PRE_TOOL_USE.value) is None
+
+
 def test_the_shipped_ledger_is_the_file_on_disk() -> None:
     """The loader reads packaged data, so the check must be against that file, not a fixture."""
     rows = json.loads(evidence.WITNESSES_PATH.read_text(encoding="utf-8"))
