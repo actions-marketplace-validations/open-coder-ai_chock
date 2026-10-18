@@ -33,8 +33,13 @@ def _fill(value: Any, tokens: dict[str, str]) -> Any:
 
 def render(client_id: str, tokens: dict[str, str]) -> list[Step]:
     """The client's steps with the destination, plugin and marketplace filled in."""
+    return render_steps(package.client(client_id)["steps"], tokens)
+
+
+def render_steps(data: list[dict[str, Any]], tokens: dict[str, str]) -> list[Step]:
+    """Step records (`command`, `settings` or `note`) with every token filled in."""
     out = []
-    for step in package.client(client_id)["steps"]:
+    for step in data:
         if "command" in step:
             out.append(Step(command=_fill(step["command"], tokens)))
         elif "settings" in step:

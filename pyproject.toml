@@ -61,7 +61,7 @@ dependencies = [
     # stay self-contained stdlib-only files, unaffected by this dependency. Pre-1.0 it is
     # pinned to an agentseam main commit (its newest adapters are unreleased); release week
     # swaps this for the released version, since PyPI refuses a direct reference.
-    "agentseam @ git+https://github.com/open-coder-ai/agentseam@945ceb09e2e22101aa4f56b11deefef5aabaa4a1",
+    "agentseam @ git+https://github.com/open-coder-ai/agentseam@683f95b5f2784dc3446acb1c91636ebc5ee7bee6",
 ]
 
 [project.optional-dependencies]
