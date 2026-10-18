@@ -112,13 +112,6 @@
     {
       "kind": "client",
       "clients": [
-        "antigravity"
-      ],
-      "says": "Evidence wanted: what you see Antigravity do with this plugin, at https://github.com/open-coder-ai/agentseam/issues/129"
-    },
-    {
-      "kind": "client",
-      "clients": [
         "openhands"
       ],
       "says": "OpenHands documents no plugin-root variable: the hooks name the plugin folder by absolute path, and its hook runner blocks only on exit code 2 or a deny, so any other hook failure lets the call through."
@@ -168,7 +161,6 @@
     {
       "kind": "client",
       "clients": [
-        "antigravity",
         "openhands",
         "kimi-code",
         "factory-droid"

@@ -56,6 +56,13 @@
     "method": "live probe of a chock plugin auto-discovered from ~/.agents/plugins/chock-witness, with Git for Windows' sh on PATH (goose runs every hook with `sh -c`; without sh every tool call, a benign `git status` too, was denied with \"the hook command failed to run\", on_failure: block): block-no-verify refused a `git commit --no-verify` shell command before it ran (\"Tool call denied by policy hook `chock-witness`: Blocked by chock policy: block-no-verify\") and pin-github-actions refused a write to .github/workflows/witness.yml at the write (\"Unpinned GitHub Action detected\"); a benign `git status` ran (org-plan witness/results/witness-goose-2026-10-18.md, 6316fd3)"
   },
   {
+    "agent": "antigravity",
+    "surface": "plugin-hook",
+    "client": "Antigravity IDE (version not recorded), Windows 11",
+    "date": "2026-10-18",
+    "method": "live probe of chock's shipped plugin built on Windows (store windows_hook_command: quote_free, so the hooks.json command carries no quotes), copied to ~/.gemini/config/plugins/chock-witness, no hand edits: block-no-verify refused the witness kit's GUARD shell command before it ran (\"tool call denied by pre-tool hook: Blocked by chock policy: block-no-verify\"; `git status` then showed \"No commits yet\"); pin-github-actions let a write of .github/workflows/witness.yml with actions/checkout@v4 land and refused at turn end (\"Stop hook blocked termination: Unpinned GitHub Action det…\"), not at the write, and the agent then pinned the action by commit SHA; a benign `git status` ran. The claim is for a Windows build only (org-plan witness/results/witness-antigravity-2026-10-18.md, section \"Re-run on chock's shipped build\", 11121b3)"
+  },
+  {
     "agent": "claude_code",
     "surface": "git-hook-env",
     "client": "Claude Code, Bash tool (CLAUDECODE=1, AI_AGENT=claude-code_<version>_agent)",
