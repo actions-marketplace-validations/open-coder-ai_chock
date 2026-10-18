@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import re
 import subprocess
 import sys
 from pathlib import Path, PurePath
@@ -89,6 +90,34 @@ def cmd_escape(text: str) -> str:
 def plugin_interpreter_quote_free(launcher: str) -> str:
     """`plugin_interpreter` with no quote and no space in any argument: `launcher` must hold neither."""
     return f"git -c alias.{PLUGIN_ALIAS}=!{cmd_escape(_QUOTE_FREE_MISSING)} {PLUGIN_ALIAS} {launcher}"
+
+
+#: What a quote-free command's paths may not hold: whitespace, quotes, cmd.exe metacharacters, and what git's sh
+#: would expand or split in an unquoted word (`$`, backquote, backslash, glob characters).
+QUOTE_FREE_UNSAFE = re.compile(r"""[\s"'|&<>^%()$`\\*?\[!]""")
+
+#: `_PREFIX` for the same cmd.exe runner: the repo launcher's refusal (exit 2) kept, written as `_QUOTE_FREE_MISSING`.
+_QUOTE_FREE_PREFIX = (
+    f"git -c alias.{ALIAS}=!"
+    + cmd_escape(
+        f"test -f {LAUNCHER_REL}||(echo chock: no {LAUNCHER_REL} here, run chock sync --repo .>&2;exit 2)"
+        f"&&sh {LAUNCHER_REL}"
+    )
+    + f" {ALIAS}"
+)
+
+
+def hook_command_quote_free(command: str) -> str:
+    """A `hook_command` with no quote or space in any argument; one whose words cannot be carried bare is refused."""
+    words = command.removeprefix(f"{_PREFIX} ").split(" ")
+    bare = [word[1:-1] if len(word) > 1 and word[0] == word[-1] == '"' else word for word in words]
+    if not command.startswith(f"{_PREFIX} ") or any(not word or QUOTE_FREE_UNSAFE.search(word) for word in bare):
+        msg = (
+            f"{command!r}: this client runs hook commands through cmd.exe on Windows, where no quoting reaches git, "
+            "so every argument must be a plain repo-relative path or flag"
+        )
+        raise ValueError(msg)
+    return " ".join([_QUOTE_FREE_PREFIX, *bare])
 
 
 def launcher_text() -> str:

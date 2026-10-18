@@ -5,17 +5,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from chock.plugin import hook_dir
+from chock.plugin import hook_dir, posture
 
-#: The vendor's hooks guide documents `on_failure: block` (agentseam writes it on every entry) as
-#: denying a PreToolUse call whose hook fails; it also says Stop stays fail-open whatever it says.
+#: goose runs every hook with `sh -c` and denies a PreToolUse call whose hook fails (`on_failure: block`, which agentseam
+#: writes on every entry): without sh every call was denied (org-plan witness/results/witness-goose-2026-10-18.md).
 GUARD_NOTE = (
     "This policy ships a PreToolUse hook in this plugin's hooks/hooks.json with `on_failure: block`, "
-    "which goose's hooks documentation says denies the tool call when the hook fails to run or "
-    "answer (documented, not witnessed by chock); goose's Stop hooks stay fail-open. The hook needs "
-    "git and a Python 3.11+ on PATH. Repo-wide git-hook and CI coverage still needs `chock sync`. "
+    "so goose denies the tool call when the hook fails to run or answer "
+    f"({posture.witness_clause('goose')}); goose's Stop hooks stay fail-open. goose runs every hook with "
+    "`sh -c`, so the hook needs sh (on Windows, Git for Windows' sh), git and a Python 3.11+ on PATH; without "
+    "sh every tool call is denied. Repo-wide git-hook and CI coverage still needs `chock sync`. "
     "See https://github.com/open-coder-ai/chock"
 )
+
 
 SPEC = hook_dir.Spec("goose", "goose", GUARD_NOTE)
 

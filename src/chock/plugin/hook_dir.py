@@ -176,16 +176,11 @@ def root_path(folder: PurePath) -> str:
     return (path if path.is_absolute() else Path(path).absolute()).as_posix()
 
 
-#: What a quote-free command's paths may not hold: whitespace, quotes, cmd.exe metacharacters, and what git's sh
-#: would expand or split in the launcher's unquoted `$1` (`$`, backquote, backslash, glob characters).
-_QUOTE_FREE_UNSAFE = re.compile(r"""[\s"'|&<>^%()$`\\*?\[!]""")
-
-
 def resolve_root(files: dict[Path, str], folder: PurePath, store_name: str | None = None) -> dict[Path, str]:
     """`files` with every `ROOT_TOKEN` naming `folder`; a folder whose path a hook command cannot carry is refused."""
     root = root_path(folder)
     carried = any(ROOT_TOKEN in content for content in files.values())
-    if carried and quote_free(store_name) and _QUOTE_FREE_UNSAFE.search(root):
+    if carried and quote_free(store_name) and launch.QUOTE_FREE_UNSAFE.search(root):
         msg = (
             f"{root}: this client runs hook commands through cmd.exe on Windows, where no quoting reaches git, so "
             "the plugin folder's path may not hold spaces or other whitespace, quotes, any of | & < > ^ % ( ) ! $ "
