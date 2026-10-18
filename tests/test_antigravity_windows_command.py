@@ -100,7 +100,8 @@ def test_a_folder_the_quote_free_command_cannot_carry_is_refused_at_install(
     assert folder.as_posix() in str(caught.value) and "choose another --dest" in str(caught.value)
 
 
-def test_a_spaced_folder_is_still_carried_quoted_off_windows(tmp_path: Path) -> None:
+def test_a_spaced_folder_is_still_carried_quoted_off_windows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hook_dir, "build_windows", lambda: False)
     members = make_members(tmp_path)
     files = merged_files(AGENT, bundle(members), members, tmp_path)
     resolved = hook_dir.resolve_root(files, tmp_path / "Jo Smith" / "pkg", AGENT)
