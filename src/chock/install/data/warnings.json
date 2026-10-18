@@ -112,13 +112,6 @@
     {
       "kind": "client",
       "clients": [
-        "antigravity"
-      ],
-      "says": "Evidence wanted: what you see Antigravity do with this plugin, at https://github.com/open-coder-ai/agentseam/issues/129"
-    },
-    {
-      "kind": "client",
-      "clients": [
         "gemini-cli"
       ],
       "says": "Gemini CLI treats a hook that exits with any code other than 0 or 2 as a warning and lets the call through, and Google is sunsetting Gemini CLI for consumer tiers in favor of Antigravity CLI (use the antigravity client there)."
@@ -189,7 +182,6 @@
     {
       "kind": "client",
       "clients": [
-        "antigravity",
         "gemini-cli",
         "openhands",
         "kimi-code",

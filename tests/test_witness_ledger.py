@@ -221,6 +221,20 @@ def test_gooses_plugin_witness_cites_its_record_and_the_sh_it_needed() -> None:
     assert evidence.witness("goose", Surface.PRE_TOOL_USE.value) is None
 
 
+def test_antigravitys_plugin_witness_cites_its_record_and_the_turn_end_gate() -> None:
+    """WIT-AGY: keyed `antigravity`, chock's antigravity install client's agent; guard refused, gate at turn end."""
+    row = evidence.witness("antigravity", evidence.PLUGIN_HOOK)
+    assert row is not None
+    assert row.client == "Antigravity IDE (version not recorded), Windows 11"
+    assert "witness/results/witness-antigravity-2026-10-18.md" in row.method
+    assert "11121b3" in row.method
+    assert "Blocked by chock policy: block-no-verify" in row.method
+    assert "Stop hook blocked termination: Unpinned GitHub Action det" in row.method
+    assert "at turn end" in row.method and "not at the write" in row.method
+    assert "quote_free" in row.method and "Windows build only" in row.method
+    assert evidence.witness("antigravity", Surface.PRE_TOOL_USE.value) is None
+
+
 def test_the_shipped_ledger_is_the_file_on_disk() -> None:
     """The loader reads packaged data, so the check must be against that file, not a fixture."""
     rows = json.loads(evidence.WITNESSES_PATH.read_text(encoding="utf-8"))
