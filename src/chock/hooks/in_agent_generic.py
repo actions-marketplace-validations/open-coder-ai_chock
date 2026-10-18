@@ -8,7 +8,7 @@ from typing import Any
 
 from chock import vendors
 from chock.emit import write_generated_json
-from chock.hooks import heartbeat, stop_check
+from chock.hooks import heartbeat, launch, stop_check
 from chock.hooks.in_agent_toml import install_toml, installed_toml_ids
 from chock.hooks.runtime_vendor import runtime_rel, vendor_runtime
 
@@ -102,6 +102,29 @@ def _fragments(repo_root: Path, vendor: str) -> list[tuple[str, Any]]:
     return found
 
 
+def quote_free(vendor: str) -> bool:
+    """Whether sync writes `vendor`'s commands quote-free: the rule and store data its plugin follows (hook_dir.quote_free)."""
+    from chock.plugin import hook_dir  # noqa: PLC0415 -- the plugin side imports this package
+    from chock.plugin.clients import CLIENTS  # noqa: PLC0415 -- likewise
+
+    return any(client.agent == vendor and hook_dir.quote_free(name) for name, client in CLIENTS.items())
+
+
+def windows_form(node: Any) -> Any:
+    """`node` with every hook `command` in its quote-free form (launch.hook_command_quote_free)."""
+    if isinstance(node, dict):
+        return {
+            k: launch.hook_command_quote_free(v) if k == "command" and isinstance(v, str) else windows_form(v)
+            for k, v in node.items()
+        }
+    return [windows_form(v) for v in node] if isinstance(node, list) else node
+
+
+def _for_runner(vendor: str, docs: list[tuple[str, Any]]) -> list[tuple[str, Any]]:
+    """`docs` in the command form `vendor`'s hook runner reads on this machine."""
+    return [(name, windows_form(doc)) for name, doc in docs] if quote_free(vendor) else docs
+
+
 def _sync_runtime(repo_root: Path, vendor: str, *, wanted: bool) -> None:
     """Vendor `vendor`'s runtime while a hook entry runs it; otherwise drop it."""
     if wanted:
@@ -143,11 +166,10 @@ def install_generic(repo_root: Path, vendor: str, *, uninstall: bool = False) ->
         return []
 
     vendor_runtime(repo_root, vendor)
-    for _policy_id, fragment in [*fragments, *stopping]:
-        _merge(settings, fragment)
     beat = heartbeat.sync_doc(vendor)
-    if isinstance(beat, dict):
-        _merge(settings, beat)
+    beats = [("heartbeat", beat)] if isinstance(beat, dict) else []
+    for _policy_id, fragment in _for_runner(vendor, [*fragments, *stopping, *beats]):
+        _merge(settings, fragment)
     config_path.parent.mkdir(parents=True, exist_ok=True)
     write_generated_json(config_path, settings)
     return [policy_id for policy_id, _ in fragments]
@@ -170,7 +192,7 @@ def installed_generic_ids(repo_root: Path, vendor: str) -> set[str]:
     _collect_ours(settings if isinstance(settings, dict) else {}, marker, present)
     wanted_by: set[str] = set()
     missing: set[str] = set()
-    for policy_id, fragment in _fragments(repo_root, vendor):
+    for policy_id, fragment in _for_runner(vendor, _fragments(repo_root, vendor)):
         wanted: dict[str, dict] = {}
         _collect_ours(fragment, marker, wanted)
         if wanted:
