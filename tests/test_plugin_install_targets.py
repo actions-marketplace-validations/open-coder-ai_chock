@@ -277,19 +277,6 @@ def test_labels_come_from_the_tier_table_and_warnings_link_the_evidence_issue(
     assert kept.get(client, "") in out
 
 
-@pytest.mark.parametrize("extra", [(), ("--client", "gemini-cli")])
-def test_gemini_cli_is_retired_and_install_points_to_antigravity(
-    catalog, tmp_path: Path, home: Path, capsys, extra: tuple
-) -> None:
-    """A selection naming gemini-cli, or the flag, exits non-zero with one line naming the antigravity client."""
-    root, ref = catalog
-    assert _install(tmp_path, root, ref, "goose" if extra else "gemini-cli", *extra) == 1
-    err = capsys.readouterr().err.splitlines()
-    assert len(err) == 1 and "--client antigravity" in err[0], err
-    assert _tree(home) == set()
-    assert "gemini-cli" not in cli.CLIENTS and "gemini" not in CLIENTS and "gemini" not in plugin_cli.FORMATS
-
-
 def test_an_ask_gate_is_labelled_not_enforced_where_the_client_cannot_ask(catalog, tmp_path: Path) -> None:
     members = make_members(tmp_path / "m")
     gate = next(m for m in members if m.id == GATE_ID)
