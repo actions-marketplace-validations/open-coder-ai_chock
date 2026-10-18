@@ -274,11 +274,7 @@ def test_labels_come_from_the_tier_table_and_warnings_link_the_evidence_issue(
     lines = {line.split()[0]: line for line in out.splitlines() if line.startswith("  demo-")}
     assert f"{prefix}refuses a matched shell command" in lines[GUARD_ID]
     assert "advisory only" in lines[ADVISORY_ID] and prefix not in lines[ADVISORY_ID]
-    kept = {  # witnessed: no Untested
-        "goose": "Git for Windows' sh must be on PATH",
-        "grok": "Grok's hooks fail open",
-        "antigravity": "a gate judges what a turn wrote only at turn end",
-    }
+    kept = {"goose": "sh must be on PATH", "grok": "Grok's hooks fail open", "antigravity": "only at turn end"}
     witnessed = client in kept
     assert ("warning: Untested: chock has not witnessed an install in this client" in out) != witnessed
     assert {"Evidence wanted" in out, evidence in out} == {not witnessed}
