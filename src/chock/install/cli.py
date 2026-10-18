@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from chock.compile.compiler import _load_manifest
-from chock.install import local, package, place, resolve, selection, steps, trust, warnings
+from chock.install import claude_plugin, local, package, place, resolve, selection, steps, trust, warnings
 from chock.plugin.bundle_build import Member
 from chock.scaffold.add import IntegrityError
 from chock.scaffold.pin import PinError, fetch_catalog
@@ -197,6 +197,10 @@ def main(argv: list[str] | None = None) -> int:
     }
     rendered = steps.render(client_id, tokens)
     _show(rendered, applying=args.apply)
+    build = claude_plugin.settings()["build_client"]
+    build_dest = dest if client_id == build else place.default_dest(build).resolve()
+    for line in claude_plugin.lines(client_id, claude_plugin.tokens(build_dest, name, args.selection)):
+        print(line)
     return _apply(client_id, rendered) if args.apply else 0
 
 
