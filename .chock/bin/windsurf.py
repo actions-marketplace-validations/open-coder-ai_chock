@@ -629,7 +629,7 @@ def degrade(decision, event):
 # Not self-contained: chock's guard logic lives in the sibling _chock_runtime.py, loaded from this
 # file's own folder and pinned to the render this entry came from. Missing, unreadable, another
 # version, or failing to import: every call refuses (_CHOCK_RUNTIME_FAULT), never allows.
-_CHOCK_RUNTIME_PIN = 'a2059af84a40b0a567de8f6d9bf7abcb7e7949159d016fdf19691fd2e0fef82a'
+_CHOCK_RUNTIME_PIN = 'a0dfe128bff953bb9f650d1e8712bf3c519af60325fa39207fadbd566c886124'
 
 
 def _chock_load_runtime():

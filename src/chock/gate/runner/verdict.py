@@ -33,7 +33,7 @@ from .constants import (
 )
 from .context import GateResult, ListingError
 from .halt import HALT_POLICY, HALT_REASON, halt_everywhere_read, halt_find, halt_git_roots, halt_message
-from .kinds import KINDS
+from .kinds import KINDS, PatternDeadlineError
 from .log import _actor, _held_record, _log_halt, _log_outcome, _log_script_hook
 from .material import _context, _params, own_paths
 from .report import (
@@ -194,12 +194,24 @@ def evaluate(
         return 2, VERDICT_ERROR
     signal = agent_signal(repo_root)
     judged = _judged_event(name, agent=signal is not None)
+    result = _judge_kind(kind, ctx, _params(gate_path, spec), judged, gate_path)
+    if isinstance(result, tuple):
+        return result
+    return Evaluation(spec, result, rollout(repo_root, event, signal, base), signal, judged)
+
+
+def _judge_kind(kind: Any, ctx: Any, params: dict, judged: str, gate_path: Path) -> GateResult | tuple[int, str]:
+    """The kind's result, or (2, error) with the reason on stderr when it could not judge."""
     try:
-        result = kind(ctx, _params(gate_path, spec), judged)
+        return kind(ctx, params, judged)
     except ListingError as exc:
         print(f"gate: {inert(str(exc))} -- refusing rather than judging a change it cannot read.", file=sys.stderr)
-        return 2, VERDICT_ERROR
-    return Evaluation(spec, result, rollout(repo_root, event, signal, base), signal, judged)
+    except PatternDeadlineError as exc:
+        policy = _policy_id(gate_path) or gate_path.name
+        print(
+            f"gate: {policy}: {inert(str(exc))} -- refusing rather than allowing what it never judged.", file=sys.stderr
+        )
+    return 2, VERDICT_ERROR
 
 
 def judge(

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 from pathlib import Path
 
@@ -182,15 +181,10 @@ def _judged_event(name: str, *, agent: bool) -> str:
     return AGENT_COMMIT_EVENT if name == "commit" and agent else name
 
 
-def _waiver_re(params: dict, event: str) -> re.Pattern[str] | None:
-    """The waiver regex for events that honour a waiver at all, else None."""
+def _waiver_pattern(params: dict, event: str) -> str | None:
+    """The waiver pattern for events that honour a waiver at all, else None."""
     pragma = params.get("allowlist_pragma") if event in WAIVABLE_EVENTS | HEAD_WAIVER_EVENTS else None
-    return re.compile(pragma) if pragma else None
-
-
-def _honoured(pragma_re: re.Pattern[str] | None, text: str, head: frozenset[str] | None) -> bool:
-    """A waiver on `text` counts unless `head` is given and the text is not already committed."""
-    return bool(pragma_re and pragma_re.search(text) and (head is None or text in head))
+    return str(pragma) if pragma else None
 
 
 # >>> gate.py 16
