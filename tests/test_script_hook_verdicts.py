@@ -127,9 +127,11 @@ def test_an_agent_cannot_answer_for_the_person(repo: Path, marker: dict) -> None
     assert "treated as an agent's" in done.stderr
 
 
-def test_the_escape_hatch_answers_from_an_agent_terminal(repo: Path) -> None:
+def test_the_escape_hatch_does_not_answer_from_an_agent_terminal(repo: Path) -> None:
+    """`CHOCK_AGENT_COMMIT=0` clears no vendor marker: the agent could type it itself."""
     env = {"CHOCK_ALLOW": POLICY_ID, "CLAUDECODE": "1", "CHOCK_AGENT_COMMIT": "0"}
-    assert _commit(repo, "ask", env).returncode == 0
+    assert _commit(repo, "ask", env).returncode == 1
+    assert _commit(repo, "ask", {"CHOCK_ALLOW": POLICY_ID, "CHOCK_AGENT_COMMIT": "0"}).returncode == 0
 
 
 def test_a_warn_is_the_same_for_an_agent(repo: Path) -> None:
