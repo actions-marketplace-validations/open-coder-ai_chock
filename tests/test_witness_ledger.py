@@ -191,7 +191,7 @@ def test_copilots_plugin_witness_cites_its_record_and_names_what_it_did_not_cove
     assert evidence.witness("vscode_copilot", Surface.AGENT_HOOKS.value) is not None
     assert "witness/results/witness-copilot-2026-10-11.md" in row.method
     assert "83f636d" in row.method
-    assert "VS Code agent mode" in row.method and "not covered" in row.method
+    assert "Not covered: VS Code agent mode" in row.method
     assert "VS Code" not in row.client
 
 
@@ -230,7 +230,7 @@ def test_antigravitys_plugin_witness_cites_its_record_and_the_turn_end_gate() ->
     assert "11121b3" in row.method
     assert "Blocked by chock policy: block-no-verify" in row.method
     assert "Stop hook blocked termination: Unpinned GitHub Action det" in row.method
-    assert "at turn end" in row.method and "not at the write" in row.method
+    assert "It refused at turn end" in row.method and "did not refuse the write itself" in row.method
     assert "quote_free" in row.method and "Windows build only" in row.method
     assert evidence.witness("antigravity", Surface.PRE_TOOL_USE.value) is None
 

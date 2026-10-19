@@ -5,6 +5,12 @@
   "origin": {
     "custom": "custom, not reviewed"
   },
+  "tier_prefix": "__GRADE__, and __FAIL__ (agentseam __BASIS__): ",
+  "tier_fail_mode": {
+    "open": "a hook error lets the action through",
+    "closed": "a hook error blocks the action",
+    "configurable": "what a hook error does is configurable"
+  },
   "labels": {
     "block": "blocks",
     "ask": "asks",
@@ -87,7 +93,7 @@
       "dest": "~/.chock/marketplace/devin",
       "binary": "devin",
       "index": [],
-      "label_prefix": "best-effort, fails open: ",
+      "label_prefix": "best-effort, and a hook error lets the action through: ",
       "gate_turn_end_only": true,
       "steps": [
         {"note": "On Windows, `devin plugins install --local` creates a symbolic link, so it needs Developer Mode (Settings > System > For developers) or an elevated shell; otherwise it fails with \"os error 1314: A required privilege is not held by the client\"."},

@@ -245,10 +245,10 @@ def test_labels_come_from_the_tier_table_and_warnings_link_the_evidence_issue(
     assert _install(tmp_path, root, ref, client) == 0
     out = capsys.readouterr().out
     lines = {line.split()[0]: line for line in out.splitlines() if line.startswith("  demo-")}
-    prefix = "best-effort, fail mode open (agentseam vendor-docs): "
+    prefix = "best-effort, and a hook error lets the action through (agentseam vendor-docs): "
     assert f"{prefix}refuses a matched shell command" in lines[GUARD_ID]
     assert "advisory only" in lines[ADVISORY_ID] and prefix not in lines[ADVISORY_ID]
-    assert "warning: Untested: chock has not witnessed an install in this client" in out
+    assert "warning: Untested: no live run has shown a chock install working in this client" in out
     assert evidence in out
 
 
@@ -258,8 +258,8 @@ def test_an_ask_gate_is_labelled_not_enforced_in_kimi_and_droid(tmp_path: Path) 
     gate.manifest["hook"]["gate"]["action"] = "ask"
     (gate.policy_dir / "manifest.yaml").write_text(yaml.safe_dump(gate.manifest), encoding="utf-8")
     kimi = {label.policy_id: label.says for label in package.labels(members, tmp_path / "m", "kimi-code")}
-    assert kimi[GATE_ID].endswith("; the ask is not enforced here: Kimi Code cannot prompt for confirmation")
+    assert kimi[GATE_ID].endswith(". The ask is not enforced here (Kimi Code cannot prompt for confirmation)")
     droid = {label.policy_id: label.says for label in package.labels(members, tmp_path / "m", "factory-droid")}
     assert droid[GATE_ID].endswith(
-        "; the ask is not enforced here: Droid's ask does not force a prompt, so this is a block"
+        ". The ask is not enforced here (Droid's ask does not force a prompt, so this is a block)"
     )

@@ -84,7 +84,7 @@ def test_overlap_with_another_chock_plugin_for_the_client_is_warned(catalog, tmp
     assert _run(tmp_path, v2(root, ref, "codex", (GATE_ID, ADVISORY_ID), name="set-two")) == 0
     folder = place.default_dest("codex").resolve() / "codex" / "set-one"
     out = capsys.readouterr().out
-    assert f"warning: {GATE_ID} is also in the chock plugin set-one ({folder}): both copies fire" in out
+    assert f"warning: {GATE_ID} is also in the chock plugin set-one ({folder}), so both copies fire" in out
     assert GUARD_ID not in out.split("warning:", 1)[1].split("\n", 1)[0]
     assert _run(tmp_path, v2(root, ref, "claude-code", (GATE_ID,), name="set-three")) == 0
     assert "is also in the chock plugin" not in capsys.readouterr().out, "another client's plugin never overlaps"

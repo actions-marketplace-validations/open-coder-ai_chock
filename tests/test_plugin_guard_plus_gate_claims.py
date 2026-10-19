@@ -29,7 +29,7 @@ def test_a_merged_bundle_carries_and_states_both_halves(tmp_path: Path, client: 
     assert any("--guard" in c for c in commands) and any("--gate" in c for c in commands)
     description = json.loads(files[Path(manifest_rel)])["description"]
     assert "Shell guard:" in description and "Write gate:" in description
-    assert "refuses a matched shell command before it runs; blocks" in description
+    assert "refuses a matched shell command before it runs. Blocks" in description
 
 
 def test_a_stop_only_gate_beside_a_guard_never_reads_as_judging_the_write(tmp_path: Path) -> None:
@@ -38,7 +38,7 @@ def test_a_stop_only_gate_beside_a_guard_never_reads_as_judging_the_write(tmp_pa
     members = [Member(pack, data)]
     files = merged_files("copilot", _bundle(), members, tmp_path)
     description = json.loads(files[Path("plugin.json")])["description"]
-    assert "at turn end only; the write itself is not judged" in description
+    assert "at turn end only. It does not check a file write when it happens" in description
 
 
 def test_the_catalog_page_counts_each_half_and_says_some_ship_both(tmp_path: Path) -> None:

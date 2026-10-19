@@ -44,8 +44,10 @@ def test_both_halves_ship_in_every_store(tmp_path: Path, store: str) -> None:
     gate_events = bundle_grade.events_for(doc, "--gate")
     assert (len(gate_events) == 2) == (matcher is not None and stop)
     grade, says = bundle_grade.grade_of_files(files, hooks_rel, agent)
-    assert says.startswith("refuses a matched shell command before it runs; blocks ")
-    assert ("the write itself is not judged" in says) == (matcher is None), "a Stop-only gate never claims the write"
+    assert says.startswith("refuses a matched shell command before it runs. Blocks ")
+    assert ("It does not check a file write when it happens" in says) == (matcher is None), (
+        "a Stop-only gate never claims the write"
+    )
     assert grade == (bundle_grade.BLOCKS if matcher else bundle_grade.STOP_ONLY)
 
 
