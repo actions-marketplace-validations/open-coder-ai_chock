@@ -20,7 +20,7 @@ _GATE_FLAG = "--gate"
 ADVISORY, WARNS, ASKS, STOP_ONLY, BLOCKS = range(5)
 #: Keyword a bundle's weakest member lends it, in the manifest's own `enforcement` vocabulary.
 _ENFORCEMENT = {ADVISORY: "advise", WARNS: "warn", ASKS: "ask", STOP_ONLY: "block", BLOCKS: "block"}
-ADVISORY_SAYS = "advisory only: skill text, nothing stops a violation"
+ADVISORY_SAYS = "advisory only. It is skill text, and nothing stops a violation"
 _GUARD_SAYS = "refuses a matched shell command before it runs"
 _GATE_ACTION_GRADE = {"warn": WARNS, "ask": ASKS}
 _GATE_VERBS = {"block": "blocks", "ask": "asks", "warn": "warns"}
@@ -72,12 +72,14 @@ def grade_of(
         reach = (
             "on an agent's file writes and at turn end"
             if writes
-            else "at turn end only; the write itself is not judged"
+            else "at turn end only. It does not check a file write when it happens"
         )
         grade = _GATE_ACTION_GRADE.get(action, BLOCKS if writes else STOP_ONLY)
         gate_says = f"{_GATE_VERBS.get(action, 'blocks')} {reach}"
         # A guard beside the gate blocks outright, so the gate's grade stays the package's floor.
-        return grade, f"{_GUARD_SAYS}; {gate_says}" if any(_GUARD_FLAG in c for c in commands) else gate_says
+        if any(_GUARD_FLAG in c for c in commands):
+            return grade, f"{_GUARD_SAYS}. {gate_says[:1].upper()}{gate_says[1:]}"
+        return grade, gate_says
     if any(_GUARD_FLAG in c for c in commands):
         return BLOCKS, _GUARD_SAYS
     return ADVISORY, ADVISORY_SAYS

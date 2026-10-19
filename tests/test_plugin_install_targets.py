@@ -252,13 +252,17 @@ def test_antigravity_install_names_its_final_folder_not_the_staging_one(catalog,
     assert commands and all(f'"{folder.as_posix()}/scripts/' in c for c in commands)
 
 
+THROUGH = "best-effort, and a hook error lets the action through (agentseam vendor-docs): "
+CONFIGURABLE = "best-effort, and what a hook error does is configurable (agentseam vendor-docs): "
+
+
 @pytest.mark.parametrize(
     ("client", "prefix", "evidence"),
     [
-        ("goose", "best-effort, fail mode configurable (agentseam vendor-docs): ", "agentseam/issues/177"),
-        ("grok", "best-effort, fail mode open (agentseam vendor-docs): ", "agentseam/issues/188"),
-        ("antigravity", "best-effort, fail mode open (agentseam vendor-docs): ", "agentseam/issues/129"),
-        ("openhands", "best-effort, fail mode open (agentseam vendor-docs): ", "agentseam/issues/181"),
+        ("goose", CONFIGURABLE, "agentseam/issues/177"),
+        ("grok", THROUGH, "agentseam/issues/188"),
+        ("antigravity", THROUGH, "agentseam/issues/129"),
+        ("openhands", THROUGH, "agentseam/issues/181"),
     ],
 )
 def test_labels_come_from_the_tier_table_and_warnings_link_the_evidence_issue(
@@ -270,9 +274,9 @@ def test_labels_come_from_the_tier_table_and_warnings_link_the_evidence_issue(
     lines = {line.split()[0]: line for line in out.splitlines() if line.startswith("  demo-")}
     assert f"{prefix}refuses a matched shell command" in lines[GUARD_ID]
     assert "advisory only" in lines[ADVISORY_ID] and prefix not in lines[ADVISORY_ID]
-    kept = {"goose": "sh must be on PATH", "grok": "Grok's hooks fail open", "antigravity": "only at turn end"}
+    kept = {"goose": "sh must be on PATH", "grok": "returns malformed output", "antigravity": "only at turn end"}
     witnessed = client in kept
-    assert ("warning: Untested: chock has not witnessed an install in this client" in out) != witnessed
+    assert ("warning: Untested: chock has not seen an install work in this client in a live run" in out) != witnessed
     assert {"Evidence wanted" in out, evidence in out} == {not witnessed}
     assert kept.get(client, "") in out
 
@@ -283,10 +287,10 @@ def test_an_ask_gate_is_labelled_not_enforced_where_the_client_cannot_ask(catalo
     gate.manifest["hook"]["gate"]["action"] = "ask"
     (gate.policy_dir / "manifest.yaml").write_text(yaml.safe_dump(gate.manifest), encoding="utf-8")
     labels = {label.policy_id: label.says for label in package.labels(members, tmp_path / "m", "goose")}
-    assert labels[GATE_ID].endswith("; the ask is not enforced here: goose cannot prompt for confirmation")
+    assert labels[GATE_ID].endswith(". The ask is not enforced here (goose cannot prompt for confirmation)")
     # Antigravity's gate runs at Stop only, where agentseam records it cannot prompt either.
     labels = {label.policy_id: label.says for label in package.labels(members, tmp_path / "m", "antigravity")}
-    assert labels[GATE_ID].endswith("; the ask is not enforced here: Antigravity cannot prompt at Stop")
+    assert labels[GATE_ID].endswith(". The ask is not enforced here (Antigravity cannot prompt at Stop)")
 
 
 def test_the_toggle_lookup_reads_goose_and_antigravity_folders(tmp_path: Path) -> None:

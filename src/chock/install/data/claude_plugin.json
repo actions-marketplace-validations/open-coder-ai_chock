@@ -1,11 +1,11 @@
 {
   "build_client": "claude-code",
   "offer_when": {"deny_reply": ["yes", "partial"]},
-  "heading": "Also works: the Claude Code plugin (agentseam loads_claude_plugins, witnessed):",
-  "listing": "This build also runs in other agents (agentseam loads_claude_plugins, witnessed):",
+  "heading": "This agent can also run the Claude Code plugin (agentseam loads_claude_plugins, seen in a live run):",
+  "listing": "This build also runs in other agents (agentseam loads_claude_plugins, seen in a live run):",
   "build": "Build it: chock install --selection __SELECTION__ --client __BUILD_CLIENT__ (then, in __WHERE__:)",
   "warnings": [
-    "Install one build per agent, not both: the agent's own chock plugin and the Claude Code plugin would each check every action.",
+    "Install one build per agent. If you install both the agent's own chock plugin and the Claude Code plugin, each one checks every action.",
     "When another agent runs the Claude Code plugin, chock logs its events as claude_code (~/.chock/log/claude_code/), not under that agent."
   ],
   "clients": {
@@ -54,7 +54,7 @@
         {
           "where": "VS Code",
           "witness": "an Agents-window session bound to a repo (Copilot SDK) ran no hooks",
-          "label": "Chat panel only; an Agents-window repo session ran no hooks",
+          "label": "Chat panel only. An Agents-window repo session ran no hooks",
           "steps": [
             {"note": "Add to your VS Code user settings (chock does not edit them), then use the Chat panel with the folder open:"},
             {"settings": {"chat.plugins.enabled": true, "chat.pluginLocations": {"__PLUGIN_DIR__": true}}}
@@ -68,7 +68,7 @@
         {
           "where": "Devin",
           "witness": "turn-end gate only",
-          "label": "turn end only; the shell guard and the write gate did not run",
+          "label": "turn end only. The shell guard and the write gate did not run",
           "prefer_native": "Devin's own chock plugin (chock install --client devin) is the better install here.",
           "steps": [
             {"note": "On Windows, `devin plugins install --local` creates a symbolic link, so it needs Developer Mode (Settings > System > For developers) or an elevated shell."},
@@ -79,7 +79,7 @@
     },
     "cursor": {
       "agent": "cursor",
-      "not_offered": "Not offered for Cursor: with Include Third-Party Plugins on, Cursor imports an enabled Claude Code plugin and calls its hooks, but in the witness run chock never ran and nothing was refused; do not rely on that import to enforce chock's policies.",
+      "not_offered": "Not offered for Cursor. With Include Third-Party Plugins on, Cursor imports an enabled Claude Code plugin and calls its hooks. But in the live test, chock never ran and nothing was refused. Do not rely on that import to enforce chock's policies.",
       "routes": []
     }
   }

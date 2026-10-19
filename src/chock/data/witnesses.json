@@ -25,42 +25,42 @@
     "surface": "plugin-hook",
     "client": "GitHub Copilot CLI 1.0.94, Windows",
     "date": "2026-10-11",
-    "method": "live probe of the chock plugin: pin-github-actions refused a create write at preToolUse, before the file landed, and chock-guardrails-protect refused a shell write to .chock/guardrails.json at preToolUse; VS Code agent mode, a toggle-file write through the edit tool and a delete-only apply_patch not covered (org-plan witness/results/witness-copilot-2026-10-11.md, 83f636d)"
+    "method": "live probe of the chock plugin. `pin-github-actions` refused a create write at preToolUse, before the file landed. `chock-guardrails-protect` refused a shell write to `.chock/guardrails.json` at preToolUse. Not covered: VS Code agent mode, a toggle-file write through the edit tool, and a delete-only apply_patch (org-plan witness/results/witness-copilot-2026-10-11.md, 83f636d)"
   },
   {
     "agent": "claude_code",
     "surface": "plugin-hook",
     "client": "Claude Code 2.1.283, Windows",
     "date": "2026-10-12",
-    "method": "live probe of the chock plugin, every other chock plugin disabled: block-no-verify refused a Bash call and pin-github-actions refused a Write at PreToolUse, before either ran; Stop not exercised (org-plan witness/results/witness-claude-code-2026-10-12.md, 198694b)"
+    "method": "live probe of the chock plugin, with every other chock plugin disabled. `block-no-verify` refused a Bash call and `pin-github-actions` refused a Write at PreToolUse, before either ran. Stop was not exercised (org-plan witness/results/witness-claude-code-2026-10-12.md, 198694b)"
   },
   {
     "agent": "devin",
     "surface": "plugin-hook",
     "client": "Devin CLI 3000.11.3 (local session), Windows",
     "date": "2026-10-08",
-    "method": "live probe of a chock plugin installed with `devin plugins install --local`: block-no-verify and chock-guardrails-protect refused a shell command before it ran; pin-github-actions did not refuse the write, only at turn end (stop); self-protection held (org-plan witness/results/witness-devin-2026-10-08.md, 0f06113)"
+    "method": "live probe of a chock plugin installed with `devin plugins install --local`. `block-no-verify` and `chock-guardrails-protect` refused a shell command before it ran. `pin-github-actions` did not refuse the write itself. It refused only at turn end (stop). Chock's protection of its own files held (org-plan witness/results/witness-devin-2026-10-08.md, 0f06113)"
   },
   {
     "agent": "grok",
     "surface": "plugin-hook",
     "client": "Grok Build 1.0.62, Windows 11",
     "date": "2026-10-17",
-    "method": "live probe of a chock plugin installed with `grok plugin install --trust` (no hook trust prompt) and enabled under Grok's generated name c--users-<user>--chock-marketplace-grok-chock-witness-481da8d4 (username redacted as <user>), not chock-witness: block-no-verify refused a `git commit --no-verify` shell command before it ran (\"`run_terminal_command` blocked by plugin/c--users-<user>--chock-marketplace-grok-chock-witness-481da8d4/hooks: Blocked by chock policy: block-no-verify\"); pin-github-actions is advisory on Grok and the workflow write landed, as labelled, so no gate refusal is claimed (org-plan witness/results/witness-grok-2026-10-17.md, f52c055)"
+    "method": "live probe of a chock plugin installed with `grok plugin install --trust` (no hook trust prompt). It was enabled under the name Grok generated, c--users-<user>--chock-marketplace-grok-chock-witness-481da8d4 (username redacted as <user>), instead of chock-witness. `block-no-verify` refused a `git commit --no-verify` shell command before it ran (\"`run_terminal_command` blocked by plugin/c--users-<user>--chock-marketplace-grok-chock-witness-481da8d4/hooks: Blocked by chock policy: block-no-verify\"). `pin-github-actions` is advisory on Grok and the workflow write landed, as labelled, so no gate refusal is claimed (org-plan witness/results/witness-grok-2026-10-17.md, f52c055)"
   },
   {
     "agent": "goose",
     "surface": "plugin-hook",
     "client": "goose 1.55.0 CLI, Windows 11",
     "date": "2026-10-18",
-    "method": "live probe of a chock plugin auto-discovered from ~/.agents/plugins/chock-witness, with Git for Windows' sh on PATH (goose runs every hook with `sh -c`; without sh every tool call, a benign `git status` too, was denied with \"the hook command failed to run\", on_failure: block): block-no-verify refused a `git commit --no-verify` shell command before it ran (\"Tool call denied by policy hook `chock-witness`: Blocked by chock policy: block-no-verify\") and pin-github-actions refused a write to .github/workflows/witness.yml at the write (\"Unpinned GitHub Action detected\"); a benign `git status` ran (org-plan witness/results/witness-goose-2026-10-18.md, 6316fd3)"
+    "method": "live probe of a chock plugin auto-discovered from `~/.agents/plugins/chock-witness`, with Git for Windows' sh on PATH. goose runs every hook with `sh -c`. Without sh, every tool call was denied, even a harmless `git status`, with \"the hook command failed to run\" (`on_failure: block`). `block-no-verify` refused a `git commit --no-verify` shell command before it ran (\"Tool call denied by policy hook `chock-witness`: Blocked by chock policy: block-no-verify\"). `pin-github-actions` refused a write to `.github/workflows/witness.yml` at the write (\"Unpinned GitHub Action detected\"). A harmless `git status` ran (org-plan witness/results/witness-goose-2026-10-18.md, 6316fd3)"
   },
   {
     "agent": "antigravity",
     "surface": "plugin-hook",
     "client": "Antigravity IDE (version not recorded), Windows 11",
     "date": "2026-10-18",
-    "method": "live probe of chock's shipped plugin built on Windows (store windows_hook_command: quote_free, so the hooks.json command carries no quotes), copied to ~/.gemini/config/plugins/chock-witness, no hand edits: block-no-verify refused the witness kit's GUARD shell command before it ran (\"tool call denied by pre-tool hook: Blocked by chock policy: block-no-verify\"; `git status` then showed \"No commits yet\"); pin-github-actions let a write of .github/workflows/witness.yml with actions/checkout@v4 land and refused at turn end (\"Stop hook blocked termination: Unpinned GitHub Action det…\"), not at the write, and the agent then pinned the action by commit SHA; a benign `git status` ran. The claim is for a Windows build only (org-plan witness/results/witness-antigravity-2026-10-18.md, section \"Re-run on chock's shipped build\", 11121b3)"
+    "method": "live probe of chock's shipped plugin, built on Windows and copied to `~/.gemini/config/plugins/chock-witness` with no hand edits. The store sets `windows_hook_command: quote_free`, so the hooks.json command has no quotes. `block-no-verify` refused the witness kit's GUARD shell command before it ran (\"tool call denied by pre-tool hook: Blocked by chock policy: block-no-verify\"). Then `git status` showed \"No commits yet\". `pin-github-actions` let a write of `.github/workflows/witness.yml` with `actions/checkout@v4` land. It did not refuse the write itself. It refused at turn end (\"Stop hook blocked termination: Unpinned GitHub Action det…\"), and the agent then pinned the action by commit SHA. A harmless `git status` ran. The claim is for a Windows build only (org-plan witness/results/witness-antigravity-2026-10-18.md, section \"Re-run on chock's shipped build\", 11121b3)"
   },
   {
     "agent": "claude_code",

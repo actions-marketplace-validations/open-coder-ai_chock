@@ -30,7 +30,7 @@
   "manifest": {
     "name": "demo-bundle",
     "version": "0.1.0",
-    "description": "Two demo policies. Members: demo-write-gate: blocks on an agent's file writes and at turn end; demo-shell-guard: refuses a matched shell command before it runs; demo-advice: advisory only: skill text, nothing stops a violation. [Advisory skill only; enforcement needs chock installed in the repo.]"
+    "description": "Two demo policies. Members: demo-write-gate: blocks on an agent's file writes and at turn end; demo-shell-guard: refuses a matched shell command before it runs; demo-advice: advisory only. It is skill text, and nothing stops a violation. [Advisory skill only; enforcement needs chock installed in the repo.]"
   },
   "hooks": {
     "hooks": {

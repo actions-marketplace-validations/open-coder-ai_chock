@@ -61,7 +61,13 @@ def _prefix(data: dict[str, Any]) -> str:
         return str(data["label_prefix"])
     agent = bundle_build.CLIENTS[data["format"]].agent
     row = next(r for r in tier_table.rows() if r["agent"] == agent)
-    return f"{row['grade']}, fail mode {row['fail_mode']} (agentseam {row['basis']}): "
+    words = settings()
+    return (
+        words["tier_prefix"]
+        .replace("__GRADE__", row["grade"])
+        .replace("__FAIL__", words["tier_fail_mode"][row["fail_mode"]])
+        .replace("__BASIS__", row["basis"])
+    )
 
 
 def _unasked(data: dict[str, Any], level: int) -> str:
@@ -70,7 +76,7 @@ def _unasked(data: dict[str, Any], level: int) -> str:
     if not data.get("tier_label") or level != bundle_grade.ASKS or any(runtime_bundle.pre_tool_can_ask(agent).values()):
         return ""
     why = vendors.entry(agent)["verdicts"]["degrade_notes"]["escalate"]
-    return f"; the ask is not enforced here: {why}"
+    return f". The ask is not enforced here ({why})"
 
 
 def labels(members: list[Member], catalog: Path, client_id: str, custom: frozenset[str] = frozenset()) -> list[Label]:

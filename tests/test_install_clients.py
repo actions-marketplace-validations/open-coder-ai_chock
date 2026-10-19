@@ -132,8 +132,8 @@ def test_the_flag_overrides_the_selections_client_and_the_marker_records_it(cata
         ("copilot", "refuses a matched shell command", "blocks on an agent's file writes and at turn end"),
         (
             "devin",
-            "best-effort, fails open: refuses a matched shell command",
-            "best-effort, fails open: blocks at turn end only",
+            "best-effort, and a hook error lets the action through: refuses a matched shell command",
+            "best-effort, and a hook error lets the action through: blocks at turn end only",
         ),
     ],
 )
@@ -155,11 +155,11 @@ def test_client_warnings_say_untested_for_every_unwitnessed_client(catalog, tmp_
     root, ref = catalog
     assert _run(tmp_path, v2(root, ref, client)) == 0
     out = capsys.readouterr().out
-    assert ("warning: Untested: chock has not witnessed an install" in out) == (client in UNWITNESSED)
+    assert ("warning: Untested: chock has not seen an install work in this client" in out) == (client in UNWITNESSED)
     assert ("trust them in /hooks" in out) == (client == "codex")
-    assert ("fails open: a hook that errors" in out) == (client == "devin")
+    assert ("A hook that errors or times out lets the action through" in out) == (client == "devin")
     assert ("only at turn end" in out) == (client == "devin")
-    assert ("in VS Code agent mode that is unmeasured" in out) == (client == "copilot")
+    assert ("In VS Code agent mode that is unmeasured" in out) == (client == "copilot")
     assert ("Allow Local Plugin Imports" in out) == (client == "cursor")
 
 

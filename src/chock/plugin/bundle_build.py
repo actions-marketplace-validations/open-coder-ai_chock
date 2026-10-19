@@ -92,7 +92,7 @@ def member_grades(
 
 
 #: Devin's own docs call plugin hooks best-effort and fail-open, so no member line may say it "refuses" flatly.
-_QUALIFIER = {"devin": "best-effort, fails open: "}
+_QUALIFIER = {"devin": "best-effort, and a hook error lets the action through: "}
 
 
 def _describe(client: Client, bundle: dict[str, Any], packages: list, note: str) -> tuple[str, int]:

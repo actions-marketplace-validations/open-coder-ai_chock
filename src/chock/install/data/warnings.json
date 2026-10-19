@@ -6,7 +6,7 @@
         "block-wildcard-agent-permissions",
         "agent-permissions-scan"
       ],
-      "says": "__PRESENT__ is selected without its twin __ABSENT__: the two cover one rule by different means; select both."
+      "says": "__PRESENT__ is selected without its twin __ABSENT__. The two cover one rule in different ways, so select both."
     },
     {
       "kind": "all_present",
@@ -14,7 +14,7 @@
         "rtk-dangerous-actions-blocker",
         "block-destructive-commands"
       ],
-      "says": "__PRESENT__ judge the same commands from one shared table: keep one, or a command is judged twice."
+      "says": "__PRESENT__ check the same commands from one shared table. Keep one, or a command is checked twice."
     },
     {
       "kind": "file_absent",
@@ -22,7 +22,7 @@
         "verify-dependency-exists"
       ],
       "file": ".chock/dependency-allowlist.txt",
-      "says": "__PRESENT__ refuses every new dependency until __FILE__ exists (not found in the current directory); create it first."
+      "says": "__PRESENT__ refuses every new dependency until __FILE__ exists (not found in the current directory). Create it first."
     },
     {
       "kind": "file_absent",
@@ -30,7 +30,7 @@
         "verify-mcp-allowlist"
       ],
       "file": ".chock/mcp-allowlist.json",
-      "says": "__PRESENT__ refuses every MCP server until __FILE__ exists (not found in the current directory); create it first."
+      "says": "__PRESENT__ refuses every MCP server until __FILE__ exists (not found in the current directory). Create it first."
     },
     {
       "kind": "grade",
@@ -44,7 +44,7 @@
     },
     {
       "kind": "overlap",
-      "says": "__PRESENT__ is also in the chock plugin __PLUGIN__ (__PATH__): both copies fire; remove it from one of the two selections."
+      "says": "__PRESENT__ is also in the chock plugin __PLUGIN__ (__PATH__), so both copies fire. Remove it from one of the two selections."
     },
     {
       "kind": "client",
@@ -58,21 +58,21 @@
       "clients": [
         "devin"
       ],
-      "says": "Devin runs plugin hooks best-effort and fails open: a hook that errors or times out lets the action through."
+      "says": "Devin runs plugin hooks on a best-effort basis. A hook that errors or times out lets the action through."
     },
     {
       "kind": "client",
       "clients": [
         "devin"
       ],
-      "says": "This client names no file-write tool a hook can match, so a gate judges what a turn wrote only at turn end; the write itself is not held."
+      "says": "This client names no file-write tool a hook can match. So a gate checks what a turn wrote only at turn end, and it does not stop the write when it happens."
     },
     {
       "kind": "client",
       "clients": [
         "copilot"
       ],
-      "says": "A gate judges the write before it lands in Copilot CLI (witnessed 2026-10-11, CLI 1.0.94 on Windows); in VS Code agent mode that is unmeasured."
+      "says": "In Copilot CLI, a gate checks the write before it lands (seen in a live run on 2026-10-11, CLI 1.0.94 on Windows). In VS Code agent mode that is unmeasured."
     },
     {
       "kind": "client",
@@ -86,28 +86,28 @@
       "clients": [
         "goose"
       ],
-      "says": "goose denies a PreToolUse call whose hook fails, because every entry sets on_failure: block; its Stop hooks stay fail-open, so a gate that fails at turn end lets the turn finish."
+      "says": "goose denies a PreToolUse call when its hook fails, because every entry sets `on_failure: block`. Its Stop hooks keep the default, so if a gate fails at turn end, the turn still finishes."
     },
     {
       "kind": "client",
       "clients": [
         "grok"
       ],
-      "says": "Grok's hooks fail open: a timeout, a crash or malformed output lets the action through, only an explicit deny blocks, and an allowManagedHooksOnly policy skips plugin hooks. No gate runs here: agentseam records neither a write-tool vocabulary nor a blocking Stop for grok."
+      "says": "If a Grok hook times out, crashes or returns malformed output, the action goes through. Only an explicit deny blocks, and an allowManagedHooksOnly policy skips plugin hooks. No gate runs here, because agentseam records neither a write-tool vocabulary nor a blocking Stop for grok."
     },
     {
       "kind": "client",
       "clients": [
         "antigravity"
       ],
-      "says": "Antigravity documents no fail mode for a hook and no plugin-root variable: the hooks name the plugin folder by absolute path, and a gate judges what a turn wrote only at turn end."
+      "says": "Antigravity documents no fail mode for a hook and no plugin-root variable. The hooks name the plugin folder by absolute path, and a gate checks what a turn wrote only at turn end."
     },
     {
       "kind": "client",
       "clients": [
         "goose"
       ],
-      "says": "On Windows, goose runs every hook with `sh -c`, so Git for Windows' sh must be on PATH; without it every tool call is denied, a harmless one too, because the hook cannot start (on_failure: block)."
+      "says": "On Windows, goose runs every hook with `sh -c`, so Git for Windows' sh must be on PATH. Without it, every tool call is denied, even a harmless one, because the hook cannot start (`on_failure: block`)."
     },
     {
       "kind": "client",
@@ -128,14 +128,14 @@
       "clients": [
         "kimi-code"
       ],
-      "says": "Kimi Code lets a call through when a hook errors, times out or exits with any code other than 2, cannot prompt (an ask is not enforced there), and applies a plugin to every project you open; it installs from its TUI only, and runs a copy, so reinstall after a rebuild."
+      "says": "Kimi Code lets a call through when a hook errors, times out or exits with any code other than 2. It cannot prompt, so an ask is not enforced there. It applies a plugin to every project you open. It installs from its TUI only and runs a copy, so reinstall after a rebuild."
     },
     {
       "kind": "client",
       "clients": [
         "kimi-code"
       ],
-      "says": "On Windows, the shell Kimi Code runs hook commands with is unmeasured, and the hooks read ${KIMI_PLUGIN_ROOT}; this path is not tested there."
+      "says": "On Windows, the shell Kimi Code runs hook commands with is unmeasured, and the hooks read ${KIMI_PLUGIN_ROOT}. This path is not tested there."
     },
     {
       "kind": "client",
@@ -165,7 +165,7 @@
         "kimi-code",
         "factory-droid"
       ],
-      "says": "Untested: chock has not witnessed an install in this client. Its steps, its hooks and the plugin version string (<bundle.version>+<digest12>) are unmeasured there."
+      "says": "Untested: chock has not seen an install work in this client in a live run. Its steps, its hooks and the plugin version string (<bundle.version>+<digest12>) are unmeasured there."
     }
   ]
 }
