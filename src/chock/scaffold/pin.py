@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from importlib import metadata
@@ -15,7 +16,20 @@ import chock
 REMOTE_TIMEOUT = 600
 LOCAL_TIMEOUT = 60
 ALLOWED_PROTOCOLS = "https:ssh:file:git"
-INERT = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false")
+#: Hooks off, fsmonitor off, and line endings as committed: a checkout under `core.autocrlf=true`
+#: (Windows' usual setting) would hash differently from the same commit on Linux.
+INERT = (
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.autocrlf=false",
+    "-c",
+    "core.eol=lf",
+)
+_TEXT_PROBE = 8000  # git's own binary heuristic: a NUL in the first 8000 bytes
+_VCS_DIR = ".git"
 
 _DROPPED_ENV = frozenset(
     {
@@ -143,11 +157,62 @@ def _clone_ref(source: str, remote: str, ref: str | None, into: Path) -> str | N
     return (resolved.stdout.strip() or None) if resolved.returncode == 0 else None
 
 
+def _committed_tree(local: Path) -> tuple[Path, str] | None:
+    """(toplevel, prefix) when `local` is a directory that HEAD of its checkout holds, else None."""
+    try:
+        found = _run(["git", "-C", str(local), *INERT, "rev-parse", "--show-toplevel", "--show-prefix", "HEAD"])
+    except (OSError, RuntimeError):
+        return None
+    lines = found.stdout.splitlines() if found.returncode == 0 else []
+    if len(lines) != 3:  # noqa: PLR2004 -- one line per flag, then the commit
+        return None
+    toplevel, prefix, _head = lines
+    tracked = _run(["git", "-C", str(local), *INERT, "rev-parse", "--verify", "--quiet", f"HEAD:{prefix}"])
+    if tracked.returncode != 0:
+        return None
+    return Path(toplevel), prefix
+
+
+def _is_text(data: bytes) -> bool:
+    return b"\0" not in data[:_TEXT_PROBE]
+
+
+def _copy_normalised(local: Path, into: Path) -> None:
+    """Copy a plain directory, text files to LF: the bytes git would commit, so a later clone verifies.
+
+    Symlinks are copied as links, never followed (`os.walk` stays inside `into`): the pack check refuses
+    them later, and nothing outside the copy is read or rewritten.
+    """
+    shutil.copytree(local, into, symlinks=True, ignore=shutil.ignore_patterns(_VCS_DIR))
+    for parent, _dirs, files in os.walk(into):
+        for path in (Path(parent, name) for name in files):
+            if path.is_symlink():
+                continue
+            data = path.read_bytes()
+            if b"\r\n" in data and _is_text(data):
+                path.write_bytes(data.replace(b"\r\n", b"\n"))
+
+
+def _snapshot_local(source: str, local: Path, into: Path) -> tuple[Path, str | None]:
+    """A local source with no ref: a clone of its checkout at HEAD, or the directory as git would commit it."""
+    committed = _committed_tree(local)
+    if committed is None:
+        _copy_normalised(local, into)
+        return into, None
+    toplevel, prefix = committed
+    head = _clone_ref(source, toplevel.as_uri(), None, into)
+    return into / prefix, head
+
+
 def fetch_catalog(source: str, ref: str | None, into: Path) -> tuple[Path, str | None]:
-    """Make the catalog available locally. Returns (root, resolved commit or None)."""
+    """Make the catalog available locally. Returns (root, resolved commit or None).
+
+    The returned tree holds the bytes a clone of the catalog holds: a local checkout is cloned at its
+    HEAD (uncommitted edits are left out), a plain directory is copied with its text files normalised to LF.
+    """
     local = Path(source).expanduser()
-    if local.exists() and not ref:
-        return local.resolve(), None
+    if local.is_dir() and not ref:
+        return _snapshot_local(source, local.resolve(), into)
     remote = str(local.resolve()) if local.exists() else source
 
     if ref and _FULL_SHA.fullmatch(ref):
