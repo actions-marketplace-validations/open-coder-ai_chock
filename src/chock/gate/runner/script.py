@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -26,6 +27,9 @@ _SCRIPT_ALLOW, _SCRIPT_BLOCK, _SCRIPT_ASK, _SCRIPT_WARN = 0, 1, 3, 4
 #: is a script that failed, not one that refused.
 _CRASH_MARKERS = ("traceback (most recent call last)", "syntax error", "syntaxerror", "unexpected eof")
 
+#: Running a gate never writes bytecode into the pack it judges.
+_BYTECODE_OFF = {"PYTHONDONTWRITEBYTECODE": "1"}
+
 _UNDECIDED = " -- refusing rather than allowing what it never judged"
 
 _FINDINGS_KEY = "findings"
@@ -40,6 +44,7 @@ def _spawn(script: Path, ctx: GateContext, payload: dict, timeout: float) -> sub
         encoding="utf-8",
         errors="replace",
         cwd=ctx.repo_root,
+        env={**os.environ, **_BYTECODE_OFF},
         timeout=timeout,
         check=False,
     )

@@ -38,8 +38,18 @@ _BYTECODE_DIR = "__pycache__"
 _BYTECODE_SUFFIXES = (".pyc", ".pyo")
 
 
+def _is_bytecode(path: Path) -> bool:
+    return _BYTECODE_DIR in path.parts or path.suffix in _BYTECODE_SUFFIXES
+
+
 def _is_pack_content(path: Path) -> bool:
-    return path.is_file() and _BYTECODE_DIR not in path.parts and path.suffix not in _BYTECODE_SUFFIXES
+    return path.is_file() and not _is_bytecode(path)
+
+
+def pack_bytecode(pack_dir: Path) -> list[str]:
+    """Posix-relative names of the build artifacts a pack ships: `__pycache__` entries and `.pyc`/`.pyo` files."""
+    found = (p.relative_to(pack_dir).as_posix() for p in pack_dir.rglob("*") if p.is_file() and _is_bytecode(p))
+    return sorted(found)
 
 
 def _pack_files(pack_dir: Path) -> list[tuple[str, Path]]:
@@ -181,6 +191,10 @@ def verify_lock(repo_root: Path | None = None) -> tuple[bool, list[str]]:
         if not pack_dir.exists():
             failures.append(f"{entry['id']}: pack directory missing")
             continue
+        failures += [
+            f"{entry['id']}: ships build artifact {name} (bytecode is never catalog content; delete it)"
+            for name in pack_bytecode(pack_dir)
+        ]
         actual = compute_pack_hash(pack_dir)
         if actual != entry.get("sha256"):
             failures.append(f"{entry['id']}: hash mismatch (expected {entry.get('sha256')}, got {actual})")

@@ -6,6 +6,7 @@ wires is run the way its client runs it: guards, gates, the stop check and Stop.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -31,7 +32,6 @@ from chock.plugin.bundle_build import CLIENTS, merged_files
 SHARED = runtime_bundle.SHARED_FILE
 #: A gate's Stop refusal: Cursor's is `followup_message`, as any gate's (test_stop_reentry_wire); exit 2 elsewhere too.
 STOP_REFUSES = {**STOP_REFUSALS, "cursor": lambda p: p.returncode == 2 or "followup_message" in _body(p)}
-_PIN_LINE = re.compile(r"^CHOCK_RUNTIME_DIGEST = '[0-9a-f]{64}'$", re.MULTILINE)
 
 
 def _rewrite(path: Path, change) -> None:
@@ -47,8 +47,10 @@ def _unreadable(path: Path) -> None:
 FAULTS = {
     "missing": lambda path: path.unlink(),
     "unreadable": _unreadable,
-    "other-version": lambda path: _rewrite(path, lambda t: _PIN_LINE.sub(f"CHOCK_RUNTIME_DIGEST = '{'0' * 64}'", t)),
-    "no-pin": lambda path: _rewrite(path, lambda t: _PIN_LINE.sub("", t)),
+    "edited-one-byte": lambda path: _rewrite(path, lambda t: t + "# edited\n"),
+    "edited-and-declaring-the-old-digest": lambda path: _rewrite(
+        path, lambda t: t + f"CHOCK_RUNTIME_DIGEST = {runtime_bundle.shared_pin()!r}\n"
+    ),
     "import-error": lambda path: _rewrite(path, lambda t: "raise ImportError('broken')\n" + t),
     "syntax-error": lambda path: _rewrite(path, lambda t: t + "\ndef (\n"),
     "not-utf8": lambda path: path.write_bytes(b"\xff\xfe" + path.read_bytes()),
@@ -90,9 +92,10 @@ def test_every_bundle_ships_the_pinned_shared_runtime_beside_its_entry(installed
     assert f"_CHOCK_RUNTIME_PIN = {runtime_bundle.shared_pin()!r}\n" in entry.read_text(encoding="utf-8")
 
 
-def test_the_pin_is_the_shared_runtime_s_own_digest() -> None:
+def test_the_pin_is_the_sha256_of_the_shared_runtime_s_bytes() -> None:
     text = runtime_bundle.render_shared()
-    assert f"CHOCK_RUNTIME_DIGEST = {runtime_bundle.shared_pin()!r}\n" in text
+    assert runtime_bundle.shared_pin() == hashlib.sha256(text.encode("utf-8")).hexdigest()
+    assert "CHOCK_RUNTIME_DIGEST" not in text
     assert not re.search(r"^\s*(?:import|from)\s+(?:chock|agentseam)\b", text, re.MULTILINE)
 
 
