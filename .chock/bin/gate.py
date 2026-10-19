@@ -1139,6 +1139,9 @@ VERDICT_ERROR = "error"
 _GIT_EVENTS = ("pre-commit", "pre-push", "commit-msg")
 
 
+_UNJUDGED = " -- refusing rather than allowing what it never judged."
+
+
 def _policy_id(gate_path: Path) -> str | None:
     """The policy a compiled gate belongs to, from `.chock/compiled/<id>/<surface>/`, else None."""
     parents = gate_path.resolve().parents
@@ -1627,10 +1630,10 @@ def _judge_kind(kind: Any, ctx: Any, params: dict, judged: str, gate_path: Path)
     except ListingError as exc:
         print(f"gate: {inert(str(exc))} -- refusing rather than judging a change it cannot read.", file=sys.stderr)
     except PatternDeadlineError as exc:
-        policy = _policy_id(gate_path) or gate_path.name
-        print(
-            f"gate: {policy}: {inert(str(exc))} -- refusing rather than allowing what it never judged.", file=sys.stderr
-        )
+        # The reason names a time or the judge's own last stderr line, never the judged text; stderr is
+        # the runner's one channel to the person.
+        reason = f"gate: {_policy_id(gate_path) or gate_path.name}: {inert(str(exc))}{_UNJUDGED}"
+        print(reason, file=sys.stderr)  # codeql[py/clear-text-logging-sensitive-data]
     return 2, VERDICT_ERROR
 
 

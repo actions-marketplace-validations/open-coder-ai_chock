@@ -9,11 +9,11 @@ detected here; the runtime deadline (`chock.gate.budget`) is the backstop for ev
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from re import _constants as sre_constants
 from re import _parser as sre_parser
+from re import error as re_error
 
 #: The gate params that hold a regular expression.
 REGEX_PARAM_SUFFIXES = ("_pattern", "_regex", "_pragma")
@@ -174,7 +174,7 @@ def catastrophic(pattern: str) -> str | None:
     """Why `pattern` can take exponential time on a crafted line, or None; a pattern that does not compile is None too."""
     try:
         parsed = sre_parser.parse(pattern)
-    except (re.error, ValueError, OverflowError, RecursionError):
+    except (re_error, ValueError, OverflowError, RecursionError):
         return None
     hit = _walk(list(parsed), [], in_loop=False)
     if hit is None:
