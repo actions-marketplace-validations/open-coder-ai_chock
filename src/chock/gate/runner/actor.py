@@ -64,31 +64,13 @@ def _config_agent_env(repo_root: Path) -> list[str]:
 
 
 def agent_signal(repo_root: Path | None = None) -> str | None:
-    """The marker that makes this an agent's commit, or None for a person's.
+    """The first agent marker set, or None for a person's shell: a truthy `CHOCK_AGENT_COMMIT`, `CLAUDECODE=1`,
+    a non-empty `AI_AGENT`, or any non-empty variable named under the repository's `agent_commit_env`.
 
-    An explicit `CHOCK_AGENT_COMMIT` decides: truthy is an agent, `0|false|no|off` is a person
-    whatever else is set (an escape hatch for a person's own git in an agent's terminal, which an
-    agent can set too). Otherwise `CLAUDECODE=1`, a non-empty `AI_AGENT`, or any non-empty variable
-    named in the repository's `agent_commit_env` marks an agent.
+    One rule for every check (commit, push, tool call, stop, resume, the person-only commands). `CHOCK_AGENT_COMMIT=0`
+    clears nothing a vendor set, since an agent can set it too: a person's git in an agent's terminal is told apart
+    by having no vendor marker, which is what their own shell has.
     """
-    env = os.environ
-    explicit = env.get(AGENT_COMMIT_ENV, "").strip().lower()
-    if explicit in _HUMAN_ENV:
-        return None
-    if explicit:
-        return AGENT_COMMIT_ENV
-    if env.get(CLAUDECODE_ENV) == "1":
-        return f"{CLAUDECODE_ENV}=1"
-    if env.get(AI_AGENT_ENV, "").strip():
-        return AI_AGENT_ENV
-    configured = _config_agent_env(repo_root) if repo_root is not None else []
-    return next((name for name in configured if env.get(name)), None)
-
-
-def stop_agent_signal(repo_root: Path | None = None) -> str | None:
-    """The first agent marker set, for every stop check (commit, push, stop, resume): `CHOCK_AGENT_COMMIT=0`,
-    the commit rule's escape hatch for a person's git in an agent's terminal, clears nothing, since an agent can
-    set it too."""
     env = os.environ
     named = env.get(AGENT_COMMIT_ENV, "").strip().lower()
     checks = (
@@ -222,19 +204,16 @@ def approval(repo_root: Path | None = None) -> dict[str, str]:
 
 
 def _ask_refusal(policy_id: str | None, signal: str | None) -> str:
-    """Why a hook refuses an `ask`, and the one way through: a person's explicit override."""
+    """Why a hook refuses an `ask`, and the one way through: a person's explicit override, which only a person is told."""
     if policy_id is None:
         return f"gate: this gate asks a person, a hook cannot prompt, and it has no policy id for {ALLOW_ENV} to name."
-    person = f"{ALLOW_ENV}={policy_id}"
+    lead = f"gate: {policy_id} asks a person to decide, and a hook cannot prompt."
     if signal:
-        person = f"{person} {AGENT_COMMIT_ENV}=0"
-        who = f" This is treated as an agent's ({signal}), and an agent cannot answer for the person."
-    else:
-        who = ""
-    return (
-        f"gate: {policy_id} asks a person to decide, and a hook cannot prompt.{who} "
-        f"To go ahead, a person runs this one command from their own shell with {person} set."
-    )
+        return (
+            f"{lead} This is treated as an agent's ({signal}), and an agent cannot answer for the person: "
+            "ask them. If they agree, they run this one command from their own shell."
+        )
+    return f"{lead} To go ahead, a person runs this one command from their own shell with {ALLOW_ENV}={policy_id} set."
 
 
 def _ask_answered(policy_id: str | None, signal: str | None) -> bool:

@@ -165,6 +165,8 @@ def test_adapter_instructs_when_chock_is_not_importable(tmp_path: Path, monkeypa
     context = decision["hookSpecificOutput"]["additionalContext"]
     assert "chock sync --repo ." in context
     assert "NOT installed" in context
+    # The reader is an agent, and `chock sync` refuses an agent's shell: the advice is to ask a person.
+    assert "a person runs, from their own shell" in context and "Ask them to run it" in context
 
 
 def test_adapter_arms_a_fresh_clone_end_to_end(tmp_path: Path) -> None:

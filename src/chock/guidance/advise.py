@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from chock import resources, yamlio
-from chock.config import policy_status
+from chock.config import committed_config_text, policy_status
 from chock.guidance import match, selection
 from chock.guidance.match import Hit
 from chock.guidance.source import GuidanceError, load_catalog, read_text
@@ -64,19 +64,34 @@ def _too_deep(text: str) -> bool:
     return any(len(line) - len(line.lstrip(" ")) > 2 * _MAX_DEPTH for line in text.splitlines())
 
 
-def _enabled(repo: Path, policy: str, cap: int) -> bool:
-    """Whether the repo's config leaves the policy on. The config is read like every other file here:
-    no symlink, no oversize file; a config that cannot be parsed is an error, never a guess."""
-    raw = read_text(repo, _CONFIG, cap)
-    if raw is not None and _too_deep(raw):
+def _parsed(text: str | None, cap: int) -> dict:
+    """One config text as a mapping (empty when absent): the depth and size caps apply before the parser runs."""
+    if text is None:
+        return {}
+    if len(text.encode("utf-8")) > cap:
+        msg = f"{_CONFIG} is larger than {cap} bytes; refusing to read it"
+        raise GuidanceError(msg)
+    if _too_deep(text):
         msg = f"{_CONFIG} nests deeper than {_MAX_DEPTH} levels; refusing to parse it"
         raise GuidanceError(msg)
+    config = yamlio.safe_load(text) or {}
+    return config if isinstance(config, dict) else {}
+
+
+def _enabled(repo: Path, policy: str, cap: int) -> bool:
+    """Whether the repo's config leaves the policy on for the agent asking. The config is read like every other
+    file here (no symlink, no oversize file; a config that cannot be parsed is an error, never a guess), and a
+    disable counts only once committed: the caller is an agent, and an uncommitted edit changes nothing for it."""
+    raw = read_text(repo, _CONFIG, cap)
+    head = committed_config_text(repo)
     try:
-        config = (yamlio.safe_load(raw) or {}) if raw is not None else {}
-        return policy_status(config if isinstance(config, dict) else {}, policy)["state"] != "disabled"
+        config, committed = _parsed(raw, cap), _parsed(head, cap)
+    except GuidanceError:
+        raise
     except Exception as exc:
         msg = f"{_CONFIG} cannot be read ({type(exc).__name__})"
         raise GuidanceError(msg) from exc
+    return policy_status(config, policy, committed=committed)["state"] != "disabled"
 
 
 def _verdicts(repo: Path, rel: str, catalog_packs: dict[str, set[str]], cap: int) -> tuple[dict[str, str], str]:

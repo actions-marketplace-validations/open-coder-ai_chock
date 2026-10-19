@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -130,12 +131,32 @@ def test_an_oversize_selection_is_refused(tmp_path):
     assert ask(root, plan=PLAN, paths=[J + "F.java"])["isError"] is True
 
 
-def test_a_disabled_policy_gives_no_guidance(tmp_path):
-    root = install(tmp_path)
+def _disable(root, *, commit: bool) -> None:
     (root / ".chock").mkdir(exist_ok=True)
     (root / ".chock" / "config.yaml").write_text("policies:\n  disabled: [java-security]\n", encoding="utf-8")
+    if commit:
+        for args in (
+            ["init", "-q"],
+            ["add", ".chock/config.yaml"],
+            ["-c", "user.name=t", "-c", "user.email=t@x", "commit", "-qm", "off"],
+        ):
+            subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+
+
+def test_a_committed_disable_gives_no_guidance(tmp_path):
+    root = install(tmp_path)
+    _disable(root, commit=True)
     result = ask(root, plan=PLAN, paths=[J + "F.java"])
     assert result["structuredContent"]["guidance"] == []
+    assert result["isError"] is False
+
+
+def test_an_uncommitted_disable_changes_nothing_for_the_agent_asking(tmp_path):
+    """The caller is an agent: a disable it could have written itself counts only once a person committed it."""
+    root = install(tmp_path)
+    _disable(root, commit=False)
+    result = ask(root, plan=PLAN, paths=[J + "F.java"])
+    assert result["structuredContent"]["guidance"]
     assert result["isError"] is False
 
 
