@@ -8,7 +8,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tarfile
 from importlib import metadata
 from pathlib import Path
 
@@ -158,8 +157,8 @@ def _clone_ref(source: str, remote: str, ref: str | None, into: Path) -> str | N
     return (resolved.stdout.strip() or None) if resolved.returncode == 0 else None
 
 
-def _committed_tree(local: Path) -> tuple[Path, str, str] | None:
-    """(toplevel, prefix, HEAD) when `local` is a directory HEAD of its checkout holds, else None."""
+def _committed_tree(local: Path) -> tuple[Path, str] | None:
+    """(toplevel, prefix) when `local` is a directory that HEAD of its checkout holds, else None."""
     try:
         found = _run(["git", "-C", str(local), *INERT, "rev-parse", "--show-toplevel", "--show-prefix", "HEAD"])
     except (OSError, RuntimeError):
@@ -167,35 +166,11 @@ def _committed_tree(local: Path) -> tuple[Path, str, str] | None:
     lines = found.stdout.splitlines() if found.returncode == 0 else []
     if len(lines) != 3:  # noqa: PLR2004 -- one line per flag, then the commit
         return None
-    toplevel, prefix, head = lines
+    toplevel, prefix, _head = lines
     tracked = _run(["git", "-C", str(local), *INERT, "rev-parse", "--verify", "--quiet", f"HEAD:{prefix}"])
     if tracked.returncode != 0:
         return None
-    return Path(toplevel), prefix, head
-
-
-def _extract(tar: Path, into: Path) -> None:
-    try:
-        with tarfile.open(tar) as archive:
-            if hasattr(tarfile, "data_filter"):
-                archive.extractall(into, filter="data")
-            else:  # Python before 3.11.4 has no extraction filters; the archive is git's own export of HEAD
-                archive.extractall(into)  # noqa: S202
-    except (tarfile.TarError, OSError) as exc:
-        msg = f"could not unpack catalog {into.name} at HEAD: {exc}"
-        raise RuntimeError(msg) from exc
-
-
-def _archive_head(toplevel: Path, prefix: str, into: Path) -> None:
-    """Export `prefix` of HEAD into `into`, bytes as committed: what any clone of this commit holds."""
-    into.mkdir(parents=True, exist_ok=True)
-    tar = into.parent / f"{into.name}.tar"
-    done = _run(["git", "-C", str(toplevel), *INERT, "archive", "--format=tar", f"--output={tar}", f"HEAD:{prefix}"])
-    if done.returncode != 0:
-        msg = f"could not read catalog {toplevel} at HEAD:\n{done.stderr.strip()}"
-        raise RuntimeError(msg)
-    _extract(tar, into)
-    tar.unlink()
+    return Path(toplevel), prefix
 
 
 def _is_text(data: bytes) -> bool:
@@ -218,26 +193,26 @@ def _copy_normalised(local: Path, into: Path) -> None:
                 path.write_bytes(data.replace(b"\r\n", b"\n"))
 
 
-def _snapshot_local(local: Path, into: Path) -> tuple[Path, str | None]:
-    """A local source with no ref: HEAD of its checkout, or the directory as git would commit it."""
+def _snapshot_local(source: str, local: Path, into: Path) -> tuple[Path, str | None]:
+    """A local source with no ref: a clone of its checkout at HEAD, or the directory as git would commit it."""
     committed = _committed_tree(local)
     if committed is None:
         _copy_normalised(local, into)
         return into, None
-    toplevel, prefix, head = committed
-    _archive_head(toplevel, prefix, into)
-    return into, head
+    toplevel, prefix = committed
+    head = _clone_ref(source, toplevel.as_uri(), None, into)
+    return into / prefix, head
 
 
 def fetch_catalog(source: str, ref: str | None, into: Path) -> tuple[Path, str | None]:
     """Make the catalog available locally. Returns (root, resolved commit or None).
 
-    The returned tree holds the bytes a clone of the catalog would: a local checkout is read at HEAD
-    (uncommitted edits are left out), a plain directory with its text files normalised to LF.
+    The returned tree holds the bytes a clone of the catalog holds: a local checkout is cloned at its
+    HEAD (uncommitted edits are left out), a plain directory is copied with its text files normalised to LF.
     """
     local = Path(source).expanduser()
     if local.is_dir() and not ref:
-        return _snapshot_local(local.resolve(), into)
+        return _snapshot_local(source, local.resolve(), into)
     remote = str(local.resolve()) if local.exists() else source
 
     if ref and _FULL_SHA.fullmatch(ref):

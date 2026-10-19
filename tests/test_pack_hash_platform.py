@@ -123,7 +123,7 @@ def test_a_catalog_below_the_checkout_root_is_read_at_head(tmp_path: Path) -> No
 
 
 def test_an_uncommitted_directory_in_a_checkout_is_copied_as_git_would_commit_it(tmp_path: Path) -> None:
-    """Nothing at HEAD to export: the working tree is the only source, so it is read with LF like a commit."""
+    """Nothing at HEAD to clone: the working tree is the only source, so it is read with LF like a commit."""
     _catalog(tmp_path / "catalog")
     untracked = tmp_path / "catalog" / "untracked"
     _write_pack(untracked / "base" / PACK, newline=b"\r\n")
