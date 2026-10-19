@@ -194,7 +194,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  from {args.source} at {added.commit}")
     print(f"  sha256 {added.sha256}")
     if not args.ref and added.commit:
-        print(f"  (unpinned: this was the default branch. Pin with --ref, or --verify-sha {added.sha256})")
+        pin = f"Pin with --ref {added.commit}, or --verify-sha {added.sha256}"
+        print(f"  (unpinned: a later run may fetch another commit. {pin})")
 
     if args.skip_compile:
         print("Run `chock sync --repo .` to compile it.")
