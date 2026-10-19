@@ -14,6 +14,9 @@ import time
 #: timeout is this plus a start-up margin (chock.compile.emitters.in_agent_hooks).
 ENGINE_BUDGET_SECONDS = 30
 
+#: Added to the environment of every policy script, so running a gate never writes bytecode into its pack.
+BYTECODE_OFF = {"PYTHONDONTWRITEBYTECODE": "1"}
+
 
 def engine_deadline():
     """The monotonic instant this invocation's budget runs out."""

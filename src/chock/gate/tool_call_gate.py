@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
-from .budget import allowed_seconds, engine_deadline, time_left
+from .budget import BYTECODE_OFF, allowed_seconds, engine_deadline, time_left
 from .session_log import (
     session_for,
     session_outcome,
@@ -85,6 +86,7 @@ def _tool_call_script(spec, root, payload, deadline=None):
             encoding="utf-8",
             errors="replace",
             cwd=str(root),
+            env={**os.environ, **BYTECODE_OFF},
             timeout=time_left(deadline, argv),
             check=False,
         )

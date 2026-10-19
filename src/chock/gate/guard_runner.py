@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .budget import ENGINE_BUDGET_SECONDS, engine_deadline, engine_remaining, time_left
+from .budget import BYTECODE_OFF, ENGINE_BUDGET_SECONDS, engine_deadline, engine_remaining, time_left
 from .runner.journal import log_write
 
 GUARD_VIOLATION = 1
@@ -87,7 +87,7 @@ def bash_candidates() -> list[str]:
 
 def interpreter_env(interpreter: str) -> dict[str, str]:
     """The environment a guard runs in: on Windows, Git's usr/bin ahead on PATH for sed and grep."""
-    env = dict(os.environ)
+    env = {**os.environ, **BYTECODE_OFF}
     env.pop(CAN_ASK_ENV, None)  # only a caller that knows the client may say; never inherited
     if os.name != _WINDOWS:
         return env

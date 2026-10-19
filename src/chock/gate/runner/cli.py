@@ -64,6 +64,18 @@ def _writes(raw: str) -> dict[str, str]:
     return _texts(raw, "writes")
 
 
+#: An agent event whose stdin is not UTF-8 is refused, never read with replacement characters in its place.
+_EXIT_UNDECODABLE = 2
+
+
+def _agent_stdin() -> str | None:
+    """The agent event's stdin as UTF-8 text, or None when its bytes do not decode."""
+    try:
+        return sys.stdin.buffer.read().decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
 def _utf8_streams() -> None:
     """Speak UTF-8 on stdin and stderr whatever the console code page, so a match cannot crash the verdict."""
     for stream in (sys.stdin, sys.stderr):
@@ -103,7 +115,12 @@ def main(argv: list[str] | None = None) -> int:
         # cannot be read back from it. {"writes": {"<path>": "<text>"}, "added": {"<path>": "<text>"}},
         # `added` present only for an edit, carrying the text it introduces.
         # Paths are named from the directory the runtime works in, which may sit below the git top-level.
-        raw = sys.stdin.read()
+        raw = _agent_stdin()
+        if raw is None:
+            print(
+                "chock: the hook payload on stdin is not UTF-8; refusing rather than judging a guess", file=sys.stderr
+            )
+            return _EXIT_UNDECODABLE
         return run(
             Path(args.gate),
             args.event,
