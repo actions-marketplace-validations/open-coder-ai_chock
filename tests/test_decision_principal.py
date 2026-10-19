@@ -198,7 +198,8 @@ def test_a_gate_with_nothing_to_judge_leaves_the_line_to_the_runtime(tmp_path: P
         ({"AI_AGENT": "claude-code_2.1.0_agent"}, "agent:claude_code"),
         ({"AI_AGENT": "Some Agent!"}, "agent:someagent"),
         ({"CHOCK_AGENT_COMMIT": "1"}, "agent:unknown"),
-        ({"CHOCK_AGENT_COMMIT": "0", "CLAUDECODE": "1"}, "person"),
+        ({"CHOCK_AGENT_COMMIT": "0", "CLAUDECODE": "1"}, "agent:claude_code"),
+        ({"CHOCK_AGENT_COMMIT": "0"}, "person"),
     ],
 )
 def test_a_git_hook_line_names_the_actor_by_the_actor_rule(

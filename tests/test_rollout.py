@@ -161,7 +161,17 @@ def test_a_person_may_set_the_level_for_their_own_commit(repo: Path, monkeypatch
     assert _judge(repo, "pre-commit") == (0, "warn")
 
 
-@pytest.mark.parametrize("env", [{"CLAUDECODE": "1"}, {"AI_AGENT": "claude-code_2_agent"}, {"CHOCK_AGENT_COMMIT": "1"}])
+@pytest.mark.parametrize(
+    "env",
+    [
+        {"CLAUDECODE": "1"},
+        {"AI_AGENT": "claude-code_2_agent"},
+        {"CHOCK_AGENT_COMMIT": "1"},
+        # `CHOCK_AGENT_COMMIT=0` clears no vendor marker: an agent can set it too.
+        {"CLAUDECODE": "1", "CHOCK_AGENT_COMMIT": "0"},
+        {"AI_AGENT": "claude-code_2_agent", "CHOCK_AGENT_COMMIT": "0"},
+    ],
+)
 def test_an_agents_commit_ignores_the_override(repo: Path, monkeypatch: pytest.MonkeyPatch, env: dict) -> None:
     for name, value in env.items():
         monkeypatch.setenv(name, value)

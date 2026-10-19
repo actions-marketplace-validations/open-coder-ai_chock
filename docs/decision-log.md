@@ -77,7 +77,7 @@ and `target` from the hook that ran it. A git hook's line carries `actor` only: 
 
 | Field | Value |
 | :--- | :--- |
-| `actor` | `agent:<client>` for an agent hook (the payload's client, else the bundle's agent). On a git hook, the agent rule a commit is judged by: `CLAUDECODE=1` or `AI_AGENT` names the client, any other marker is `agent:unknown`, none (or `CHOCK_AGENT_COMMIT=0`) is `person` |
+| `actor` | `agent:<client>` for an agent hook (the payload's client, else the bundle's agent). On a git hook, the agent rule a commit is judged by: `CLAUDECODE=1` or `AI_AGENT` names the client, any other marker is `agent:unknown`, none is `person` (`CHOCK_AGENT_COMMIT=0` clears no vendor marker) |
 | `session_id` | the client's session id, when the payload carries one |
 | `target` | a fingerprint of what one tool call touched, never its content (below) |
 
