@@ -209,10 +209,8 @@ def _judge_kind(kind: Any, ctx: Any, params: dict, judged: str, gate_path: Path)
     except ListingError as exc:
         print(f"gate: {inert(str(exc))} -- refusing rather than judging a change it cannot read.", file=sys.stderr)
     except PatternDeadlineError as exc:
-        # The reason names a time or the judge's own last stderr line, never the judged text; stderr is
-        # the runner's one channel to the person.
+        # The reason names a time or the judge's own last stderr line, never the judged text.
         reason = f"gate: {_policy_id(gate_path) or gate_path.name}: {inert(str(exc))}{_UNJUDGED}"
-        # codeql[py/clear-text-logging-sensitive-data]  # noqa: ERA001 -- a suppression, as in chock/output.py
         print(reason, file=sys.stderr)
     return 2, VERDICT_ERROR
 
