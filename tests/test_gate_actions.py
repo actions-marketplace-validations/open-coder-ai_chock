@@ -168,18 +168,30 @@ def test_an_agent_cannot_answer_an_ask(
         monkeypatch.setenv(name, value)
     assert run(_gate(repo, "ask"), "pre-commit", None, repo) == 1
     err = capsys.readouterr().err
-    assert "treated as an agent's" in err
-    assert f"{ALLOW_ENV}={POLICY} CHOCK_AGENT_COMMIT=0" in err
+    assert "treated as an agent's" in err and "ask them" in err
+    assert "CHOCK_AGENT_COMMIT=0" not in err and f"{ALLOW_ENV}=" not in err
 
 
-def test_a_person_in_an_agent_terminal_answers_with_the_escape_hatch(
-    repo: Path, monkeypatch: pytest.MonkeyPatch
+def test_a_person_is_told_the_override_and_an_agent_is_not(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
+    """The recipe is printed to the shell that can honour it: a person's own, with no agent marker."""
     _stage(repo, BAD)
-    monkeypatch.setenv("CLAUDECODE", "1")
+    assert run(_gate(repo, "ask"), "pre-commit", None, repo) == 1
+    assert f"from their own shell with {ALLOW_ENV}={POLICY} set" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("marker", [{"CLAUDECODE": "1"}, {"AI_AGENT": "claude-code_1_agent"}])
+def test_the_escape_hatch_does_not_open_under_a_vendor_marker(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, marker: dict
+) -> None:
+    """`CHOCK_ALLOW=x CHOCK_AGENT_COMMIT=0` in an agent's terminal is what the agent itself can type."""
+    _stage(repo, BAD)
+    for name, value in marker.items():
+        monkeypatch.setenv(name, value)
     monkeypatch.setenv(ALLOW_ENV, POLICY)
     monkeypatch.setenv("CHOCK_AGENT_COMMIT", "0")
-    assert run(_gate(repo, "ask"), "pre-commit", None, repo) == 0
+    assert run(_gate(repo, "ask"), "pre-commit", None, repo) == 1
 
 
 def test_ask_does_not_override_a_block(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
