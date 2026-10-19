@@ -42,12 +42,20 @@ def _is_pack_content(path: Path) -> bool:
     return path.is_file() and _BYTECODE_DIR not in path.parts and path.suffix not in _BYTECODE_SUFFIXES
 
 
+def _pack_files(pack_dir: Path) -> list[tuple[str, Path]]:
+    """(posix-relative name, path) in code-point order of the name: the same order on every platform.
+
+    Sorting `Path` objects compares case-insensitively on Windows, so a pack holding `LICENSE` beside
+    `hooks/` hashed differently there from the hash a Linux checkout recorded.
+    """
+    named = ((p.relative_to(pack_dir).as_posix(), p) for p in pack_dir.rglob("*") if _is_pack_content(p))
+    return sorted(named, key=lambda item: item[0])
+
+
 def compute_pack_hash(pack_dir: Path) -> str:
     """Return a single sha256 for all files in a pack directory, bytecode left out."""
-    files = sorted(p for p in pack_dir.rglob("*") if _is_pack_content(p))
     h = hashlib.sha256()
-    for f in files:
-        rel = f.relative_to(pack_dir).as_posix()
+    for rel, f in _pack_files(pack_dir):
         h.update(rel.encode("utf-8"))
         h.update(b"\0")
         h.update(f.read_bytes())
