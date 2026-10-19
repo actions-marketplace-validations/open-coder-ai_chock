@@ -165,7 +165,7 @@
         "kimi-code",
         "factory-droid"
       ],
-      "says": "Untested: no live run has shown a chock install working in this client. Its steps, its hooks and the plugin version string (<bundle.version>+<digest12>) are unmeasured there."
+      "says": "Untested: chock has not seen an install work in this client in a live run. Its steps, its hooks and the plugin version string (<bundle.version>+<digest12>) are unmeasured there."
     }
   ]
 }

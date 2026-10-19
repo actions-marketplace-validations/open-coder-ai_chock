@@ -276,7 +276,7 @@ def test_labels_come_from_the_tier_table_and_warnings_link_the_evidence_issue(
     assert "advisory only" in lines[ADVISORY_ID] and prefix not in lines[ADVISORY_ID]
     kept = {"goose": "sh must be on PATH", "grok": "returns malformed output", "antigravity": "only at turn end"}
     witnessed = client in kept
-    assert ("warning: Untested: no live run has shown a chock install working in this client" in out) != witnessed
+    assert ("warning: Untested: chock has not seen an install work in this client in a live run" in out) != witnessed
     assert {"Evidence wanted" in out, evidence in out} == {not witnessed}
     assert kept.get(client, "") in out
 

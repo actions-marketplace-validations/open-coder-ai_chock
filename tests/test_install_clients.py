@@ -155,7 +155,7 @@ def test_client_warnings_say_untested_for_every_unwitnessed_client(catalog, tmp_
     root, ref = catalog
     assert _run(tmp_path, v2(root, ref, client)) == 0
     out = capsys.readouterr().out
-    assert ("warning: Untested: no live run has shown a chock install working" in out) == (client in UNWITNESSED)
+    assert ("warning: Untested: chock has not seen an install work in this client" in out) == (client in UNWITNESSED)
     assert ("trust them in /hooks" in out) == (client == "codex")
     assert ("A hook that errors or times out lets the action through" in out) == (client == "devin")
     assert ("only at turn end" in out) == (client == "devin")

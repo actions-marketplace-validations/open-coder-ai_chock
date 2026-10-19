@@ -248,7 +248,7 @@ def test_labels_come_from_the_tier_table_and_warnings_link_the_evidence_issue(
     prefix = "best-effort, and a hook error lets the action through (agentseam vendor-docs): "
     assert f"{prefix}refuses a matched shell command" in lines[GUARD_ID]
     assert "advisory only" in lines[ADVISORY_ID] and prefix not in lines[ADVISORY_ID]
-    assert "warning: Untested: no live run has shown a chock install working in this client" in out
+    assert "warning: Untested: chock has not seen an install work in this client in a live run" in out
     assert evidence in out
 
 
