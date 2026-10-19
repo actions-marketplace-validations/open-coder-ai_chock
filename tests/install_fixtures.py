@@ -6,6 +6,7 @@ import base64
 import json
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,7 @@ import yaml
 from bundle_fixtures import ADVISORY_ID, GATE_ID, GUARD_ID, make_members
 
 from chock.lock import compute_pack_hash
+from chock.scaffold.pin import fetch_catalog
 
 IDS = (GUARD_ID, GATE_ID, ADVISORY_ID)
 VERSION = "0.0.1"
@@ -48,9 +50,17 @@ def side_commit(root: Path) -> str:
     return sha
 
 
+def fetched_hashes(root: Path, ids: tuple[str, ...] = IDS) -> dict[str, str]:
+    """Each pack's sha256 as `chock install` will see it: hashed on what the fetch returns, not the working tree."""
+    with tempfile.TemporaryDirectory(prefix="chock-fixture-") as tmp:
+        fetched, _commit = fetch_catalog(str(root), None, Path(tmp) / "catalog")
+        return {i: compute_pack_hash(fetched / "base" / i) for i in ids}
+
+
 def selection(root: Path, ref: str, ids: tuple[str, ...] = IDS, **overrides: Any) -> dict[str, Any]:
     """A valid selection of `ids` pinned to `ref`, with any top-level key overridden."""
-    picks = [{"id": i, "version": VERSION, "sha256": compute_pack_hash(root / "base" / i)} for i in ids]
+    hashes = fetched_hashes(root, ids)
+    picks = [{"id": i, "version": VERSION, "sha256": hashes[i]} for i in ids]
     data = {"schema": 1, "client": "claude-code", "catalog": {"source": str(root), "ref": ref}, "policies": picks}
     return {**data, **overrides}
 
