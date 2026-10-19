@@ -757,7 +757,7 @@ def degrade(decision, event):
 
 # >>> agentseam handler >>>
 # Not self-contained: chock's guard logic lives in the sibling _chock_runtime.py, loaded from this
-# file's own folder and pinned to the sha256 of that file's bytes, hashed before they are executed.
+# file's own folder and pinned to the sha256 of that file's bytes (CRLF read as LF), hashed before they are executed.
 # Missing, unreadable, another version, or failing to import: every call refuses (_CHOCK_RUNTIME_FAULT), never allows.
 _CHOCK_RUNTIME_PIN = 'd5de85f0d147a3adfdb978c71b2b840c7291380fb4b458c2835a4226f9574d50'
 
@@ -774,7 +774,7 @@ def _chock_load_runtime():
 
         with open(path, "rb") as handle:
             source = handle.read()
-        if sha256(source).hexdigest() != _CHOCK_RUNTIME_PIN:
+        if sha256(source.replace(b"\r\n", b"\n")).hexdigest() != _CHOCK_RUNTIME_PIN:
             return "%s is not the version this entry was built with" % path
         shared = ModuleType('_chock_runtime')
         shared.__file__ = path

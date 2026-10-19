@@ -48,6 +48,7 @@ FAULTS = {
     "missing": lambda path: path.unlink(),
     "unreadable": _unreadable,
     "edited-one-byte": lambda path: _rewrite(path, lambda t: t + "# edited\n"),
+    "crlf-and-edited": lambda path: path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n") + b"# edited\r\n"),
     "edited-and-declaring-the-old-digest": lambda path: _rewrite(
         path, lambda t: t + f"CHOCK_RUNTIME_DIGEST = {runtime_bundle.shared_pin()!r}\n"
     ),
@@ -101,6 +102,15 @@ def test_the_pin_is_the_sha256_of_the_shared_runtime_s_bytes() -> None:
 
 def test_an_intact_bundle_still_allows_an_ordinary_call(installed) -> None:
     client, package, repo = installed
+    for command, done, refused in _verdicts(client, package, repo):
+        assert not refused and done.returncode == 0, (client, command, done.stdout, done.stderr)
+
+
+def test_a_crlf_copy_of_the_shared_runtime_still_loads(installed) -> None:
+    """A Windows checkout or text-mode write turns LF into CRLF; the pin is over the LF text, so it must still match."""
+    client, package, repo = installed
+    path = package / "scripts" / SHARED
+    path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
     for command, done, refused in _verdicts(client, package, repo):
         assert not refused and done.returncode == 0, (client, command, done.stdout, done.stderr)
 
