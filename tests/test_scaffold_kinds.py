@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import warnings
@@ -62,6 +63,7 @@ def test_each_scaffold_passes_chock_check_only_evals_and_compiles_without_warnin
     assert "PEND" not in out
 
 
+@pytest.mark.skipif(os.name == "nt", reason="NTFS has no executable bit; the scaffold's chmod is a POSIX property")
 @pytest.mark.parametrize("kind", ["guard", "script"])
 def test_executable_templates_are_executable(tmp_path: Path, kind: str) -> None:
     assert new.cmd_new(["policy", "demo", "--kind", kind, "--root", str(tmp_path)]) == 0

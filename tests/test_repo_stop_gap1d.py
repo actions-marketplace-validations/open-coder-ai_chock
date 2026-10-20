@@ -222,3 +222,17 @@ def test_a_persons_commit_passes_in_a_repo_with_no_policy_while_stopped(
     refused = _commit(root, AGENT)
     assert refused.returncode != 0
     assert "stopped: no policy" in refused.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        r"rm C:\repo\.chock\stop.json",
+        r"rm -f 'C:\repo\.chock\stop.json'",
+        r'rm "C:\repo\.chock\stop.json"',
+        r"rm C:\repo/.chock/stop.json",
+    ],
+)
+def test_a_windows_path_word_names_its_repo_on_every_platform(command: str) -> None:
+    paths = repo_stop.repo_stop_paths(SimpleNamespace(command=command, path=None, raw=None))
+    assert "C:/repo/.chock/stop.json" in paths or "C:\\repo\\.chock\\stop.json" in paths

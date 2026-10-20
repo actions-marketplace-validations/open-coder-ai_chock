@@ -28,7 +28,7 @@ def _mode_at(repo_root: Path, ref: str, path: Path) -> str | None:
     """The git mode of `path` at `ref`; None when the revision has nothing there."""
     result = _git(repo_root, "ls-tree", ref, "--", path.as_posix())
     if result.returncode != 0:
-        msg = f"cannot list {path} at {ref}: {result.stderr.strip()}"
+        msg = f"cannot list {path.as_posix()} at {ref}: {result.stderr.strip()}"
         raise SelectionInvalidError(msg)
     return result.stdout.split(maxsplit=1)[0] if result.stdout.strip() else None
 
@@ -41,7 +41,9 @@ def _at_ref(repo_root: Path, kind: Kind, ref: str) -> str | None:
             return None
         if mode != _TREE if part == rel.parent else mode not in _REGULAR:
             what = "a file" if mode in _REGULAR else _MODES.get(mode, f"object mode {mode}")
-            msg = f"{part} is {what} at {ref}, not {want}; the base selection cannot be trusted as a baseline"
+            msg = (
+                f"{part.as_posix()} is {what} at {ref}, not {want}; the base selection cannot be trusted as a baseline"
+            )
             raise SelectionInvalidError(msg)
     result = _git(repo_root, "show", f"{ref}:{kind.filename}")
     if result.returncode != 0:
@@ -59,10 +61,12 @@ def _in_worktree(repo_root: Path, kind: Kind) -> str | None:
         except FileNotFoundError:
             return None
         if stat.S_ISLNK(mode) or (part == rel and not stat.S_ISREG(mode)):
-            msg = f"{part} is a symlink or not a regular file; a selection must be a committed regular file"
+            msg = f"{part.as_posix()} is a symlink or not a regular file; a selection must be a committed regular file"
             raise SelectionInvalidError(msg)
         if part != rel and not stat.S_ISDIR(mode):
-            msg = f"{part} is a file, not a directory; the runtime finds no selection under it and falls back"
+            msg = (
+                f"{part.as_posix()} is a file, not a directory; the runtime finds no selection under it and falls back"
+            )
             raise SelectionInvalidError(msg)
     return (repo_root / rel).read_text(encoding="utf-8")
 

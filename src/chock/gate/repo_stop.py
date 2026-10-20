@@ -17,7 +17,7 @@ import re
 import shlex
 import sys
 import time
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from .decision_log import DLOG_ROUTE_SYNC, runtime_route
 from .runner.halt import (
@@ -64,15 +64,29 @@ def _repo_stop_path(text):
     return text if 0 < len(text) <= _REPO_STOP_PATH_MAX and "\x00" not in text else None
 
 
-def _repo_stop_words(command):
-    """Each word of a shell command, and the value of each `--flag=value` word: best effort, never raises."""
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+def _repo_stop_split(command, posix):
+    lexer = shlex.shlex(command, posix=posix, punctuation_chars=True)
     lexer.whitespace_split = True
     try:
-        words = list(lexer)
+        return list(lexer)
     except ValueError:
-        words = command.split()
-    return words + [word.split("=", 1)[1] for word in words if "=" in word]
+        return command.split()
+
+
+def _repo_stop_windows(word):
+    """A word read as a Windows path (`C:\\repo\\x` kept, quotes dropped), spelled with `/`; None when it has no drive."""
+    path = PureWindowsPath(word.strip("\"'"))
+    return path.as_posix() if path.drive else None
+
+
+def _repo_stop_words(command):
+    """Each word of a shell command, the value of each `--flag=value` word, and each Windows-path reading of a word
+    (a POSIX split eats the backslashes of `C:\\repo\\x`): best effort, never raises."""
+    words = _repo_stop_split(command, posix=True)
+    raw = _repo_stop_split(command, posix=False)
+    words += [word.strip("\"'") for word in raw if "\\" in word]
+    words += [word.split("=", 1)[1] for word in words if "=" in word]
+    return words + [path for path in map(_repo_stop_windows, raw) if path]
 
 
 def _repo_stop_named(raw):

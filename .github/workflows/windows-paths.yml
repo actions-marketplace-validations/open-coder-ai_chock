@@ -1,8 +1,8 @@
 name: Windows paths
 
 # Windows path spellings in the agent write gate (drive-letter case, `/c:/` roots, either
-# slash). Linux cannot exercise them, and CI's full matrix does not run on PRs, so this one
-# targeted file runs on Windows every time.
+# slash), the repo stop, pack hashing, install and scaffold. Linux cannot exercise them, and CI's
+# full matrix does not run on PRs, so these targeted files run on Windows every time.
 
 on:
   push:
@@ -39,5 +39,13 @@ jobs:
           python -m pip install --require-hashes --upgrade -r requirements/pip.txt
           python -m pip install --require-hashes -r requirements/dev.txt && pip install -e . --no-deps
 
-      - name: Windows write-gate path tests
-        run: pytest -q tests/test_cursor_windows_write_gate.py
+      - name: Windows path tests
+        run: >-
+          pytest -q
+          tests/test_cursor_windows_write_gate.py
+          tests/test_repo_stop_gap1d.py
+          tests/test_pack_hash_platform.py
+          tests/test_install_command.py
+          tests/test_install_local.py
+          tests/test_scaffold_new.py
+          tests/test_scaffold_kinds.py
