@@ -668,9 +668,9 @@ def degrade(decision, event):
 
 # >>> agentseam handler >>>
 # Not self-contained: chock's guard logic lives in the sibling _chock_runtime.py, loaded from this
-# file's own folder and pinned to the render this entry came from. Missing, unreadable, another
-# version, or failing to import: every call refuses (_CHOCK_RUNTIME_FAULT), never allows.
-_CHOCK_RUNTIME_PIN = 'a0dfe128bff953bb9f650d1e8712bf3c519af60325fa39207fadbd566c886124'
+# file's own folder and pinned to the sha256 of that file's bytes (CRLF read as LF), hashed before they are executed.
+# Missing, unreadable, another version, or failing to import: every call refuses (_CHOCK_RUNTIME_FAULT), never allows.
+_CHOCK_RUNTIME_PIN = '09ed5e7bf20341a34839444d62cf4b17a37eeb24e1120b65724eabec6f83fba9'
 
 
 def _chock_load_runtime():
@@ -680,17 +680,18 @@ def _chock_load_runtime():
         sys.path.insert(0, here)
     path = _chock_os.path.join(here, '_chock_runtime.py')
     try:
-        from importlib.machinery import SourceFileLoader
+        from hashlib import sha256
         from types import ModuleType
 
+        with open(path, "rb") as handle:
+            source = handle.read()
+        if sha256(source.replace(b"\r\n", b"\n")).hexdigest() != _CHOCK_RUNTIME_PIN:
+            return "%s is not the version this entry was built with" % path
         shared = ModuleType('_chock_runtime')
         shared.__file__ = path
-        shared.__loader__ = SourceFileLoader('_chock_runtime', path)
-        shared.__loader__.exec_module(shared)
+        exec(compile(source, path, "exec"), shared.__dict__)  # noqa: S102 -- the bytes just matched the pin
     except BaseException as exc:  # noqa: BLE001 -- a SystemExit from its top level must refuse too
         return "chock could not load %s (%s)" % (path, type(exc).__name__)
-    if getattr(shared, "CHOCK_RUNTIME_DIGEST", None) != _CHOCK_RUNTIME_PIN:
-        return "%s is not the version this entry was built with" % path
     globals().update((name, value) for name, value in vars(shared).items() if not name.startswith("__"))
     return None
 
