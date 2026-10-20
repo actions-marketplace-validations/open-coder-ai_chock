@@ -123,11 +123,10 @@ def _shared_body() -> str:
 
 @functools.cache
 def _shared() -> tuple[str, str]:
-    """(shared runtime text, its pin): the sha256 of the text with the digest still a placeholder."""
+    """(shared runtime text, its pin): the sha256 of the bytes written to disk, which an entry hashes before it execs them."""
     body = _shared_body()
-    unpinned = _SHARED.replace("__IMPORTS__\n", _needed_imports(body)).replace("__BODY__\n", body)
-    pin = hashlib.sha256(unpinned.encode("utf-8")).hexdigest()
-    return unpinned.replace("__DIGEST__", repr(pin), 1), pin
+    text = _SHARED.replace("__IMPORTS__\n", _needed_imports(body)).replace("__BODY__\n", body)
+    return text, hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def render_shared() -> str:
@@ -136,7 +135,7 @@ def render_shared() -> str:
 
 
 def shared_pin() -> str:
-    """The `CHOCK_RUNTIME_DIGEST` every entry rendered now requires."""
+    """The sha256 of the shared runtime file every entry rendered now requires."""
     return _shared()[1]
 
 

@@ -14,7 +14,7 @@ import yaml
 
 from chock import yamlio
 from chock.config import agents_from_config as _agents_from_config
-from chock.lock import LOCAL_SOURCE, compute_pack_hash, is_local_source, read_lock, write_lock
+from chock.lock import LOCAL_SOURCE, compute_pack_hash, is_local_source, pack_bytecode, read_lock, write_lock
 from chock.output import error
 from chock.scaffold.pin import PinError, fetch_catalog
 from chock.scaffold.recompile import BookkeepingError, recompile
@@ -49,6 +49,14 @@ def _reject_symlinks(pack_dir: Path, artifact_id: str) -> None:
         ]
     if links:
         msg = f"{artifact_id}: the catalog pack contains symlink(s): {', '.join(sorted(links))}. Nothing was installed."
+        raise IntegrityError(msg)
+
+
+def _reject_bytecode(pack_dir: Path, artifact_id: str) -> None:
+    """Refuse a pack shipping `__pycache__` or `.pyc`/`.pyo`: build artifacts, never catalog content."""
+    shipped = pack_bytecode(pack_dir)
+    if shipped:
+        msg = f"{artifact_id}: the catalog pack ships build artifact(s): {', '.join(shipped)}; nothing was installed."
         raise IntegrityError(msg)
 
 
@@ -98,6 +106,7 @@ def verified_pack(catalog: Path, artifact_id: str, verify_sha: str | None) -> tu
     """Locate one artifact in a fetched catalog, refuse an unsafe pack, check its hash: (source, area, sha256)."""
     src, area = locate(catalog, artifact_id)
     _reject_symlinks(src, artifact_id)
+    _reject_bytecode(src, artifact_id)
     _reject_foreign_id(src, artifact_id)
     digest = compute_pack_hash(src)
     if verify_sha and digest != verify_sha:

@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 from .budget import (
+    BYTECODE_OFF,
     PATTERN_SECONDS,
     allowed_seconds,
     close_judge,
@@ -105,6 +107,7 @@ def _tool_call_script(spec, root, payload, deadline=None):
             encoding="utf-8",
             errors="replace",
             cwd=str(root),
+            env={**os.environ, **BYTECODE_OFF},
             timeout=time_left(deadline, argv),
             check=False,
         )
