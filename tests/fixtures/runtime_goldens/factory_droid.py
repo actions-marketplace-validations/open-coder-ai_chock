@@ -763,7 +763,7 @@ def degrade(decision, event):
 # Not self-contained: chock's guard logic lives in the sibling _chock_runtime.py, loaded from this
 # file's own folder and pinned to the sha256 of that file's bytes (CRLF read as LF), hashed before they are executed.
 # Missing, unreadable, another version, or failing to import: every call refuses (_CHOCK_RUNTIME_FAULT), never allows.
-_CHOCK_RUNTIME_PIN = 'd5de85f0d147a3adfdb978c71b2b840c7291380fb4b458c2835a4226f9574d50'
+_CHOCK_RUNTIME_PIN = '09ed5e7bf20341a34839444d62cf4b17a37eeb24e1120b65724eabec6f83fba9'
 
 
 def _chock_load_runtime():
@@ -774,15 +774,30 @@ def _chock_load_runtime():
     path = _chock_os.path.join(here, '_chock_runtime.py')
     try:
         from hashlib import sha256
-        from types import ModuleType
+        from importlib.abc import InspectLoader
+        from importlib.util import module_from_spec, spec_from_loader
+
+        class PinnedBytes(InspectLoader):
+            """Hands the import machinery the bytes already read and hashed; it never opens the file again."""
+
+            def __init__(self, source):
+                self.source = source
+
+            def get_source(self, fullname):
+                return self.source.decode("utf-8")
+
+            def get_code(self, fullname):
+                return compile(self.source, path, "exec")
 
         with open(path, "rb") as handle:
             source = handle.read()
         if sha256(source.replace(b"\r\n", b"\n")).hexdigest() != _CHOCK_RUNTIME_PIN:
             return "%s is not the version this entry was built with" % path
-        shared = ModuleType('_chock_runtime')
+        loader = PinnedBytes(source)
+        shared = module_from_spec(spec_from_loader('_chock_runtime', loader))
         shared.__file__ = path
-        exec(compile(source, path, "exec"), shared.__dict__)  # noqa: S102 -- the bytes just matched the pin
+        shared.__loader__ = loader
+        loader.exec_module(shared)
     except BaseException as exc:  # noqa: BLE001 -- a SystemExit from its top level must refuse too
         return "chock could not load %s (%s)" % (path, type(exc).__name__)
     globals().update((name, value) for name, value in vars(shared).items() if not name.startswith("__"))

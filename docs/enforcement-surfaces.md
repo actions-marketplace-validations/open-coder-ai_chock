@@ -38,19 +38,19 @@ each guarantee holds.
 > the pen. Only lines the turn changed against HEAD are judged, so an old violation in a touched
 > file does not block the turn.
 >
-> **An agent's commit is not a human's.** The commit hook cannot ask who ran `git commit`, and an
-> agent that can run it could add the waiver itself, so chock reads the environment the hook
-> inherits from git. A commit is an agent's when `CHOCK_AGENT_COMMIT` is truthy (any value but
-> empty, `0`, `false`, `no`, `off`), or `CLAUDECODE=1`, or `AI_AGENT` is non-empty, or a variable
-> named under `agent_commit_env:` in `.chock/config.yaml` is set. The pre-commit gate then judges
-> the commit at the event `agent-commit`: a waiver the commit adds is not honoured, one already in
-> HEAD still is, and a refusal says which marker it saw. `CHOCK_AGENT_COMMIT=0` says "a person" and
-> wins over every marker, for a person running git inside an agent's terminal; an agent could set
-> it too, so it is a default and not an identity, and the guards on an agent's own commands are the
-> separate backstop. Claude Code's two variables are witnessed reaching a git hook (a probe from
-> the Bash tool, 2026-09-29); Codex, Cursor and Copilot markers are unverified, so add them once
-> captured: `agent_commit_env: [CODEX_SANDBOX]`. Pre-push and CI are unchanged, and CI honours a
-> waiver in the range it reads.
+> **An agent's commit is not a human's.** The commit hook cannot ask who ran `git commit`, and an agent
+> that can run it could add the waiver itself, so chock reads the environment the hook inherits from git.
+> A commit is an agent's when `CHOCK_AGENT_COMMIT` is truthy (any value but empty, `0`, `false`, `no`,
+> `off`), or `CLAUDECODE=1`, or `AI_AGENT` is non-empty, or a variable named under `agent_commit_env:` in
+> `.chock/config.yaml` is set. The pre-commit gate then judges the commit at the event `agent-commit`: a
+> waiver the commit adds is not honoured, one already in HEAD still is, and a refusal says which marker
+> it saw. `CHOCK_AGENT_COMMIT=0` unsets that one variable and clears no vendor marker (an agent could set
+> it too): a person commits from their own shell, which has none. The guards on an agent's own commands
+> are the separate backstop, and `sync`, `add`, `remove`, `enable`, `disable`, `init`, `compile`,
+> `install-hooks` and `recompile` refuse under any marker, as `chock stop` does. Claude Code's two
+> variables are witnessed reaching a git hook (a probe from the Bash tool, 2026-09-29); Codex, Cursor and
+> Copilot markers are unverified, so add them once captured: `agent_commit_env: [CODEX_SANDBOX]`.
+> Pre-push and CI are unchanged, and CI honours a waiver in the range it reads.
 >
 > **`action: warn | ask`.** A gate's `action` picks what a violation does (full table:
 > `spec/gate-dsl.md`). `warn` never blocks: at commit, push and ci the reason is printed (a

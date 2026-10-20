@@ -4,27 +4,142 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import difflib
 import fnmatch
 import hashlib
 import json
 import os
+import queue
 import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import tomllib
 import unicodedata
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-#: One hook invocation's time budget, in seconds (chock.gate.budget).
 ENGINE_BUDGET_SECONDS = 30
+
+
+BYTECODE_OFF = {"PYTHONDONTWRITEBYTECODE": "1"}
+
+
+PATTERN_SECONDS = 10
+
+
+PATTERN_JUDGE_SOURCE = (
+    "import json, re, sys\n"
+    "for line in sys.stdin:\n"
+    "    out = []\n"
+    "    for pattern, texts in json.loads(line):\n"
+    "        search = re.compile(pattern).search\n"
+    "        out.append([index for index, text in enumerate(texts) if search(text)])\n"
+    "    print(json.dumps(out), flush=True)\n"
+)
+
+
+def engine_deadline():
+    """The monotonic instant this invocation's budget runs out."""
+    return time.monotonic() + ENGINE_BUDGET_SECONDS
+
+
+def engine_remaining(deadline):
+    """Seconds left before `deadline`, never negative."""
+    return max(deadline - time.monotonic(), 0.0)
+
+
+def time_left(deadline, cmd):
+    """Seconds left for a subprocess; raises TimeoutExpired when none are, so the caller's timeout path runs."""
+    left = deadline - time.monotonic()
+    if left <= 0:
+        raise subprocess.TimeoutExpired(cmd, 0)
+    return left
+
+
+def allowed_seconds(expired):
+    """The time a timed-out call was actually given, as text (what the deadline left it, not the full budget)."""
+    return f"{max(float(expired.timeout or 0), 0.0):.1f}s"
+
+
+def pattern_judge(interpreter=None):
+    """A pattern judge, not yet started: the interpreter to run the patterns in (this one by default)."""
+    return {"argv": [interpreter or sys.executable, "-I", "-c", PATTERN_JUDGE_SOURCE], "proc": None, "lines": None}
+
+
+def _pump_lines(proc, lines):
+    for line in proc.stdout:
+        lines.put(line)
+    lines.put(None)
+
+
+def _start_judge(judge):
+    proc = subprocess.Popen(  # noqa: S603 -- the child is this module's own source, run by this interpreter
+        judge["argv"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+    )
+    lines = queue.Queue()
+    threading.Thread(target=_pump_lines, args=(proc, lines), daemon=True).start()
+    judge["proc"], judge["lines"] = proc, lines
+
+
+def close_judge(judge):
+    """Stop the judge's child, if one runs; the last line it wrote to stderr, or ""."""
+    proc = judge["proc"]
+    judge["proc"] = judge["lines"] = None
+    if proc is None:
+        return ""
+    if proc.poll() is None:
+        proc.kill()  # before closing stdout: the reader thread holds it until the child's EOF
+    proc.wait()
+    try:
+        spoken = proc.stderr.read()
+    except (OSError, ValueError):
+        spoken = ""
+    for stream in (proc.stdin, proc.stdout, proc.stderr):
+        with contextlib.suppress(OSError):
+            stream.close()
+    return (spoken.strip().splitlines() or [""])[-1]
+
+
+def judge_patterns(judge, jobs, seconds):
+    """(hits, None) or (None, why): per job of (pattern, texts), the indices of the texts the pattern matches.
+
+    A job that runs past `seconds` kills the child and names the time; a job with no text is never
+    sent. `why` is text for a refusal: the judge is undecided and an undecided gate refuses.
+    """
+    if not any(texts for _, texts in jobs):
+        return [[] for _ in jobs], None
+    if judge["proc"] is None:
+        try:
+            _start_judge(judge)
+        except OSError as exc:
+            return None, f"the pattern judge could not start ({exc})"
+    proc, lines = judge["proc"], judge["lines"]
+    try:
+        proc.stdin.write(json.dumps(jobs) + "\n")
+        proc.stdin.flush()
+    except (OSError, ValueError):
+        return None, f"the pattern judge exited early ({close_judge(judge)})"
+    try:
+        line = lines.get(timeout=seconds)
+    except queue.Empty:
+        close_judge(judge)
+        return None, f"the patterns gave no verdict within {seconds:g}s (a catastrophic pattern?)"
+    if line is None:
+        return None, f"the pattern judge exited early ({close_judge(judge)})"
+    return json.loads(line), None
 
 
 _GIT = shutil.which("git") or "git"
@@ -287,8 +402,8 @@ WAIVABLE_EVENTS = frozenset({"commit", "push", "ci"})
 #: The event of both agent surfaces (pre-tool-use and stop), by the name policies declare.
 TOOL_USE_EVENT = "tool_use"
 
-#: Env var a person or agent sets to say who is committing: truthy marks an agent, and a value in
-#: `_HUMAN_ENV` marks a person and wins over every detected marker.
+#: Env var that says an agent is acting: truthy marks an agent. A value in `_HUMAN_ENV` unsets this
+#: one variable and clears no vendor marker, since an agent can set it too.
 AGENT_COMMIT_ENV = "CHOCK_AGENT_COMMIT"
 
 #: Markers Claude Code's Bash tool sets in every command it runs (witnessed; a git hook inherits
@@ -329,7 +444,7 @@ _OBSERVE_NOTE = (
 _AGENT_COMMIT_NOTE = (
     "gate: this commit is treated as an agent's ({signal}), so a waiver it adds "
     "was not honoured; only waivers already in HEAD count. A person reviews and waives it, then "
-    f"commits from their own shell with {AGENT_COMMIT_ENV}=0."
+    "commits from their own shell."
 )
 
 
@@ -364,31 +479,13 @@ def _config_agent_env(repo_root: Path) -> list[str]:
 
 
 def agent_signal(repo_root: Path | None = None) -> str | None:
-    """The marker that makes this an agent's commit, or None for a person's.
+    """The first agent marker set, or None for a person's shell: a truthy `CHOCK_AGENT_COMMIT`, `CLAUDECODE=1`,
+    a non-empty `AI_AGENT`, or any non-empty variable named under the repository's `agent_commit_env`.
 
-    An explicit `CHOCK_AGENT_COMMIT` decides: truthy is an agent, `0|false|no|off` is a person
-    whatever else is set (an escape hatch for a person's own git in an agent's terminal, which an
-    agent can set too). Otherwise `CLAUDECODE=1`, a non-empty `AI_AGENT`, or any non-empty variable
-    named in the repository's `agent_commit_env` marks an agent.
+    One rule for every check (commit, push, tool call, stop, resume, the person-only commands). `CHOCK_AGENT_COMMIT=0`
+    clears nothing a vendor set, since an agent can set it too: a person's git in an agent's terminal is told apart
+    by having no vendor marker, which is what their own shell has.
     """
-    env = os.environ
-    explicit = env.get(AGENT_COMMIT_ENV, "").strip().lower()
-    if explicit in _HUMAN_ENV:
-        return None
-    if explicit:
-        return AGENT_COMMIT_ENV
-    if env.get(CLAUDECODE_ENV) == "1":
-        return f"{CLAUDECODE_ENV}=1"
-    if env.get(AI_AGENT_ENV, "").strip():
-        return AI_AGENT_ENV
-    configured = _config_agent_env(repo_root) if repo_root is not None else []
-    return next((name for name in configured if env.get(name)), None)
-
-
-def stop_agent_signal(repo_root: Path | None = None) -> str | None:
-    """The first agent marker set, for every stop check (commit, push, stop, resume): `CHOCK_AGENT_COMMIT=0`,
-    the commit rule's escape hatch for a person's git in an agent's terminal, clears nothing, since an agent can
-    set it too."""
     env = os.environ
     named = env.get(AGENT_COMMIT_ENV, "").strip().lower()
     checks = (
@@ -488,41 +585,65 @@ def _judged_event(name: str, *, agent: bool) -> str:
     return AGENT_COMMIT_EVENT if name == "commit" and agent else name
 
 
-def _waiver_re(params: dict, event: str) -> re.Pattern[str] | None:
-    """The waiver regex for events that honour a waiver at all, else None."""
+def _waiver_pattern(params: dict, event: str) -> str | None:
+    """The waiver pattern for events that honour a waiver at all, else None."""
     pragma = params.get("allowlist_pragma") if event in WAIVABLE_EVENTS | HEAD_WAIVER_EVENTS else None
-    return re.compile(pragma) if pragma else None
+    return str(pragma) if pragma else None
 
 
-def _honoured(pragma_re: re.Pattern[str] | None, text: str, head: frozenset[str] | None) -> bool:
-    """A waiver on `text` counts unless `head` is given and the text is not already committed."""
-    return bool(pragma_re and pragma_re.search(text) and (head is None or text in head))
+class PatternDeadlineError(Exception):
+    """A gate's patterns reached no verdict: the judge ran past its deadline or died, as the message says."""
+
+
+def _hits(judge: dict, jobs: list[tuple[str | None, list[str]]]) -> list[set[int]]:
+    """Per job of (pattern, texts), the indices of the texts the pattern matches; no pattern matches nothing."""
+    found, why = judge_patterns(judge, [(pattern, texts) for pattern, texts in jobs if pattern], PATTERN_SECONDS)
+    if why:
+        raise PatternDeadlineError(why)
+    results = iter(found)
+    return [set(next(results)) if pattern else set() for pattern, _ in jobs]
+
+
+def _lines(paths: list[str], read: Callable[[str], list[str]]) -> tuple[dict[str, range], list[str]]:
+    """Every path's lines as `read` gives them, in one list, with each path's span of it."""
+    spans: dict[str, range] = {}
+    texts: list[str] = []
+    for path in paths:
+        found = read(path)
+        spans[path] = range(len(texts), len(texts) + len(found))
+        texts += found
+    return spans, texts
+
+
+def _waived(index: int, line: str, waivers: set[int], head: frozenset[str] | None) -> bool:
+    """A waiver on `line` counts unless `head` is given and the line is not already committed."""
+    return index in waivers and (head is None or line in head)
 
 
 def _kind_content_regex(ctx: GateContext, params: dict, event: str) -> GateResult:
-    content_re = re.compile(params["content_pattern"])
-    forbidden_path_regex = params.get("forbidden_path_regex")
-    path_re = re.compile(forbidden_path_regex) if forbidden_path_regex else None
-    pragma_re = _waiver_re(params, event)
+    pragma = _waiver_pattern(params, event)
     agent = event in HEAD_WAIVER_EVENTS
-    scan = params.get("scan", "added_lines")
-    diff_filter = params.get("diff_filter", "ACMRT")
-
+    whole = params.get("scan", "added_lines") == "staged_blob"
+    paths = ctx.staged_paths(params.get("diff_filter", "ACMRT"))
+    judge = pattern_judge()
+    try:
+        forbidden = sorted(_hits(judge, [(params.get("forbidden_path_regex"), paths)])[0])
+        heads = {path: ctx.committed_blob(path) if agent else "" for path in paths}
+        blobs = [heads[paths[index]] if agent else ctx.staged_blob(paths[index]) for index in forbidden]
+        spans, texts = _lines(
+            paths, lambda path: ctx.staged_blob(path).splitlines() if whole else ctx.added_lines(path)
+        )
+        jobs = [(pragma, blobs), (pragma, texts), (params["content_pattern"], texts)]
+        blob_waivers, line_waivers, hits = _hits(judge, jobs)
+    finally:
+        close_judge(judge)
     matches: list[str] = []
-    for path in ctx.staged_paths(diff_filter):
-        head_text = ctx.committed_blob(path) if agent else ""
-        head = frozenset(head_text.splitlines()) if agent else None
-        if path_re and path_re.search(path):
-            blob = head_text if agent else ctx.staged_blob(path)
-            if not (pragma_re and pragma_re.search(blob)):
-                matches.append(f"{path}: forbidden path")
-        lines = ctx.staged_blob(path).splitlines() if scan == "staged_blob" else ctx.added_lines(path)
-        for line in lines:
-            if _honoured(pragma_re, line, head):
-                continue
-            if content_re.search(line):
-                matches.append(f"{path}: content pattern")
-                break
+    for index, path in enumerate(paths):
+        if index in forbidden and forbidden.index(index) not in blob_waivers:
+            matches.append(f"{path}: forbidden path")
+        head = frozenset(heads[path].splitlines()) if agent else None
+        if any(n in hits and not _waived(n, texts[n], line_waivers, head) for n in spans[path]):
+            matches.append(f"{path}: content pattern")
     return GateResult(allowed=not matches, matches=matches)
 
 
@@ -637,39 +758,39 @@ def _kind_dependency_allowlist(ctx: GateContext, params: dict, _event: str) -> G
     return GateResult(allowed=not matches, matches=matches)
 
 
-def _count(
-    pattern: "re.Pattern[str]", lines: list[str], pragma: re.Pattern[str] | None, head: frozenset[str] | None = None
-) -> int:
-    return sum(1 for line in lines if pattern.search(line) and not _honoured(pragma, line, head))
+def _count(span: range, hits: set[int], texts: list[str], waivers: set[int], head: frozenset[str] | None) -> int:
+    return sum(1 for n in span if n in hits and not _waived(n, texts[n], waivers, head))
 
 
 def _kind_test_integrity(ctx: GateContext, params: dict, event: str) -> GateResult:
     """Block a change that wins green CI by weakening the tests rather than fixing the code."""
-    path_re = re.compile(params["test_path_regex"])
-    assertion_re = re.compile(params["assertion_pattern"])
-    dummy_pattern = params.get("dummy_assertion_pattern")
-    dummy_re = re.compile(dummy_pattern) if dummy_pattern else None
-    pragma_re = _waiver_re(params, event)
+    pragma = _waiver_pattern(params, event)
     agent = event in HEAD_WAIVER_EVENTS
-
-    matches: list[str] = []
-    added = removed = 0
-    for path in ctx.staged_paths("D"):
-        if path_re.search(path):
-            matches.append(f"{path}: test file deleted")
-    for path in ctx.staged_paths("ACMRT"):
-        if not path_re.search(path):
-            continue
-        added_lines = ctx.net_added_lines(path)
+    deleted, changed = ctx.staged_paths("D"), ctx.staged_paths("ACMRT")
+    judge = pattern_judge()
+    try:
+        gone, tests = _hits(judge, [(params["test_path_regex"], deleted), (params["test_path_regex"], changed)])
+        files = [changed[index] for index in sorted(tests)]
+        added_spans, added = _lines(files, ctx.net_added_lines)
+        removed_spans, removed = _lines(files, ctx.removed_lines)
+        assertion = params["assertion_pattern"]
+        jobs = [(assertion, added), (assertion, removed), (pragma, added), (pragma, removed)]
+        jobs.append((params.get("dummy_assertion_pattern"), added))
+        asserted_added, asserted_removed, waived_added, waived_removed, dummy = _hits(judge, jobs)
+    finally:
+        close_judge(judge)
+    matches = [f"{deleted[index]}: test file deleted" for index in sorted(gone)]
+    added_count = removed_count = 0
+    for path in files:
         head = frozenset(ctx.committed_blob(path).splitlines()) if agent else None
-        if any(_honoured(pragma_re, line, head) for line in added_lines):
+        if any(_waived(n, added[n], waived_added, head) for n in added_spans[path]):
             continue
-        added += _count(assertion_re, added_lines, pragma_re, head)
-        removed += _count(assertion_re, ctx.removed_lines(path), pragma_re, head)
-        if dummy_re and any(dummy_re.search(line) for line in added_lines):
+        added_count += _count(added_spans[path], asserted_added, added, waived_added, head)
+        removed_count += _count(removed_spans[path], asserted_removed, removed, waived_removed, head)
+        if any(n in dummy for n in added_spans[path]):
             matches.append(f"{path}: vacuous assertion added")
-    if removed > added:
-        matches.append(f"assertions removed across tests: {removed} removed, {added} added")
+    if removed_count > added_count:
+        matches.append(f"assertions removed across tests: {removed_count} removed, {added_count} added")
     return GateResult(allowed=not matches, matches=matches)
 
 
@@ -685,6 +806,9 @@ _SCRIPT_ALLOW, _SCRIPT_BLOCK, _SCRIPT_ASK, _SCRIPT_WARN = 0, 1, 3, 4
 #: is a script that failed, not one that refused.
 _CRASH_MARKERS = ("traceback (most recent call last)", "syntax error", "syntaxerror", "unexpected eof")
 
+#: Running a gate never writes bytecode into the pack it judges.
+_BYTECODE_OFF = {"PYTHONDONTWRITEBYTECODE": "1"}
+
 _UNDECIDED = " -- refusing rather than allowing what it never judged"
 
 _FINDINGS_KEY = "findings"
@@ -699,6 +823,7 @@ def _spawn(script: Path, ctx: GateContext, payload: dict, timeout: float) -> sub
         encoding="utf-8",
         errors="replace",
         cwd=ctx.repo_root,
+        env={**os.environ, **_BYTECODE_OFF},
         timeout=timeout,
         check=False,
     )
@@ -1003,6 +1128,9 @@ VERDICT_ERROR = "error"
 _GIT_EVENTS = ("pre-commit", "pre-push", "commit-msg")
 
 
+_UNJUDGED = " -- refusing rather than allowing what it never judged."
+
+
 def _policy_id(gate_path: Path) -> str | None:
     """The policy a compiled gate belongs to, from `.chock/compiled/<id>/<surface>/`, else None."""
     parents = gate_path.resolve().parents
@@ -1290,19 +1418,16 @@ def approval(repo_root: Path | None = None) -> dict[str, str]:
 
 
 def _ask_refusal(policy_id: str | None, signal: str | None) -> str:
-    """Why a hook refuses an `ask`, and the one way through: a person's explicit override."""
+    """Why a hook refuses an `ask`, and the one way through: a person's explicit override, which only a person is told."""
     if policy_id is None:
         return f"gate: this gate asks a person, a hook cannot prompt, and it has no policy id for {ALLOW_ENV} to name."
-    person = f"{ALLOW_ENV}={policy_id}"
+    lead = f"gate: {policy_id} asks a person to decide, and a hook cannot prompt."
     if signal:
-        person = f"{person} {AGENT_COMMIT_ENV}=0"
-        who = f" This is treated as an agent's ({signal}), and an agent cannot answer for the person."
-    else:
-        who = ""
-    return (
-        f"gate: {policy_id} asks a person to decide, and a hook cannot prompt.{who} "
-        f"To go ahead, a person runs this one command from their own shell with {person} set."
-    )
+        return (
+            f"{lead} This is treated as an agent's ({signal}), and an agent cannot answer for the person: "
+            "ask them. If they agree, they run this one command from their own shell."
+        )
+    return f"{lead} To go ahead, a person runs this one command from their own shell with {ALLOW_ENV}={policy_id} set."
 
 
 def _ask_answered(policy_id: str | None, signal: str | None) -> bool:
@@ -1401,7 +1526,7 @@ def halt_git(repo_root: Path, event: str, policy_id: str | None = None) -> tuple
     """An agent's commit or push while a stop reaches it: refused and logged with reason `stopped`, whatever
     `CHOCK_ALLOW`, `CHOCK_AGENT_COMMIT=0` or the rollout level say. A person's own commit or push is not the
     stop's: None."""
-    signal = stop_agent_signal(repo_root)
+    signal = agent_signal(repo_root)
     who = _actor(signal)
     client = str(who["actor"]).removeprefix(ACTOR_AGENT_PREFIX)
     stop = (halt_find(halt_git_roots(repo_root), client) or halt_everywhere_read()) if signal is not None else None
@@ -1478,12 +1603,23 @@ def evaluate(
         return 2, VERDICT_ERROR
     signal = agent_signal(repo_root)
     judged = _judged_event(name, agent=signal is not None)
+    result = _judge_kind(kind, ctx, _params(gate_path, spec), judged, gate_path)
+    if isinstance(result, tuple):
+        return result
+    return Evaluation(spec, result, rollout(repo_root, event, signal, base), signal, judged)
+
+
+def _judge_kind(kind: Any, ctx: Any, params: dict, judged: str, gate_path: Path) -> GateResult | tuple[int, str]:
+    """The kind's result, or (2, error) with the reason on stderr when it could not judge."""
     try:
-        result = kind(ctx, _params(gate_path, spec), judged)
+        return kind(ctx, params, judged)
     except ListingError as exc:
         print(f"gate: {inert(str(exc))} -- refusing rather than judging a change it cannot read.", file=sys.stderr)
-        return 2, VERDICT_ERROR
-    return Evaluation(spec, result, rollout(repo_root, event, signal, base), signal, judged)
+    except PatternDeadlineError as exc:
+        # The reason names a time or the judge's own last stderr line, never the judged text.
+        reason = f"gate: {_policy_id(gate_path) or gate_path.name}: {inert(str(exc))}{_UNJUDGED}"
+        print(reason, file=sys.stderr)
+    return 2, VERDICT_ERROR
 
 
 def judge(
@@ -2257,6 +2393,18 @@ def _writes(raw: str) -> dict[str, str]:
     return _texts(raw, "writes")
 
 
+#: An agent event whose stdin is not UTF-8 is refused, never read with replacement characters in its place.
+_EXIT_UNDECODABLE = 2
+
+
+def _agent_stdin() -> str | None:
+    """The agent event's stdin as UTF-8 text, or None when its bytes do not decode."""
+    try:
+        return sys.stdin.buffer.read().decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
 def _utf8_streams() -> None:
     """Speak UTF-8 on stdin and stderr whatever the console code page, so a match cannot crash the verdict."""
     for stream in (sys.stdin, sys.stderr):
@@ -2296,7 +2444,12 @@ def main(argv: list[str] | None = None) -> int:
         # cannot be read back from it. {"writes": {"<path>": "<text>"}, "added": {"<path>": "<text>"}},
         # `added` present only for an edit, carrying the text it introduces.
         # Paths are named from the directory the runtime works in, which may sit below the git top-level.
-        raw = sys.stdin.read()
+        raw = _agent_stdin()
+        if raw is None:
+            print(
+                "chock: the hook payload on stdin is not UTF-8; refusing rather than judging a guess", file=sys.stderr
+            )
+            return _EXIT_UNDECODABLE
         return run(
             Path(args.gate),
             args.event,

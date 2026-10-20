@@ -26,9 +26,10 @@ your rules travel with every clone and fork — the maintainer governs the contr
   and per-agent adapter files are in the tree; agents pick them up ambiently the moment
   the repo is cloned.
 - **The repo re-arms itself.** Git never clones hooks, so Chock has the agent close the
-  gap: an ambient rule tells every agent to run `chock sync --repo .` before its first
-  commit, and for Claude Code a committed SessionStart hook arms the git hooks
-  automatically when a session opens — consented through the workspace-trust prompt.
+  gap: an ambient rule tells every agent a fresh clone arms itself on the first session
+  from what is committed (a person runs `chock sync` to change what is enforced), and for
+  Claude Code a committed SessionStart hook arms the git hooks automatically when a
+  session opens — consented through the workspace-trust prompt.
   The blocked commit happens on the contributor's machine, before the pull request,
   instead of in your review queue. [How arming works](adopting.md#arming-a-fresh-clone).
 - **The CI gate is yours and depends on nothing the contributor does.** `chock sync --ci`

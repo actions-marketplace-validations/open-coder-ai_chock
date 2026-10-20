@@ -60,7 +60,7 @@ def check_ambient_rule_blocks(root: Path, report: Report) -> None:
                 str(agents_md),
                 "ambient_pointer",
                 "warning",
-                "AGENTS.md is missing the managed pointer block; run `chock sync`.",
+                "AGENTS.md is missing the managed pointer block; a person runs `chock sync`.",
             )
         )
         return
@@ -71,7 +71,7 @@ def check_ambient_rule_blocks(root: Path, report: Report) -> None:
                 str(agents_md),
                 "ambient_pointer",
                 "warning",
-                "AGENTS.md pointer block does not match the canonical text; run `chock sync`.",
+                "AGENTS.md pointer block does not match the canonical text; a person runs `chock sync`.",
             )
         )
 
@@ -82,7 +82,7 @@ def check_ambient_rule_blocks(root: Path, report: Report) -> None:
                 str(index_path),
                 "index_freshness",
                 "warning",
-                "INDEX.md is missing; run `chock sync`.",
+                "INDEX.md is missing; a person runs `chock sync`.",
             )
         )
         return

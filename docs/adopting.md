@@ -66,14 +66,16 @@ gap with three mechanisms, each consented where consent is required:
 
 1. **The ambient arm rule (every agent, zero setup).** The managed pointer block in
    `AGENTS.md` — read by all fourteen adapters — tells the agent:
-   `fresh_clone: git never clones hooks -> run(chock sync --repo .) before first commit`.
-   A contributor's coding agent arms the hooks before it can trip them.
+   `fresh_clone: first session arms hooks from what is committed; a person runs(chock sync) to change enforcement`.
+   A contributor's coding agent arms the hooks from what is committed before it can trip them;
+   only a person changes what is enforced.
 2. **The SessionStart arm hook (Claude Code, automatic).** `chock sync` wires a
    `SessionStart` entry into the committed `.claude/settings.json` that runs the vendored
    `.chock/bin/claude_code.py` when a session opens — consented through Claude Code's
    workspace-trust prompt, the same gate PreToolUse passes through. If the hooks are
-   already armed it stays silent; if `chock` is installed it runs `chock sync` itself; if
-   not, it prints the exact command into the session context so the agent runs it.
+   already armed it stays silent; if `chock` is installed it runs `chock sync --committed`
+   itself, which compiles what is committed and refuses when the config, lock or a policy
+   differs from HEAD; if not, it prints the command into the session context for a person to run.
 3. **Bootstrap piggyback (humans, and every other entry path).** Put `chock sync --repo .`
    wherever contributors already run setup:
 

@@ -26,47 +26,41 @@ RULE_PATH = "forbidden-path"
 
 @dataclass(frozen=True)
 class Rule:
+    """A gate's patterns as text: the scan runs them in the pattern judge (chock.gate.budget), never in-process."""
+
     policy: str
-    content_re: re.Pattern[str]
-    path_re: re.Pattern[str] | None
-    pragma_re: re.Pattern[str] | None
+    content_pattern: str
+    path_pattern: str | None
+    pragma_pattern: str | None
     judge: GateContext
 
     def covers(self, path: str) -> bool:
         return self.judge.in_scope(path)
 
-    def hits(self, text: str) -> list[int]:
-        """1-based line numbers whose text matches and carries no waiver pragma."""
-        found = []
-        for number, line in enumerate(text.splitlines(), start=1):
-            if self.pragma_re and self.pragma_re.search(line):
-                continue
-            if self.content_re.search(line):
-                found.append(number)
-        return found
 
-
-def _compile(policy: str, pattern: object) -> re.Pattern[str] | None:
+def _checked(policy: str, pattern: object) -> str | None:
+    """`pattern` as text once it is known to compile; None for none."""
     if not pattern:
         return None
     try:
-        return re.compile(str(pattern))
+        re.compile(str(pattern))
     except re.error as exc:
         raise HistoryError(f"{policy}: gate pattern does not compile ({exc}); refusing to scan without it") from exc
+    return str(pattern)
 
 
 def _rule(repo: Path, gate_path: Path, spec: dict) -> Rule:
     policy = gate_path.parents[1].name
     params = spec.get("params") or {}
-    content = _compile(policy, params.get("content_pattern"))
+    content = _checked(policy, params.get("content_pattern"))
     if content is None:
         raise HistoryError(f"{policy}: content_regex gate has no content_pattern; refusing to scan without it")
     judge = GateContext(repo_root=repo, scope=spec.get("paths"), own=own_paths(gate_path))
     return Rule(
         policy,
         content,
-        _compile(policy, params.get("forbidden_path_regex")),
-        _compile(policy, params.get("allowlist_pragma")),
+        _checked(policy, params.get("forbidden_path_regex")),
+        _checked(policy, params.get("allowlist_pragma")),
         judge,
     )
 

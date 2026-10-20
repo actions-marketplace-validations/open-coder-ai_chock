@@ -12,12 +12,21 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
 
-from .budget import BYTECODE_OFF, allowed_seconds, engine_deadline, time_left
+from .budget import (
+    BYTECODE_OFF,
+    PATTERN_SECONDS,
+    allowed_seconds,
+    close_judge,
+    engine_deadline,
+    engine_remaining,
+    judge_patterns,
+    pattern_judge,
+    time_left,
+)
 from .session_log import (
     session_for,
     session_outcome,
@@ -61,10 +70,22 @@ def _tool_call_refusal(spec, spoken):
     return spoken or str(spec.get("message") or "").strip() or "blocked by a chock tool_call gate"
 
 
-def _tool_call_regex(spec, tool_input):
-    """`deny` verdict when the input, as JSON text, matches the gate's `content_pattern`."""
+def _tool_call_regex(spec, tool_input, deadline, policy):
+    """`deny` verdict when the input, as JSON text, matches the gate's `content_pattern`.
+
+    The pattern runs under the engine's pattern deadline, within what is left of `deadline`; a
+    pattern that reaches no verdict in time refuses, naming the gate.
+    """
     text = json.dumps(tool_input, sort_keys=True, ensure_ascii=False)
-    if re.search(str((spec.get("params") or {}).get("content_pattern", "")), text):
+    pattern = str((spec.get("params") or {}).get("content_pattern", ""))
+    judge = pattern_judge()
+    try:
+        hits, why = judge_patterns(judge, [(pattern, [text])], min(PATTERN_SECONDS, engine_remaining(deadline)))
+    finally:
+        close_judge(judge)
+    if why:
+        return ("deny", f"content_regex gate {policy}: {why}{_TOOL_CALL_UNDECIDED}")
+    if hits[0]:
         return ("deny", _tool_call_refusal(spec, ""))
     return None
 
@@ -104,12 +125,12 @@ def _tool_call_script(spec, root, payload, deadline=None):
     return ("deny", f"script gate: {script.name} exited {proc.returncode}{detail}{_TOOL_CALL_UNDECIDED}")
 
 
-def _tool_call_verdict(spec, root, event, deadline):
+def _tool_call_verdict(spec, root, event, deadline, policy):
     """None to allow, else (verdict, message) for this call; a kind a tool call cannot answer refuses."""
     tool, tool_input = str(event.tool or ""), tool_call_input(event)
     kind = spec.get("kind")
     if kind == _TOOL_CALL_REGEX_KIND:
-        return _tool_call_regex(spec, tool_input)
+        return _tool_call_regex(spec, tool_input, deadline, policy)
     if kind == _TOOL_CALL_SCRIPT_KIND:
         payload = {
             "event": TOOL_CALL_EVENT,
@@ -169,7 +190,8 @@ def evaluate_tool_call(argv, event):
     if TOOL_CALL_EVENT in spec.get("on", []) and tool_call_matches(
         (spec.get("params") or {}).get("tools", []), str(event.tool or "")
     ):
-        verdict = _tool_call_capped(spec, _tool_call_verdict(spec, root, event, engine_deadline()))
+        policy = gate.parent.parent.name
+        verdict = _tool_call_capped(spec, _tool_call_verdict(spec, root, event, engine_deadline(), policy))
     if spec.get("kind") in _TOOL_CALL_NEEDS_SESSION:
         session_record(root, event, "pre", _TOOL_CALL_BLOCKED if verdict and verdict[0] == "deny" else None)
     return verdict

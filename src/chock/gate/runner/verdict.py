@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .actor import _ask_answered, _ask_refusal, _judged_event, agent_signal, approval, rollout, stop_agent_signal
+from .actor import _ask_answered, _ask_refusal, _judged_event, agent_signal, approval, rollout
 from .constants import (
     _ACTION_RANK,
     _EVENT_NAME,
@@ -33,7 +33,7 @@ from .constants import (
 )
 from .context import GateResult, ListingError
 from .halt import HALT_POLICY, HALT_REASON, halt_everywhere_read, halt_find, halt_git_roots, halt_message
-from .kinds import KINDS
+from .kinds import KINDS, PatternDeadlineError
 from .log import _actor, _held_record, _log_halt, _log_outcome, _log_script_hook
 from .material import _context, _params, own_paths
 from .report import (
@@ -47,8 +47,10 @@ from .report import (
     inert,
 )
 
-
 # >>> gate.py 14
+_UNJUDGED = " -- refusing rather than allowing what it never judged."
+
+
 def _policy_id(gate_path: Path) -> str | None:
     """The policy a compiled gate belongs to, from `.chock/compiled/<id>/<surface>/`, else None."""
     parents = gate_path.resolve().parents
@@ -117,7 +119,7 @@ def halt_git(repo_root: Path, event: str, policy_id: str | None = None) -> tuple
     """An agent's commit or push while a stop reaches it: refused and logged with reason `stopped`, whatever
     `CHOCK_ALLOW`, `CHOCK_AGENT_COMMIT=0` or the rollout level say. A person's own commit or push is not the
     stop's: None."""
-    signal = stop_agent_signal(repo_root)
+    signal = agent_signal(repo_root)
     who = _actor(signal)
     client = str(who["actor"]).removeprefix(ACTOR_AGENT_PREFIX)
     stop = (halt_find(halt_git_roots(repo_root), client) or halt_everywhere_read()) if signal is not None else None
@@ -194,12 +196,23 @@ def evaluate(
         return 2, VERDICT_ERROR
     signal = agent_signal(repo_root)
     judged = _judged_event(name, agent=signal is not None)
+    result = _judge_kind(kind, ctx, _params(gate_path, spec), judged, gate_path)
+    if isinstance(result, tuple):
+        return result
+    return Evaluation(spec, result, rollout(repo_root, event, signal, base), signal, judged)
+
+
+def _judge_kind(kind: Any, ctx: Any, params: dict, judged: str, gate_path: Path) -> GateResult | tuple[int, str]:
+    """The kind's result, or (2, error) with the reason on stderr when it could not judge."""
     try:
-        result = kind(ctx, _params(gate_path, spec), judged)
+        return kind(ctx, params, judged)
     except ListingError as exc:
         print(f"gate: {inert(str(exc))} -- refusing rather than judging a change it cannot read.", file=sys.stderr)
-        return 2, VERDICT_ERROR
-    return Evaluation(spec, result, rollout(repo_root, event, signal, base), signal, judged)
+    except PatternDeadlineError as exc:
+        # The reason names a time or the judge's own last stderr line, never the judged text.
+        reason = f"gate: {_policy_id(gate_path) or gate_path.name}: {inert(str(exc))}{_UNJUDGED}"
+        print(reason, file=sys.stderr)
+    return 2, VERDICT_ERROR
 
 
 def judge(
