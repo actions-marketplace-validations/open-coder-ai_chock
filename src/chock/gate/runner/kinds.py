@@ -6,38 +6,69 @@ import fnmatch
 import json
 import re
 import tomllib
+from collections.abc import Callable
 
-from .actor import _honoured, _waiver_re
+from ..budget import PATTERN_SECONDS, close_judge, judge_patterns, pattern_judge
+from .actor import _waiver_pattern
 from .constants import _DEPENDENCY_KIND, HEAD_WAIVER_EVENTS
 from .context import GateContext, GateResult
 from .script import _kind_script
 
 
 # >>> gate.py 06
-def _kind_content_regex(ctx: GateContext, params: dict, event: str) -> GateResult:
-    content_re = re.compile(params["content_pattern"])
-    forbidden_path_regex = params.get("forbidden_path_regex")
-    path_re = re.compile(forbidden_path_regex) if forbidden_path_regex else None
-    pragma_re = _waiver_re(params, event)
-    agent = event in HEAD_WAIVER_EVENTS
-    scan = params.get("scan", "added_lines")
-    diff_filter = params.get("diff_filter", "ACMRT")
+class PatternDeadlineError(Exception):
+    """A gate's patterns reached no verdict: the judge ran past its deadline or died, as the message says."""
 
+
+def _hits(judge: dict, jobs: list[tuple[str | None, list[str]]]) -> list[set[int]]:
+    """Per job of (pattern, texts), the indices of the texts the pattern matches; no pattern matches nothing."""
+    found, why = judge_patterns(judge, [(pattern, texts) for pattern, texts in jobs if pattern], PATTERN_SECONDS)
+    if why:
+        raise PatternDeadlineError(why)
+    results = iter(found)
+    return [set(next(results)) if pattern else set() for pattern, _ in jobs]
+
+
+def _lines(paths: list[str], read: Callable[[str], list[str]]) -> tuple[dict[str, range], list[str]]:
+    """Every path's lines as `read` gives them, in one list, with each path's span of it."""
+    spans: dict[str, range] = {}
+    texts: list[str] = []
+    for path in paths:
+        found = read(path)
+        spans[path] = range(len(texts), len(texts) + len(found))
+        texts += found
+    return spans, texts
+
+
+def _waived(index: int, line: str, waivers: set[int], head: frozenset[str] | None) -> bool:
+    """A waiver on `line` counts unless `head` is given and the line is not already committed."""
+    return index in waivers and (head is None or line in head)
+
+
+def _kind_content_regex(ctx: GateContext, params: dict, event: str) -> GateResult:
+    pragma = _waiver_pattern(params, event)
+    agent = event in HEAD_WAIVER_EVENTS
+    whole = params.get("scan", "added_lines") == "staged_blob"
+    paths = ctx.staged_paths(params.get("diff_filter", "ACMRT"))
+    judge = pattern_judge()
+    try:
+        forbidden = sorted(_hits(judge, [(params.get("forbidden_path_regex"), paths)])[0])
+        heads = {path: ctx.committed_blob(path) if agent else "" for path in paths}
+        blobs = [heads[paths[index]] if agent else ctx.staged_blob(paths[index]) for index in forbidden]
+        spans, texts = _lines(
+            paths, lambda path: ctx.staged_blob(path).splitlines() if whole else ctx.added_lines(path)
+        )
+        jobs = [(pragma, blobs), (pragma, texts), (params["content_pattern"], texts)]
+        blob_waivers, line_waivers, hits = _hits(judge, jobs)
+    finally:
+        close_judge(judge)
     matches: list[str] = []
-    for path in ctx.staged_paths(diff_filter):
-        head_text = ctx.committed_blob(path) if agent else ""
-        head = frozenset(head_text.splitlines()) if agent else None
-        if path_re and path_re.search(path):
-            blob = head_text if agent else ctx.staged_blob(path)
-            if not (pragma_re and pragma_re.search(blob)):
-                matches.append(f"{path}: forbidden path")
-        lines = ctx.staged_blob(path).splitlines() if scan == "staged_blob" else ctx.added_lines(path)
-        for line in lines:
-            if _honoured(pragma_re, line, head):
-                continue
-            if content_re.search(line):
-                matches.append(f"{path}: content pattern")
-                break
+    for index, path in enumerate(paths):
+        if index in forbidden and forbidden.index(index) not in blob_waivers:
+            matches.append(f"{path}: forbidden path")
+        head = frozenset(heads[path].splitlines()) if agent else None
+        if any(n in hits and not _waived(n, texts[n], line_waivers, head) for n in spans[path]):
+            matches.append(f"{path}: content pattern")
     return GateResult(allowed=not matches, matches=matches)
 
 
@@ -152,39 +183,39 @@ def _kind_dependency_allowlist(ctx: GateContext, params: dict, _event: str) -> G
     return GateResult(allowed=not matches, matches=matches)
 
 
-def _count(
-    pattern: "re.Pattern[str]", lines: list[str], pragma: re.Pattern[str] | None, head: frozenset[str] | None = None
-) -> int:
-    return sum(1 for line in lines if pattern.search(line) and not _honoured(pragma, line, head))
+def _count(span: range, hits: set[int], texts: list[str], waivers: set[int], head: frozenset[str] | None) -> int:
+    return sum(1 for n in span if n in hits and not _waived(n, texts[n], waivers, head))
 
 
 def _kind_test_integrity(ctx: GateContext, params: dict, event: str) -> GateResult:
     """Block a change that wins green CI by weakening the tests rather than fixing the code."""
-    path_re = re.compile(params["test_path_regex"])
-    assertion_re = re.compile(params["assertion_pattern"])
-    dummy_pattern = params.get("dummy_assertion_pattern")
-    dummy_re = re.compile(dummy_pattern) if dummy_pattern else None
-    pragma_re = _waiver_re(params, event)
+    pragma = _waiver_pattern(params, event)
     agent = event in HEAD_WAIVER_EVENTS
-
-    matches: list[str] = []
-    added = removed = 0
-    for path in ctx.staged_paths("D"):
-        if path_re.search(path):
-            matches.append(f"{path}: test file deleted")
-    for path in ctx.staged_paths("ACMRT"):
-        if not path_re.search(path):
-            continue
-        added_lines = ctx.net_added_lines(path)
+    deleted, changed = ctx.staged_paths("D"), ctx.staged_paths("ACMRT")
+    judge = pattern_judge()
+    try:
+        gone, tests = _hits(judge, [(params["test_path_regex"], deleted), (params["test_path_regex"], changed)])
+        files = [changed[index] for index in sorted(tests)]
+        added_spans, added = _lines(files, ctx.net_added_lines)
+        removed_spans, removed = _lines(files, ctx.removed_lines)
+        assertion = params["assertion_pattern"]
+        jobs = [(assertion, added), (assertion, removed), (pragma, added), (pragma, removed)]
+        jobs.append((params.get("dummy_assertion_pattern"), added))
+        asserted_added, asserted_removed, waived_added, waived_removed, dummy = _hits(judge, jobs)
+    finally:
+        close_judge(judge)
+    matches = [f"{deleted[index]}: test file deleted" for index in sorted(gone)]
+    added_count = removed_count = 0
+    for path in files:
         head = frozenset(ctx.committed_blob(path).splitlines()) if agent else None
-        if any(_honoured(pragma_re, line, head) for line in added_lines):
+        if any(_waived(n, added[n], waived_added, head) for n in added_spans[path]):
             continue
-        added += _count(assertion_re, added_lines, pragma_re, head)
-        removed += _count(assertion_re, ctx.removed_lines(path), pragma_re, head)
-        if dummy_re and any(dummy_re.search(line) for line in added_lines):
+        added_count += _count(added_spans[path], asserted_added, added, waived_added, head)
+        removed_count += _count(removed_spans[path], asserted_removed, removed, waived_removed, head)
+        if any(n in dummy for n in added_spans[path]):
             matches.append(f"{path}: vacuous assertion added")
-    if removed > added:
-        matches.append(f"assertions removed across tests: {removed} removed, {added} added")
+    if removed_count > added_count:
+        matches.append(f"assertions removed across tests: {removed_count} removed, {added_count} added")
     return GateResult(allowed=not matches, matches=matches)
 
 

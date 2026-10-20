@@ -72,7 +72,7 @@ pre-tool credit.
 
 | param | required | type | notes |
 |-------|----------|------|-------|
-| `content_pattern` | yes | string | regex matched against each line or the blob |
+| `content_pattern` | yes | string | regex matched against each line or the blob. Every pattern param runs in a child the engine kills after `PATTERN_SECONDS` (10 s per judgement), and the gate then refuses naming itself; `chock validate` and the compile step refuse a pattern whose nested repeats can run into each other (`^(a+)+$`) |
 | `scan` | no | string | `added_lines` (default) or `staged_blob` |
 | `forbidden_path_regex` | no | string | regex applied to staged file paths |
 | `allowlist_pragma` | no | string | regex matched on lines/blobs; matching content is ignored at commit, push and ci. On an agent commit (see [Actions](#actions)), and at `tool_use`, only a waiver already in HEAD is honoured |

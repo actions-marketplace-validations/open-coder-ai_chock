@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
+import ast
 import re
 
 from chock.resources import package_data_dir
-
-from .budget import ENGINE_BUDGET_SECONDS
 
 RUNNER_PACKAGE = "chock.gate.runner"
 
@@ -40,6 +39,14 @@ def _prelude() -> str:
     return package_data_dir("chock.gate", "data").joinpath("gate_prelude.py.tmpl").read_text(encoding="utf-8")
 
 
+def budget_fragment() -> str:
+    """chock.gate.budget's definitions, verbatim: the runner's deadlines and pattern judge are the engine's own."""
+    source = package_data_dir("chock.gate").joinpath("budget.py").read_text(encoding="utf-8")
+    lines = source.splitlines(keepends=True)
+    kept = [node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef | ast.Assign)]
+    return _SEPARATOR.join("".join(lines[node.lineno - 1 : node.end_lineno]).rstrip("\n") for node in kept)
+
+
 def _fragments() -> dict[int, str]:
     found: dict[int, str] = {}
     package = package_data_dir(RUNNER_PACKAGE)
@@ -62,6 +69,5 @@ def runner_source() -> str:
     if sorted(found) != list(range(1, len(found) + 1)):
         msg = f"gate.py fragments must run 1..N without a gap; found {sorted(found)}"
         raise ValueError(msg)
-    budget = f"#: One hook invocation's time budget, in seconds (chock.gate.budget).\nENGINE_BUDGET_SECONDS = {ENGINE_BUDGET_SECONDS}"
-    body = _SEPARATOR.join([budget, *(found[number] for number in sorted(found))])
+    body = _SEPARATOR.join([budget_fragment(), *(found[number] for number in sorted(found))])
     return _prelude() + body + "\n"
