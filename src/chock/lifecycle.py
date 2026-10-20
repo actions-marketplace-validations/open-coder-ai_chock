@@ -26,8 +26,10 @@ def sync_main(argv: list[str] | None) -> int:
     parser.add_argument("--check", action="store_true", help="Report drift and exit non-zero; write nothing")
     parser.add_argument("--ci", action="store_true", help="Also install the GitHub Actions CI gate workflow")
     parser.add_argument("--skills", action="store_true", help="Also install bundled authoring skills")
+    parser.add_argument("--committed", action="store_true", help="Arm from what is committed (takes only --repo)")
     args = parser.parse_args(argv)
-
+    if args.committed and (args.agents is not None or any((args.skip_hooks, args.check, args.ci, args.skills))):
+        parser.error("--committed takes only --repo")
     from chock.toggles import recompile_main
 
     passthrough = ["--repo", args.repo]

@@ -13,7 +13,7 @@ from pathlib import Path
 from chock import __version__
 from chock.pipe import guard_stdout, silence_interpreter_flush
 from chock.resources import package_data_dir
-from chock.stop_common import person_only_refused
+from chock.stop_common import committed_refused, person_only_refused
 
 #: A person-only command given this flag reports drift and writes nothing, so it stays open to an agent.
 _CHECK_FLAG = "--check"
@@ -35,6 +35,10 @@ def _module_fn(module_name: str, fn_name: str):
     return _main
 
 
+#: command -> the one flag whose sole use (with `--repo`) an agent may run: it applies only what is committed.
+AGENT_OK_FLAG: dict[str, str] = {}
+
+
 def _build_group(group: dict[str, dict[str, object]]) -> dict[str, tuple]:
     """One command name -> (lazy handler, help text, person-only), from a data/commands.json group.
 
@@ -43,6 +47,8 @@ def _build_group(group: dict[str, dict[str, object]]) -> dict[str, tuple]:
     """
     built = {}
     for name, spec in group.items():
+        if "agent_ok_flag" in spec:
+            AGENT_OK_FLAG[name] = spec["agent_ok_flag"]
         handler = _module_fn(spec["module"], spec["fn"]) if "fn" in spec else _module_main(spec["module"])
         built[name] = (handler, spec["help"], bool(spec.get("person_only")))
     return built
@@ -56,6 +62,19 @@ def _repo_root(argv: list[str]) -> Path:
         if arg.startswith("--repo="):
             return Path(arg.removeprefix("--repo="))
     return Path()
+
+
+def _is_sole_flag_form(command: str, argv: list[str]) -> bool:
+    """`argv` is the command's agent-ok flag with at most a `--repo`, and nothing else."""
+    flag = AGENT_OK_FLAG.get(command)
+    if flag is None or flag not in argv:
+        return False
+    rest = [arg for arg in argv if arg != flag]
+    if rest[:1] == ["--repo"]:
+        rest = rest[2:]
+    elif rest[:1] and rest[0].startswith("--repo="):
+        rest = rest[1:]
+    return not rest
 
 
 _COMMANDS_JSON = json.loads(package_data_dir("chock", "data").joinpath("commands.json").read_text(encoding="utf-8"))
@@ -93,8 +112,13 @@ def _dispatch(argv: list[str]) -> int:
         print(f"Unknown command: {command!r}. Run 'chock --help'.", file=sys.stderr)
         return 2
     fn, _, person_only = COMMANDS[command]
-    if person_only and _CHECK_FLAG not in rest and person_only_refused(_repo_root(rest).resolve(), command):
-        return 1
+    if person_only and _CHECK_FLAG not in rest:
+        repo = _repo_root(rest).resolve()
+        if _is_sole_flag_form(command, rest):
+            if committed_refused(repo, command):
+                return 1
+        elif person_only_refused(repo, command):
+            return 1
     return int(fn(rest) or 0)
 
 

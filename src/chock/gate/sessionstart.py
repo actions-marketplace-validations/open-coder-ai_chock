@@ -13,7 +13,8 @@ _INSTRUCTION = (
     "Chock: this clone's git hooks are NOT installed -- git never clones hooks, "
     "so commit-time gates will not run locally until a person runs, from their own shell:\n"
     "    pip install chock && chock sync --repo .\n"
-    "Ask them to run it before the first commit; `chock sync` refuses an agent's shell. "
+    "Ask them to run it before the first commit; `chock sync` refuses an agent's shell except "
+    "`chock sync --committed`, which arms a clean clone from what is committed. "
     "(The repo's CI gate, where wired, enforces regardless.)"
 )
 

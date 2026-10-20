@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -136,3 +137,85 @@ def test_the_committed_config_is_what_head_holds(repo: Path) -> None:
     run(["git", "-C", str(repo), "add", "-A"], check=True, capture_output=True)
     run(["git", "-C", str(repo), "commit", "-qm", "off"], check=True, capture_output=True)
     assert json.dumps(committed_config_text(repo)).count(POLICY) == 1
+
+
+# --- `sync --committed`: the one form an agent may run, on an untouched committed tree ----------------------
+
+
+def _commit_all(root: Path) -> None:
+    """Commit the scaffold as the person left it, so HEAD holds the config, lock and policies."""
+    git = ["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+    subprocess.run([*git, "add", "-A", "-f"], check=True, capture_output=True)
+    subprocess.run([*git, "commit", "-qm", "scaffold", "--no-verify"], check=True, capture_output=True)
+
+
+@pytest.fixture
+def committed(repo: Path) -> Path:
+    _commit_all(repo)
+    return repo
+
+
+def test_an_agent_runs_sync_committed_on_a_clean_tree(committed: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CLAUDECODE", "1")
+    assert cli.main(["sync", "--committed", "--repo", str(committed)]) == 0
+    assert (committed / ".chock" / "compiled" / POLICY).is_dir()
+
+
+@pytest.mark.parametrize("target", [".chock/config.yaml", "chock.lock", f".agents/policies/{POLICY}/manifest.yaml"])
+def test_an_agent_is_refused_sync_committed_naming_a_modified_input(
+    committed: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], target: str
+) -> None:
+    path = committed / target
+    path.write_text(path.read_text(encoding="utf-8") + "\n# edited\n", encoding="utf-8")
+    monkeypatch.setenv("CLAUDECODE", "1")
+    assert cli.main(["sync", "--committed", "--repo", str(committed)]) == 1
+    err = capsys.readouterr().err
+    assert "a person runs `chock sync` from their own shell" in err and target in err
+
+
+def test_an_agent_is_refused_sync_committed_for_an_untracked_policy_file(
+    committed: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (committed / ".agents" / "policies" / POLICY / "extra.txt").write_text("x", encoding="utf-8")
+    monkeypatch.setenv("CLAUDECODE", "1")
+    assert cli.main(["sync", "--committed", "--repo", str(committed)]) == 1
+    assert "extra.txt" in capsys.readouterr().err
+
+
+def test_an_agent_is_refused_sync_committed_when_head_cannot_be_read(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("CLAUDECODE", "1")
+    assert cli.main(["sync", "--committed", "--repo", str(repo)]) == 1
+    assert "a person runs `chock sync` from their own shell" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("extra", [["--ci"], ["--skip-hooks"], ["--skills"], ["--agents", "claude_code"]])
+def test_sync_committed_with_any_other_flag_is_refused(
+    committed: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], extra: list[str]
+) -> None:
+    monkeypatch.setenv("CLAUDECODE", "1")
+    assert cli.main(["sync", "--committed", *extra, "--repo", str(committed)]) == 1
+    assert "a person runs `chock sync` from their own shell" in capsys.readouterr().err
+
+
+def test_sync_committed_with_another_flag_is_refused_for_a_person_too(
+    committed: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name in ("CLAUDECODE", "AI_AGENT", "CHOCK_AGENT_COMMIT"):
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["sync", "--committed", "--ci", "--repo", str(committed)])
+    assert exc.value.code == 2
+
+
+def test_without_a_marker_sync_committed_is_a_plain_sync(committed: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("CLAUDECODE", "AI_AGENT", "CHOCK_AGENT_COMMIT"):
+        monkeypatch.delenv(name, raising=False)
+    config = committed / ".chock" / "config.yaml"
+    config.write_text(config.read_text(encoding="utf-8") + "\n# edited\n", encoding="utf-8")
+    assert cli.main(["sync", "--committed", "--repo", str(committed)]) == 0
+
+
+def test_the_agent_ok_flag_is_declared_in_commands_json_for_sync_alone() -> None:
+    assert cli.AGENT_OK_FLAG == {"sync": "--committed"}
