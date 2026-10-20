@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import warnings
 from pathlib import Path
 
 import pytest
@@ -42,6 +43,23 @@ def test_each_template_validates_and_passes_its_own_evals(tmp_path: Path, kind: 
     out = capsys.readouterr().out
     assert "[ERROR]" not in out
     assert " FAIL " not in out
+
+
+@pytest.mark.parametrize("kind", new.KINDS)
+def test_each_scaffold_passes_chock_check_only_evals_and_compiles_without_warnings(
+    tmp_path: Path, kind: str, capsys
+) -> None:
+    """The review's S3: a fresh policy's own evals must pass as generated, in code Python accepts without a warning."""
+    assert new.cmd_new(["policy", "demo", "--kind", kind, "--root", str(tmp_path)]) == 0
+    for script in (tmp_path / ".agents" / "policies" / "my-demo").rglob("*.py"):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            compile(script.read_text(encoding="utf-8"), str(script), "exec")
+    capsys.readouterr()
+    assert check_main(["--repo", str(tmp_path), "--only", "evals"]) == 0, capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert " FAIL " not in out
+    assert "PEND" not in out
 
 
 @pytest.mark.parametrize("kind", ["guard", "script"])

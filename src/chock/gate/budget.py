@@ -24,6 +24,9 @@ import time
 #: timeout is this plus a start-up margin (chock.compile.emitters.in_agent_hooks).
 ENGINE_BUDGET_SECONDS = 30
 
+#: Added to the environment of every policy script, so running a gate never writes bytecode into its pack.
+BYTECODE_OFF = {"PYTHONDONTWRITEBYTECODE": "1"}
+
 #: Seconds a gate's patterns may spend on one judgement (one commit's lines, one write, one blob)
 #: before the gate refuses naming itself: a repo-supplied pattern can be catastrophic.
 PATTERN_SECONDS = 10
