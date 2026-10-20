@@ -14,9 +14,11 @@ import hashlib as _chock_hashlib
 import fnmatch as _chock_fnmatch
 import re as _chock_re
 import os as _chock_os
+import queue as _chock_queue
 import shlex as _chock_shlex
 import shutil as _chock_shutil
 import subprocess as _chock_subprocess
+import threading as _chock_threading
 import time as _chock_time
 from datetime import datetime as _chock_datetime, timezone as _chock_timezone
 from pathlib import Path as _chock_Path
@@ -26,6 +28,10 @@ from pathlib import PurePosixPath as _chock_PurePosixPath, PureWindowsPath as _c
 ENGINE_BUDGET_SECONDS = 30
 
 BYTECODE_OFF = {'PYTHONDONTWRITEBYTECODE': '1'}
+
+PATTERN_SECONDS = 10
+
+PATTERN_JUDGE_SOURCE = 'import json, re, sys\nfor line in sys.stdin:\n    out = []\n    for pattern, texts in json.loads(line):\n        search = re.compile(pattern).search\n        out.append([index for index, text in enumerate(texts) if search(text)])\n    print(json.dumps(out), flush=True)\n'
 
 def engine_deadline():
     """The monotonic instant this invocation's budget runs out."""
@@ -45,6 +51,67 @@ def time_left(deadline, cmd):
 def allowed_seconds(expired):
     """The time a timed-out call was actually given, as text (what the deadline left it, not the full budget)."""
     return f'{max(float(expired.timeout or 0), 0.0):.1f}s'
+
+def pattern_judge(interpreter=None):
+    """A pattern judge, not yet started: the interpreter to run the patterns in (this one by default)."""
+    return {'argv': [interpreter or sys.executable, '-I', '-c', PATTERN_JUDGE_SOURCE], 'proc': None, 'lines': None}
+
+def _pump_lines(proc, lines):
+    for line in proc.stdout:
+        lines.put(line)
+    lines.put(None)
+
+def _start_judge(judge):
+    proc = _chock_subprocess.Popen(judge['argv'], stdin=_chock_subprocess.PIPE, stdout=_chock_subprocess.PIPE, stderr=_chock_subprocess.PIPE, text=True, encoding='utf-8')
+    lines = _chock_queue.Queue()
+    _chock_threading.Thread(target=_pump_lines, args=(proc, lines), daemon=True).start()
+    judge['proc'], judge['lines'] = (proc, lines)
+
+def close_judge(judge):
+    """Stop the judge's child, if one runs; the last line it wrote to stderr, or ""."""
+    proc = judge['proc']
+    judge['proc'] = judge['lines'] = None
+    if proc is None:
+        return ''
+    if proc.poll() is None:
+        proc.kill()
+    proc.wait()
+    try:
+        spoken = proc.stderr.read()
+    except (OSError, ValueError):
+        spoken = ''
+    for stream in (proc.stdin, proc.stdout, proc.stderr):
+        with contextlib.suppress(OSError):
+            stream.close()
+    return (spoken.strip().splitlines() or [''])[-1]
+
+def judge_patterns(judge, jobs, seconds):
+    """(hits, None) or (None, why): per job of (pattern, texts), the indices of the texts the pattern matches.
+
+    A job that runs past `seconds` kills the child and names the time; a job with no text is never
+    sent. `why` is text for a refusal: the judge is undecided and an undecided gate refuses.
+    """
+    if not any((texts for _, texts in jobs)):
+        return ([[] for _ in jobs], None)
+    if judge['proc'] is None:
+        try:
+            _start_judge(judge)
+        except OSError as exc:
+            return (None, f'the pattern judge could not start ({exc})')
+    proc, lines = (judge['proc'], judge['lines'])
+    try:
+        proc.stdin.write(json.dumps(jobs) + '\n')
+        proc.stdin.flush()
+    except (OSError, ValueError):
+        return (None, f'the pattern judge exited early ({close_judge(judge)})')
+    try:
+        line = lines.get(timeout=seconds)
+    except _chock_queue.Empty:
+        close_judge(judge)
+        return (None, f'the patterns gave no verdict within {seconds:g}s (a catastrophic pattern?)')
+    if line is None:
+        return (None, f'the pattern judge exited early ({close_judge(judge)})')
+    return (json.loads(line), None)
 
 LOG_CHAIN_PREV, LOG_CHAIN_SEQ = ('prev', 'seq')
 
@@ -2420,10 +2487,22 @@ def tool_call_matches(globs, tool):
 def _tool_call_refusal(spec, spoken):
     return spoken or str(spec.get('message') or '').strip() or 'blocked by a chock tool_call gate'
 
-def _tool_call_regex(spec, tool_input):
-    """`deny` verdict when the input, as JSON text, matches the gate's `content_pattern`."""
+def _tool_call_regex(spec, tool_input, deadline, policy):
+    """`deny` verdict when the input, as JSON text, matches the gate's `content_pattern`.
+
+    The pattern runs under the engine's pattern deadline, within what is left of `deadline`; a
+    pattern that reaches no verdict in time refuses, naming the gate.
+    """
     text = json.dumps(tool_input, sort_keys=True, ensure_ascii=False)
-    if _chock_re.search(str((spec.get('params') or {}).get('content_pattern', '')), text):
+    pattern = str((spec.get('params') or {}).get('content_pattern', ''))
+    judge = pattern_judge()
+    try:
+        hits, why = judge_patterns(judge, [(pattern, [text])], min(PATTERN_SECONDS, engine_remaining(deadline)))
+    finally:
+        close_judge(judge)
+    if why:
+        return ('deny', f'content_regex gate {policy}: {why}{_TOOL_CALL_UNDECIDED}')
+    if hits[0]:
         return ('deny', _tool_call_refusal(spec, ''))
     return None
 
@@ -2450,12 +2529,12 @@ def _tool_call_script(spec, root, payload, deadline=None):
     detail = f': {first}' if first else ''
     return ('deny', f'script gate: {script.name} exited {proc.returncode}{detail}{_TOOL_CALL_UNDECIDED}')
 
-def _tool_call_verdict(spec, root, event, deadline):
+def _tool_call_verdict(spec, root, event, deadline, policy):
     """None to allow, else (verdict, message) for this call; a kind a tool call cannot answer refuses."""
     tool, tool_input = (str(event.tool or ''), tool_call_input(event))
     kind = spec.get('kind')
     if kind == _TOOL_CALL_REGEX_KIND:
-        return _tool_call_regex(spec, tool_input)
+        return _tool_call_regex(spec, tool_input, deadline, policy)
     if kind == _TOOL_CALL_SCRIPT_KIND:
         payload = {'event': TOOL_CALL_EVENT, 'repo_root': str(root), 'tool': tool, 'input': tool_input, 'session': session_for(event, root)}
         return _tool_call_script(spec, root, payload, deadline)
@@ -2498,7 +2577,8 @@ def evaluate_tool_call(argv, event):
     root = repo_root_for(event, gate)
     verdict = None
     if TOOL_CALL_EVENT in spec.get('on', []) and tool_call_matches((spec.get('params') or {}).get('tools', []), str(event.tool or '')):
-        verdict = _tool_call_capped(spec, _tool_call_verdict(spec, root, event, engine_deadline()))
+        policy = gate.parent.parent.name
+        verdict = _tool_call_capped(spec, _tool_call_verdict(spec, root, event, engine_deadline(), policy))
     if spec.get('kind') in _TOOL_CALL_NEEDS_SESSION:
         session_record(root, event, 'pre', _TOOL_CALL_BLOCKED if verdict and verdict[0] == 'deny' else None)
     return verdict

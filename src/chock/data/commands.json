@@ -2,11 +2,13 @@
   "everyday": {
     "init": {
       "module": "chock.scaffold.init",
-      "help": "Scaffold a consumer repo (wiring only -- no policies)"
+      "help": "Scaffold a consumer repo (wiring only -- no policies)",
+      "person_only": true
     },
     "add": {
       "module": "chock.scaffold.add",
-      "help": "Install a policy or skill from a catalog and compile it"
+      "help": "Install a policy or skill from a catalog and compile it",
+      "person_only": true
     },
     "install": {
       "module": "chock.install.cli",
@@ -14,12 +16,14 @@
     },
     "remove": {
       "module": "chock.scaffold.remove",
-      "help": "Remove an installed policy and resync"
+      "help": "Remove an installed policy and resync",
+      "person_only": true
     },
     "sync": {
       "module": "chock.lifecycle",
       "fn": "sync_main",
-      "help": "Recompile + rewire so the repo matches its policies (--ci/--skills for extras)"
+      "help": "Recompile + rewire so the repo matches its policies (--ci/--skills for extras)",
+      "person_only": true
     },
     "check": {
       "module": "chock.history.cli",
@@ -56,12 +60,14 @@
     "enable": {
       "module": "chock.toggles",
       "fn": "enable_main",
-      "help": "Enable a policy by id"
+      "help": "Enable a policy by id",
+      "person_only": true
     },
     "disable": {
       "module": "chock.toggles",
       "fn": "disable_main",
-      "help": "Disable a policy by id"
+      "help": "Disable a policy by id",
+      "person_only": true
     },
     "bundle": {
       "module": "chock.guardrails.cli",
@@ -75,7 +81,8 @@
     },
     "compile": {
       "module": "chock.compile.compiler",
-      "help": "Low-level single-policy compile"
+      "help": "Low-level single-policy compile",
+      "person_only": true
     },
     "install-skills": {
       "module": "chock.scaffold.skills",
@@ -130,7 +137,8 @@
     "recompile": {
       "module": "chock.toggles",
       "fn": "recompile_main",
-      "help": "alias of: sync"
+      "help": "alias of: sync",
+      "person_only": true
     },
     "refresh": {
       "module": "chock.index.cli",
@@ -138,7 +146,8 @@
     },
     "install-hooks": {
       "module": "chock.hooks.install",
-      "help": "alias of: sync (hooks part)"
+      "help": "alias of: sync (hooks part)",
+      "person_only": true
     },
     "install-ci": {
       "module": "chock.scaffold.install_ci",

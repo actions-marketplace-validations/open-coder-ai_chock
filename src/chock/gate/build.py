@@ -10,7 +10,19 @@ from chock.compile.emitters import policy_rel_path
 from chock.config import load_config
 from chock.emit import write_generated
 from chock.gate.assemble import runner_source
+from chock.gate.pattern_safety import REGEX_PARAM_SUFFIXES, catastrophic, catastrophic_message
 from chock.manifest import load_manifest
+
+
+class CatastrophicPatternError(ValueError):
+    """A gate pattern a backtracking engine can run in exponential time: refused at compile, never installed."""
+
+
+def _refuse_catastrophic(policy_dir: Path, params: dict[str, Any]) -> None:
+    for name, value in params.items():
+        if isinstance(value, str) and name.endswith(REGEX_PARAM_SUFFIXES) and (why := catastrophic(value)):
+            msg = f"{policy_dir.name}: hook.gate.params.{catastrophic_message(name, value, why)}; nothing was compiled"
+            raise CatastrophicPatternError(msg)
 
 
 def _resolve_dotted(config: dict[str, Any], key: str) -> Any:
@@ -41,6 +53,7 @@ def build_gate_json(policy_dir: Path, repo_root: Path) -> dict[str, Any] | None:
         "message": str(gate.get("message", "")).strip(),
         "params": dict(gate.get("params") or {}),
     }
+    _refuse_catastrophic(policy_dir, spec["params"])
 
     # applies_to.paths bounds which files this gate may judge. It rides beside params rather
     # than inside them: params are what the policy declared about its check, and this is what

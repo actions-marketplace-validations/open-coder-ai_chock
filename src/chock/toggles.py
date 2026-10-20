@@ -14,6 +14,7 @@ from chock.compile.levels import Grade, render_grade
 from chock.compile.surfaces import AGENTS_ARG_REQUIRED_MSG
 from chock.config import agents_from_config as _agents_from_config
 from chock.config import load_config, policy_status, set_disabled
+from chock.gate.build import CatastrophicPatternError
 from chock.index.cli import cmd_refresh
 from chock.manifest import ManifestSourceError, load_manifest
 from chock.output import error, warn
@@ -209,7 +210,7 @@ def recompile_main(argv: list[str] | None) -> int:
 
     try:
         coverage = recompile(repo_root, agents, skip_hooks=args.skip_hooks)
-    except BookkeepingError as exc:
+    except (BookkeepingError, CatastrophicPatternError) as exc:
         error(str(exc))
         return 1
     print(f"Recompiled {len(coverage)} policies")

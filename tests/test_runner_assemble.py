@@ -8,11 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from chock.gate import assemble
-from chock.gate.assemble import runner_source
-from chock.gate.budget import ENGINE_BUDGET_SECONDS
+from chock.gate import assemble, budget
+from chock.gate.assemble import budget_fragment, runner_source
 
 PACKAGE = Path(assemble.__file__).resolve().parent / "runner"
+BUDGET = Path(budget.__file__).resolve()
 PRELUDE = Path(assemble.__file__).resolve().parent / "data" / "gate_prelude.py.tmpl"
 MARKER = re.compile(r"^# >>> gate\.py (\d+)$", re.MULTILINE)
 ENTRY_POINTS = {"__init__.py", "__main__.py"}
@@ -82,9 +82,21 @@ def test_a_header_imports_only_the_stdlib_and_its_siblings() -> None:
 def test_the_prelude_binds_every_stdlib_name_a_header_imports() -> None:
     """A module may import what it reads; gate.py has only the prelude's imports to read it from."""
     prelude = _bound(ast.parse(PRELUDE.read_text(encoding="utf-8")))
-    for path in _modules():
+    for path in [*_modules(), BUDGET]:
         missing = _bound(ast.parse(_header(path))) - prelude
         assert not missing, f"{path.name} imports {sorted(missing)}; add them to {PRELUDE.name}"
+
+
+def test_the_budget_module_is_vendored_whole_and_class_free() -> None:
+    """gate.py carries chock.gate.budget's every definition, so the runner's deadlines are the engine's own."""
+    tree = ast.parse(BUDGET.read_text(encoding="utf-8"))
+    assert not any(isinstance(node, ast.ClassDef | ast.AnnAssign) for node in tree.body), (
+        "budget.py is extracted by definition: a class or annotated assignment would be dropped"
+    )
+    defined = [node.name for node in tree.body if isinstance(node, ast.FunctionDef)]
+    for name in defined:
+        assert f"\ndef {name}(" in runner_source(), name
+    assert runner_source().count("def judge_patterns(") == 1
 
 
 def test_the_assembled_runner_is_one_compilable_file() -> None:
@@ -101,7 +113,11 @@ def _package(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, modules: dict[str,
     for name, text in modules.items():
         (pkg / name).write_text(text, encoding="utf-8")
     real = assemble.package_data_dir
-    monkeypatch.setattr(assemble, "package_data_dir", lambda package, *sub: pkg if not sub else real(package, *sub))
+
+    def stand_in(package: str, *sub: str) -> Path:
+        return pkg if package == assemble.RUNNER_PACKAGE and not sub else real(package, *sub)
+
+    monkeypatch.setattr(assemble, "package_data_dir", stand_in)
     monkeypatch.setattr(assemble, "MODULES", ("a", "b"))
 
 
@@ -113,8 +129,7 @@ def test_fragments_join_in_number_order_whatever_module_holds_them(tmp_path: Pat
     _package(
         tmp_path, monkeypatch, {"a.py": "import os\n# >>> gate.py 2\nB = 2\n", "b.py": "# >>> gate.py 1\nA = 1\n\n"}
     )
-    budget = f"#: One hook invocation's time budget, in seconds (chock.gate.budget).\nENGINE_BUDGET_SECONDS = {ENGINE_BUDGET_SECONDS}"
-    assert runner_source() == PRELUDE.read_text(encoding="utf-8") + budget + "\n\n\nA = 1\n\n\nB = 2\n"
+    assert runner_source() == PRELUDE.read_text(encoding="utf-8") + budget_fragment() + "\n\n\nA = 1\n\n\nB = 2\n"
 
 
 ONE = "# >>> gate.py 1\nA = 1\n"

@@ -17,7 +17,7 @@ SECRET_PARAMS = {
 }
 
 
-def _secret_gate(tmp_path: Path) -> Path:
+def _akia_gate(tmp_path: Path) -> Path:
     return write_gate(
         tmp_path,
         {
@@ -33,19 +33,19 @@ def _secret_gate(tmp_path: Path) -> Path:
 def test_blocks_aws_key(tmp_path: Path) -> None:
     init_repo(tmp_path)
     stage(tmp_path, "app.py", 'KEY = "AKIAIOSFODNN7EXAMPLE"\n')
-    assert run(_secret_gate(tmp_path), "pre-commit", None, tmp_path) == 1
+    assert run(_akia_gate(tmp_path), "pre-commit", None, tmp_path) == 1
 
 
 def test_allows_clean_file(tmp_path: Path) -> None:
     init_repo(tmp_path)
     stage(tmp_path, "app.py", "x = 1\n")
-    assert run(_secret_gate(tmp_path), "pre-commit", None, tmp_path) == 0
+    assert run(_akia_gate(tmp_path), "pre-commit", None, tmp_path) == 0
 
 
 def test_pragma_exempts_line(tmp_path: Path) -> None:
     init_repo(tmp_path)
     stage(tmp_path, "t.py", 'KEY = "AKIAIOSFODNN7EXAMPLE"  # pragma: allowlist secret\n')
-    assert run(_secret_gate(tmp_path), "pre-commit", None, tmp_path) == 0
+    assert run(_akia_gate(tmp_path), "pre-commit", None, tmp_path) == 0
 
 
 def test_forbidden_path_blocked(tmp_path: Path) -> None:

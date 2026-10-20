@@ -50,11 +50,26 @@ def test_only_the_witnessed_values_count(tmp_path: Path, monkeypatch: pytest.Mon
 
 
 @pytest.mark.parametrize("off", ["0", "false", "no", "off", "FALSE", " 0 "])
-def test_an_explicit_off_wins_over_every_marker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, off: str) -> None:
+def test_an_explicit_off_clears_no_vendor_marker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, off: str) -> None:
+    """`CHOCK_AGENT_COMMIT=0` is something an agent can set too: the vendor's marker still names it."""
     _config(tmp_path, f"{CONFIG_AGENT_ENV_KEY}: [CODEX_SANDBOX]\n")
-    monkeypatch.setenv("CLAUDECODE", "1")
-    monkeypatch.setenv("AI_AGENT", "claude-code_1_agent")
+    monkeypatch.setenv(AGENT_COMMIT_ENV, off)
+    assert agent_signal(tmp_path) is None
     monkeypatch.setenv("CODEX_SANDBOX", "seatbelt")
+    assert agent_signal(tmp_path) == "CODEX_SANDBOX"
+    monkeypatch.setenv("AI_AGENT", "claude-code_1_agent")
+    assert agent_signal(tmp_path) == "AI_AGENT"
+    monkeypatch.setenv("CLAUDECODE", "1")
+    assert agent_signal(tmp_path) == "CLAUDECODE=1"
+
+
+@pytest.mark.parametrize("off", ["0", "false", "no", "off"])
+def test_an_explicit_off_unsets_only_its_own_variable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, off: str
+) -> None:
+    """A shell that exported a truthy `CHOCK_AGENT_COMMIT` is a person's again with it off and no vendor marker."""
+    monkeypatch.setenv(AGENT_COMMIT_ENV, "1")
+    assert agent_signal(tmp_path) == AGENT_COMMIT_ENV
     monkeypatch.setenv(AGENT_COMMIT_ENV, off)
     assert agent_signal(tmp_path) is None
 
@@ -150,8 +165,8 @@ def test_a_detected_agent_commit_does_not_honour_the_waiver_it_adds(
         monkeypatch.setenv(name, value)
     assert run(_waivable_gate(repo), "pre-commit", None, repo) == 1
     err = capsys.readouterr().err
-    assert "not honoured" in err
-    assert f"{AGENT_COMMIT_ENV}=0" in err
+    assert "not honoured" in err and "from their own shell" in err
+    assert f"{AGENT_COMMIT_ENV}=0" not in err
 
 
 def test_a_configured_marker_is_read_from_the_repo_the_gate_runs_in(
@@ -166,13 +181,14 @@ def test_a_configured_marker_is_read_from_the_repo_the_gate_runs_in(
     assert run(gate, "pre-commit", None, repo) == 1
 
 
-def test_the_escape_hatch_lets_a_person_commit_in_an_agents_terminal(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_the_escape_hatch_does_not_open_in_an_agents_terminal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A person's own shell has no vendor marker; one that does is the agent's, whatever else it exports."""
     repo = init_repo(tmp_path)
     _stage_waived(repo)
     monkeypatch.setenv("CLAUDECODE", "1")
     monkeypatch.setenv(AGENT_COMMIT_ENV, "0")
+    assert run(_waivable_gate(repo), "pre-commit", None, repo) == 1
+    monkeypatch.delenv("CLAUDECODE")
     assert run(_waivable_gate(repo), "pre-commit", None, repo) == 0
 
 

@@ -23,6 +23,10 @@ dist/
 build/
 *.egg-info/
 
+# Coverage data: rewritten by every test run, never shared
+.coverage
+.coverage.*
+
 # Chock runtime outputs
 optimization-log.yaml
 rejected-edits/
