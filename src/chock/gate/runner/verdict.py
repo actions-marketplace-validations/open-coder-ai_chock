@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .actor import _ask_answered, _ask_refusal, _judged_event, agent_signal, approval, rollout, stop_agent_signal
+from .actor import _ask_answered, _ask_refusal, _judged_event, agent_signal, approval, rollout
 from .constants import (
     _ACTION_RANK,
     _EVENT_NAME,
@@ -119,7 +119,7 @@ def halt_git(repo_root: Path, event: str, policy_id: str | None = None) -> tuple
     """An agent's commit or push while a stop reaches it: refused and logged with reason `stopped`, whatever
     `CHOCK_ALLOW`, `CHOCK_AGENT_COMMIT=0` or the rollout level say. A person's own commit or push is not the
     stop's: None."""
-    signal = stop_agent_signal(repo_root)
+    signal = agent_signal(repo_root)
     who = _actor(signal)
     client = str(who["actor"]).removeprefix(ACTOR_AGENT_PREFIX)
     stop = (halt_find(halt_git_roots(repo_root), client) or halt_everywhere_read()) if signal is not None else None

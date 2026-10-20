@@ -44,12 +44,12 @@ an `ask`, and an agent commit ignores it. A refusal prints the reason, then the 
 
 **Agent commits.** A commit or push is an agent's when `CHOCK_AGENT_COMMIT` is truthy, or
 `CLAUDECODE=1`, or `AI_AGENT` is non-empty, or any variable named under `agent_commit_env:` in
-`.chock/config.yaml` is non-empty. `CHOCK_AGENT_COMMIT` set to `0`, `false`, `no` or `off` says
-"a person" and wins over every marker: the escape hatch for a person running git in an agent's
-terminal. An agent can set it too: the marker is a default, not an authenticated identity, and
-`CHOCK_ALLOW` is typed as easily. What backs them is the separate guards on an agent's own
-commands and review, not the hook. A person answering an `ask` in an agent's terminal is told to
-set both variables. An agent commit is judged at the event `agent-commit`: a
+`.chock/config.yaml` is non-empty. `CHOCK_AGENT_COMMIT` set to `0`, `false`, `no` or `off` unsets
+that one variable and clears no vendor marker (an agent can set it too): a person runs git from
+their own shell, which has none. The markers are defaults, not an authenticated identity, and
+`CHOCK_ALLOW` is typed as easily; what backs them is the separate guards on an agent's own commands
+and review, not the hook. A refused `ask` tells a person the `CHOCK_ALLOW` line to run and tells
+an agent to ask the person, naming no override. An agent commit is judged at `agent-commit`: a
 waiver it adds is not honoured. Only Claude Code's markers are witnessed (a git hook run by the
 Bash tool saw both, `src/chock/data/witnesses.json`, surface `git-hook-env`); Codex, Cursor and
 Copilot markers are unverified and are added per repository under `agent_commit_env:`.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,22 @@ def load_config(repo_root: Path | str) -> dict[str, Any]:
     if not path.exists():
         return {}
     return yamlio.safe_load(path.read_text(encoding="utf-8")) or {}
+
+
+def committed_config_text(repo_root: Path | str) -> str | None:
+    """`.chock/config.yaml` as committed at HEAD; None when git cannot show it (no repository, no commit, no file)."""
+    try:
+        shown = subprocess.run(  # noqa: S603 -- reading one committed file
+            ["git", "-C", str(repo_root), "show", f"HEAD:{CONFIG_DIR}/{CONFIG_NAME}"],  # noqa: S607
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
+        return None
+    return shown.stdout if shown.returncode == 0 else None
 
 
 def agents_from_config(repo_root: Path) -> list[str]:
@@ -86,10 +103,18 @@ def policy_status(
     config: dict[str, Any],
     policy_id: str,
     manifest: dict[str, Any] | None = None,
+    committed: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Resolve effective state for a policy from config + manifest."""
+    """Resolve effective state for a policy from config + manifest.
+
+    `committed` is the config as HEAD has it, given at an agent's event: a policy is then disabled only when
+    both say so, the way the committed rollout caps the working tree's, so an uncommitted disable changes
+    nothing for an agent. Absent (a person's command, or a check), the working tree's config decides.
+    """
     manifest = manifest or {}
     disabled = _disabled_list(config)
+    if committed is not None:
+        disabled &= _disabled_list(committed)
     override = _policy_overrides(config).get(policy_id, {})
     mandatory = bool(manifest.get("mandatory", False))
 

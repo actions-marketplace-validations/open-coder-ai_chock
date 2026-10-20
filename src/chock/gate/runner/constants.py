@@ -75,8 +75,8 @@ WAIVABLE_EVENTS = frozenset({"commit", "push", "ci"})
 #: The event of both agent surfaces (pre-tool-use and stop), by the name policies declare.
 TOOL_USE_EVENT = "tool_use"
 
-#: Env var a person or agent sets to say who is committing: truthy marks an agent, and a value in
-#: `_HUMAN_ENV` marks a person and wins over every detected marker.
+#: Env var that says an agent is acting: truthy marks an agent. A value in `_HUMAN_ENV` unsets this
+#: one variable and clears no vendor marker, since an agent can set it too.
 AGENT_COMMIT_ENV = "CHOCK_AGENT_COMMIT"
 
 #: Markers Claude Code's Bash tool sets in every command it runs (witnessed; a git hook inherits
@@ -117,7 +117,7 @@ _OBSERVE_NOTE = (
 _AGENT_COMMIT_NOTE = (
     "gate: this commit is treated as an agent's ({signal}), so a waiver it adds "
     "was not honoured; only waivers already in HEAD count. A person reviews and waives it, then "
-    f"commits from their own shell with {AGENT_COMMIT_ENV}=0."
+    "commits from their own shell."
 )
 
 

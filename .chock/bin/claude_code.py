@@ -842,7 +842,7 @@ if _CHOCK_RUNTIME_FAULT is not None:
 
 _GIT = _chock_shutil.which('git') or 'git'
 
-_INSTRUCTION = "Chock: this clone's git hooks are NOT installed -- git never clones hooks, so commit-time gates will not run locally until someone runs:\n    pip install chock && chock sync --repo .\nRun that before the first commit. (The repo's CI gate, where wired, enforces regardless.)"
+_INSTRUCTION = "Chock: this clone's git hooks are NOT installed -- git never clones hooks, so commit-time gates will not run locally until a person runs, from their own shell:\n    pip install chock && chock sync --repo .\nAsk them to run it before the first commit; `chock sync` refuses an agent's shell. (The repo's CI gate, where wired, enforces regardless.)"
 
 def _repo_root() -> _chock_Path:
     root = _chock_os.environ.get('CLAUDE_PROJECT_DIR')
