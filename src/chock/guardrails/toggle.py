@@ -113,12 +113,6 @@ def _states(starts: list[Path]) -> dict[str, list]:
     return {str(path): [digest(path), recorded(path)] for path in paths}
 
 
-def _states(starts: list[Path]) -> dict[str, list]:
-    """{toggle file: [sha256 of it, its record]} for every file in scope of any of `starts`."""
-    paths = dict.fromkeys(path for start in starts for path in scopes(start))
-    return {str(path): [digest(path), recorded(path)] for path in paths}
-
-
 def bind(starts: list[Path], session: str, *, fresh: bool) -> dict | None:
     """The files' states `session` is bound to in the user's engine state folder, which a `cd` cannot move."""
     return ts.bind(user_path().parent / "state", _states(starts), session, fresh=fresh)

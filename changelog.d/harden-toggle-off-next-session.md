@@ -7,3 +7,5 @@
   end while a file changed during the session switches a member off. A client that sends no session id honours an
   `off` only after a session start. The built-in protect member stays non-toggleable. docs/custom-policies.md and the
   "customize guardrails" skill state that a toggle is not a security boundary against an agent running as the person.
+  The built-in protection also refuses an agent's write to a session's binding (`guardrails-session-*.json` under
+  `.chock/state/`), by shell or Edit/Write.

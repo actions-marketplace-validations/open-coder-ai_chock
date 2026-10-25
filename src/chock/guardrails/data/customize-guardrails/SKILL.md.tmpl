@@ -43,7 +43,8 @@ it cannot be switched off.
 ## Never
 
 - Never write, edit, move, copy, link or delete `.chock/guardrails.json` or `~/.chock/guardrails.json`,
-  or its record under `.chock/state/`, and never run `chock bundle on`, `chock bundle off` or
+  its record or a session's binding (`guardrails-session-*.json`) under `.chock/state/`, and never run
+  `chock bundle on`, `chock bundle off` or
   `chock bundle status --adopt` yourself, even when asked: the built-in guard
   refuses it, and a guardrail switched off by the agent it constrains is no guardrail. Offer the
   command instead.
