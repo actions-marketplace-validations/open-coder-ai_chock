@@ -62,12 +62,6 @@ def write_call(client: str, repo: Path, path: str, content: str = MARKER) -> dic
     return {"hook_event_name": "PreToolUse", "tool_name": "Write", "tool_input": tool_input, "cwd": str(repo)}
 
 
-def in_session(payload: dict[str, Any], session: str) -> dict[str, Any]:
-    """`payload` as the client's session `session` sends it: every session or conversation key it has, else `session_id`."""
-    keys = [k for k in ("session_id", "sessionId", "conversation_id", "conversationId") if k in payload]
-    return {**payload, **dict.fromkeys(keys or ["session_id"], session)}
-
-
 def refused(proc: Any) -> bool:
     """Whether a hook did not let the call through, in any client's dialect."""
     out = proc.stdout.lower()

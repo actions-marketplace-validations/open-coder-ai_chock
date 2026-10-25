@@ -6,12 +6,14 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import client_payloads
 import pytest
 from bundle_fixtures import BUNDLE_ID, GATE_ID, GUARD_ID
-from guardrails_support import MERGED_CLIENTS, any_refused, build, in_session, outcomes, set_toggles, shell
+from guardrails_support import MERGED_CLIENTS, any_refused, build, outcomes, set_toggles, shell
 
 from chock.gate.session_log import session_id_of
-from chock.guardrails import toggle
+from chock.guardrails import toggle, toggle_state
+from chock.guardrails.plugin import WRAPPER_STATE
 
 RM = "rm -rf /"
 START = "--session-start"
@@ -35,34 +37,36 @@ def _start(commands: list[str], plugin: Path, repo: Path, home: Path, session: s
 @pytest.mark.parametrize("client", MERGED_CLIENTS)
 def test_an_off_written_during_the_session_waits_for_the_next_session(tmp_path: Path, home: Path, client: str) -> None:
     plugin, repo, commands = build(tmp_path, client)
-    mine = in_session(shell(client, repo, RM), "one")
+    mine = client_payloads.in_session(shell(client, repo, RM), "one")
     assert any_refused(commands, plugin, repo, mine, home), "on by default"
     set_toggles(repo, {BUNDLE_ID: {GUARD_ID: "off"}})  # the F17 forgery: a file with a matching record
     assert any_refused(commands, plugin, repo, mine, home), "the session that saw no file stays on"
-    assert not any_refused(commands, plugin, repo, in_session(mine, "two"), home), "the next session honours it"
+    assert not any_refused(commands, plugin, repo, client_payloads.in_session(mine, "two"), home), (
+        "the next session honours it"
+    )
 
 
 def test_a_session_keeps_the_off_it_started_with_and_ignores_every_later_edit(tmp_path: Path, home: Path) -> None:
     plugin, repo, commands = build(tmp_path, "claude")
-    mine = in_session(shell("claude", repo, RM), "one")
+    mine = client_payloads.in_session(shell("claude", repo, RM), "one")
     set_toggles(repo, {BUNDLE_ID: {GUARD_ID: "off"}})
     assert not any_refused(commands, plugin, repo, mine, home), "off before the session: honoured"
     set_toggles(repo, {BUNDLE_ID: {GUARD_ID: "off", GATE_ID: "off"}})
     procs = outcomes(commands, plugin, repo, mine, home)
     assert any_refused(commands, plugin, repo, mine, home), "the record moved: every member is on again"
     assert any("changed during this session" in p.stderr for p in procs)
-    assert not any_refused(commands, plugin, repo, in_session(mine, "two"), home)
+    assert not any_refused(commands, plugin, repo, client_payloads.in_session(mine, "two"), home)
 
 
 def test_the_user_file_binds_the_same_way(tmp_path: Path, home: Path) -> None:
     plugin, repo, commands = build(tmp_path, "claude")
     outside = tmp_path / "scratch"
     outside.mkdir()
-    mine = in_session(shell("claude", outside, RM), "one")
+    mine = client_payloads.in_session(shell("claude", outside, RM), "one")
     assert any_refused(commands, plugin, outside, mine, home)
     set_toggles(home, {BUNDLE_ID: {GUARD_ID: "off"}})
     assert any_refused(commands, plugin, outside, mine, home)
-    assert not any_refused(commands, plugin, outside, in_session(mine, "two"), home)
+    assert not any_refused(commands, plugin, outside, client_payloads.in_session(mine, "two"), home)
 
 
 def test_a_session_start_lists_every_member_that_is_off_by_scope(tmp_path: Path, home: Path) -> None:
@@ -80,7 +84,7 @@ def test_a_session_start_lists_every_member_that_is_off_by_scope(tmp_path: Path,
 
 def test_a_session_start_binds_the_session_and_a_compaction_does_not_rebind_it(tmp_path: Path, home: Path) -> None:
     plugin, repo, commands = build(tmp_path, "claude")
-    mine = in_session(shell("claude", repo, RM), "one")
+    mine = client_payloads.in_session(shell("claude", repo, RM), "one")
     _start(commands, plugin, repo, home, "one")
     set_toggles(repo, {BUNDLE_ID: {GUARD_ID: "off"}})
     _start(commands, plugin, repo, home, "one", source="compact")
@@ -116,6 +120,12 @@ def test_a_change_of_directory_does_not_start_a_new_binding(tmp_path: Path, home
     plugin, repo, commands = build(tmp_path, "claude")
     outside = tmp_path / "scratch"
     outside.mkdir()
-    assert any_refused(commands, plugin, repo, in_session(shell("claude", repo, RM), "one"), home)
+    assert any_refused(commands, plugin, repo, client_payloads.in_session(shell("claude", repo, RM), "one"), home)
     set_toggles(home, {BUNDLE_ID: {GUARD_ID: "off"}})
-    assert any_refused(commands, plugin, outside, in_session(shell("claude", outside, RM), "one"), home)
+    assert any_refused(commands, plugin, outside, client_payloads.in_session(shell("claude", outside, RM), "one"), home)
+
+
+def test_the_plugin_carries_the_state_module_beside_its_wrapper(tmp_path: Path) -> None:
+    plugin, _repo, _commands = build(tmp_path, "claude")
+    shipped = (plugin / WRAPPER_STATE).read_text(encoding="utf-8")
+    assert shipped == Path(toggle_state.__file__).read_text(encoding="utf-8")
