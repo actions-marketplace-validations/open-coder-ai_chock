@@ -15,7 +15,7 @@ from chock.guardrails import chock_bundle_log, toggle
 from chock.plugin.store import SCRIPTS_TEMPLATE
 
 _DATA = Path(__file__).resolve().parent / "data"
-PROTECT_ID = "chock-guardrails-protect"
+PROTECT_ID = toggle.PROTECT_ID
 SKILL_NAME = "customize-guardrails"
 WRAPPER = SCRIPTS_TEMPLATE.format(name="chock_bundle.py")
 #: The wrapper's log line and the gate's journal it writes through, beside it: no chock need be installed.
@@ -92,6 +92,27 @@ def verify_at_stop(doc: Any, agent: str) -> Any:
             k: swap(v) if k == "command" and isinstance(v, str) else verify_at_stop(v, agent) for k, v in doc.items()
         }
     return [verify_at_stop(v, agent) for v in doc] if isinstance(doc, list) else doc
+
+
+def at_session_start(doc: Any, agent: str) -> Any:
+    """The session-start heartbeat run through the toggle wrapper, which binds the session and lists what is off.
+
+    A heartbeat command is the launcher and the adapter with no flags, so the adapter is the command's last word.
+    """
+    adapter = re.escape(SCRIPTS_TEMPLATE.format(name=f"{agent}.py"))
+
+    def swap(command: str) -> str:
+        q = _quote(command)
+        pattern = re.compile(rf'{q}([^"\s]*)({adapter}{q})$')
+        return pattern.sub(
+            lambda m: f"{q}{m.group(1)}{WRAPPER}{q} {toggle.SESSION_START} {q}{m.group(1)}{m.group(2)}", command
+        )
+
+    if isinstance(doc, dict):
+        return {
+            k: swap(v) if k == "command" and isinstance(v, str) else at_session_start(v, agent) for k, v in doc.items()
+        }
+    return [at_session_start(v, agent) for v in doc] if isinstance(doc, list) else doc
 
 
 def _cell(text: str) -> str:

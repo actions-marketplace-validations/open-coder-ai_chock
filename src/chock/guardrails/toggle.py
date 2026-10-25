@@ -2,7 +2,12 @@
 
 `.chock/guardrails.json` (repo; else `~/.chock/guardrails.json`) is all on when absent, invalid or unlike its record.
 `--bundle <b> --member <id> <adapter> [args...]`: off runs the adapter with no args. `--verify <adapter>`: a Stop is
-refused while a toggle file in its `cwd` or any workspace root loosened.
+refused while a toggle file in its `cwd` or any workspace root loosened or changed during the session.
+`--session-start <adapter>`: binds the session to the files it sees and lists every member that is off.
+
+An `off` is honoured only by a session that started after its file's record last changed: a session is bound to the
+files it first saw (the session log's id names it), and once one differs every member is on for the rest of it. This
+is not a security boundary against an agent running as the person: that agent can write both the file and its record.
 """
 
 from __future__ import annotations
@@ -16,6 +21,7 @@ import os
 import re
 import runpy
 import sys
+import time
 from pathlib import Path
 
 try:  # beside this wrapper in a merged plugin; inside the chock package everywhere else
@@ -34,6 +40,20 @@ _ARGC = 5
 #: The record `chock bundle` keeps of the file it last wrote, beside it under the engine's own state folder.
 RECORD_PARTS = ("state", "guardrails.sha256")
 VERIFY = "--verify"
+SESSION_START = "--session-start"
+#: The built-in self-protection: never a catalog member, so an entry naming it switches nothing.
+PROTECT_ID = "chock-guardrails-protect"
+#: The session log's id keys (`session_id`, Copilot's `sessionId`), then the conversation id Cursor and Antigravity send instead.
+SESSION_ID_KEYS = ("session_id", "sessionId", "conversation_id", "conversationId")
+SESSION_ID_MAX = 128
+SESSION_UNKNOWN = "unknown"
+BOUND_NAME = "guardrails-session-{}.json"
+BOUND_PRUNE_SECONDS = 7 * 24 * 3600
+SOURCE_COMPACT = "compact"
+_UNSEEN = [None, None]
+MOVED = (
+    "changed during this session, so an `off` in it applies from the next session; every guardrail stays on until then"
+)
 DELETED = "it was deleted after `chock bundle` wrote it"
 DRIFTED = (
     "guardrails.json differs from the last `chock bundle` change; every guardrail stays on until the person "
@@ -41,6 +61,11 @@ DRIFTED = (
 )
 _VERDICT_DENY = "deny"
 _BLOCKING_EXIT = 2  # the launcher's refusal too: the wrapper speaks no client's dialect
+_NOTICE = (
+    "chock: these guardrails are switched off for this session (set before it started; `chock bundle status` shows "
+    "them):\n{listed}\nA toggle is not a security boundary against an agent running as the person; a change made "
+    "during a session applies from the next one."
+)
 
 
 class ToggleError(ValueError):
@@ -184,6 +209,105 @@ def scopes(start: Path) -> list[Path]:
     return [*([root / FILENAME] if root else []), user_path()]
 
 
+def _document(payload: bytes) -> dict:
+    """The hook payload as an object; empty when it is not one."""
+    try:
+        raw = json.loads(payload.decode("utf-8-sig"))
+    except ValueError:
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def session_id(payload: bytes) -> str:
+    """The session's id as the session log names it: a safe file stem, never empty."""
+    raw = _document(payload)
+    given = next((raw[key] for key in SESSION_ID_KEYS if raw.get(key)), "")
+    stem = "".join(c for c in str(given) if c.isalnum() or c in "._-").lstrip(".")
+    return stem[:SESSION_ID_MAX] or SESSION_UNKNOWN
+
+
+def _states(starts: list[Path]) -> dict[str, list]:
+    """{toggle file: [sha256 of it, its record]} for every file in scope of any of `starts`."""
+    paths = dict.fromkeys(path for start in starts for path in scopes(start))
+    return {str(path): [digest(path), recorded(path)] for path in paths}
+
+
+def bound_path(session: str) -> Path:
+    """Where a session's binding is kept: the user's engine state folder, so a `cd` in the session cannot move it."""
+    return user_path().parent / "state" / BOUND_NAME.format(session)
+
+
+def _keep(path: Path, states: dict[str, list], *, replace: bool) -> None:
+    """Write the binding whole or not at all; without `replace`, an existing one wins. Best effort: never raises."""
+    scratch = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        scratch.write_text(json.dumps(states), encoding="utf-8")
+        if replace:
+            os.replace(scratch, path)
+            cutoff = time.time() - BOUND_PRUNE_SECONDS
+            for old in path.parent.glob(BOUND_NAME.format("*")):
+                if old.stat().st_mtime < cutoff:
+                    old.unlink()
+        else:
+            os.link(scratch, path)
+    except OSError:  # no binding is kept: the session then reads every file as changed
+        pass
+    finally:
+        with contextlib.suppress(OSError):
+            scratch.unlink()
+
+
+def bind(starts: list[Path], session: str, *, fresh: bool) -> dict | None:
+    """The files' states this session is bound to, or None when it is bound to none.
+
+    A session start (`fresh`) binds anew. Any other first hook binds the session to what it sees, an absent file
+    included, when the client names the session; one that does not stays unbound until a session start.
+    """
+    path = bound_path(session)
+    states = _states(starts)
+    if fresh or (session != SESSION_UNKNOWN and not path.exists()):
+        _keep(path, states, replace=fresh)
+    try:
+        bound = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return bound if isinstance(bound, dict) else None
+
+
+def moved(starts: list[Path], bound: dict | None) -> list[Path]:
+    """Every toggle file in scope whose state is not the one the session was bound to (an unbound file always is)."""
+    held = bound or {}
+    return [Path(file) for file, state in _states(starts).items() if held.get(file, _UNSEEN) != state]
+
+
+def _has_off(path: Path) -> bool:
+    try:
+        return any(s == OFF for members in read(path).values() for s in members.values())
+    except ToggleError:
+        return False
+
+
+def switched_off(starts: list[Path]) -> list[str]:
+    """One line per toggle file in scope that switches a member off: its scope, path and members."""
+    governing = source(starts[0])[0]
+    lines = []
+    for path in dict.fromkeys(path for start in starts for path in scopes(start)):
+        if not os.path.lexists(path) or drift(path):
+            continue
+        try:
+            off = sorted(
+                f"{b}/{i}" for b, ms in read(path).items() for i, s in ms.items() if s == OFF and i != PROTECT_ID
+            )
+        except ToggleError:
+            continue
+        if off:
+            scope = USER if path == user_path() else REPO
+            shadowed = "" if governing in (None, path) else " (not applied here: the repository's own file governs)"
+            lines.append(f"{scope} ({path}){shadowed}: {', '.join(off)}")
+    return lines
+
+
 def handed_to_user() -> str | None:
     """Why a deleted repo file loosens: the user file that now governs switches members off, or is unvouched for."""
     user = user_path()
@@ -198,8 +322,11 @@ def handed_to_user() -> str | None:
     return f"deleting it hands control to {user}, which switches {', '.join(off)} off" if off else None
 
 
-def turn_end_drifted(starts: list[Path]) -> list[str]:
-    """One line per toggle file in scope of any of `starts` that loosened; a tightening deletion drops its record."""
+def turn_end_drifted(starts: list[Path], session: str | None = None) -> list[str]:
+    """One line per toggle file in scope of any of `starts` that loosened or, in `session`, changed to switch a member off.
+
+    A tightening deletion drops its record.
+    """
     lines = []
     for path in dict.fromkeys(path for start in starts for path in scopes(start)):
         why = drift(path)
@@ -210,6 +337,10 @@ def turn_end_drifted(starts: list[Path]) -> list[str]:
                     record_path(path).unlink()
         if why:
             lines.append(f"{path}: {why}")
+    if session is not None:
+        listed = {line.split(": ", 1)[0] for line in lines}
+        late = [p for p in moved(starts, bind(starts, session, fresh=False)) if _has_off(p) and str(p) not in listed]
+        lines += [f"{path}: {MOVED}" for path in late]
     return lines
 
 
@@ -227,21 +358,41 @@ def _adapter(path: str):
 def verify(argv: list[str], payload: bytes) -> None:
     """Turn-end check: the adapter (`argv`: it, `--gate <gate> --stop`) refuses a Stop while a toggle file drifted."""
     adapter, gate = _adapter(argv[0]), Path(argv[argv.index("--gate") + 1])
-    wheres = _wheres(payload)
+    wheres, session = _wheres(payload), session_id(payload)
     ledger = next((root for root in map(repo_root, wheres) if root), wheres[0])
     refuse = adapter.handle  # an entry whose shared runtime failed to load refuses every event itself
 
     def handle(event):
         if getattr(adapter, "_CHOCK_RUNTIME_FAULT", None) is not None:
             return refuse(event)
-        lines = turn_end_drifted(wheres) if getattr(event, "event", "") == "stop" else []
+        lines = turn_end_drifted(wheres, session) if getattr(event, "event", "") == "stop" else []
         refusal = (
-            f"chock: a guardrails toggle file was changed outside `chock bundle`: {'; '.join(lines)}. Only a person "
-            "changes it: they re-apply it with `chock bundle on|off <policy-id>`, or review it and run "
-            "`chock bundle status --adopt`. The agent does not."
+            f"chock: a guardrails toggle file was changed outside `chock bundle` or since this session started: "
+            f"{'; '.join(lines)}. Only a person changes it: they re-apply it with `chock bundle on|off <policy-id>`, "
+            "or review it and run `chock bundle status --adopt`; an `off` applies from the next session. "
+            "The agent does not."
         )
         decision = adapter.settle_stop(event, ledger, gate, (_VERDICT_DENY, refusal), {}) if lines else None
         return adapter._spoken(decision) if decision else None
+
+    adapter.handle = handle
+    sys.argv = list(argv)
+    adapter.main()
+
+
+def start(argv: list[str], payload: bytes) -> None:
+    """Session start: the adapter (`argv`: it) logs its heartbeat; the session is bound and told what is off."""
+    adapter, wheres, session = _adapter(argv[0]), _wheres(payload), session_id(payload)
+    heartbeat = adapter.handle
+    resumed = _document(payload).get("source") != SOURCE_COMPACT  # a compaction continues the session it is in
+
+    def handle(event):
+        decision = heartbeat(event)
+        if decision is not None or getattr(event, "event", "") != "session_start":
+            return decision
+        bind(wheres, session, fresh=resumed)
+        listed = switched_off(wheres)
+        return adapter.Decision.allow(context=_NOTICE.format(listed="\n".join(listed))) if listed else None
 
     adapter.handle = handle
     sys.argv = list(argv)
@@ -255,7 +406,11 @@ def wrapped(argv: list[str], payload: bytes) -> list[str]:
         raise SystemExit(msg)
     bundle, member, adapter, rest = argv[1], argv[3], argv[4], argv[5:]
     try:
-        governing, _scope, toggles, warning = load(_wheres(payload)[0])
+        starts = _wheres(payload)
+        governing, _scope, toggles, warning = load(starts[0])
+        held = moved(starts, bind(starts, session_id(payload), fresh=False))
+        if held and any(s == OFF for members in toggles.values() for s in members.values()):
+            toggles, warning = {}, "; ".join(f"{path}: {MOVED}" for path in held)
     except Exception as exc:  # noqa: BLE001 -- a lookup that fails switches nothing off
         governing, toggles, warning = None, {}, f"the guardrails toggle lookup failed, every guardrail stays on: {exc}"
     if warning:
@@ -273,6 +428,9 @@ def main() -> None:
         sys.stdin = io.TextIOWrapper(io.BytesIO(payload), encoding="utf-8")
         if sys.argv[1:2] == [VERIFY]:
             verify(sys.argv[2:], payload)
+            return
+        if sys.argv[1:2] == [SESSION_START]:
+            start(sys.argv[2:], payload)
             return
         sys.argv = wrapped(sys.argv[1:], payload)
         runpy.run_path(sys.argv[0], run_name="__main__")

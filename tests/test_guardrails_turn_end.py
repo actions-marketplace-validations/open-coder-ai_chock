@@ -8,9 +8,19 @@ from pathlib import Path
 
 import client_payloads
 import pytest
-from bundle_fixtures import ALL_ROOTS, BUNDLE_ID, GUARD_ID
+from bundle_fixtures import ALL_ROOTS, BUNDLE_ID, GATE_ID, GUARD_ID
 from conftest import run_hook_command
-from guardrails_support import MERGED_CLIENTS, TOGGLE, any_refused, build, outcomes, refused, set_toggles, shell
+from guardrails_support import (
+    MERGED_CLIENTS,
+    TOGGLE,
+    any_refused,
+    build,
+    in_session,
+    outcomes,
+    refused,
+    set_toggles,
+    shell,
+)
 
 from chock.guardrails import cli, toggle
 from chock.guardrails.plugin import WRAPPER
@@ -57,8 +67,8 @@ def _at_turn_end(client: str, tmp_path: Path, home: Path):
     verify = [c for c in commands if f'{WRAPPER}" {toggle.VERIFY}' in c]
     assert len(verify) == 1, commands
 
-    def judge() -> str:
-        (proc,) = outcomes(verify, plugin, repo, _stop(client, repo), home)
+    def judge(session: str = "s1") -> str:
+        (proc,) = outcomes(verify, plugin, repo, in_session(_stop(client, repo), session), home)
         return _verdict(proc)
 
     return repo, judge
@@ -77,13 +87,13 @@ def test_the_persons_change_through_the_cli_passes_and_a_raw_write_is_refused(
     repo, judge = _at_turn_end(client, tmp_path, home)
     assert judge() == "allowed", "no file, no record"
     _switch(repo, monkeypatch, "off", GUARD_ID)
-    assert judge() == "allowed", "written by chock bundle"
+    assert judge("s2") == "allowed", "written by chock bundle, before this session started"
     path = repo / TOGGLE
     # A write the best-effort shell guard missed: the file changes with no record of it.
     path.write_text(json.dumps({"version": 1, "bundles": {BUNDLE_ID: {GUARD_ID: "off", "demo-write-gate": "off"}}}))
-    assert judge() == "refused"
+    assert judge("s2") == "refused"
     _switch(repo, monkeypatch, "status", "--adopt")
-    assert judge() == "allowed", "a person reviewed and adopted it"
+    assert judge("s3") == "allowed", "a person reviewed and adopted it, before this session started"
 
 
 @pytest.mark.parametrize("client", MERGED_CLIENTS)
@@ -261,11 +271,13 @@ def test_an_agent_written_off_is_ignored_at_hook_time_until_a_person_adopts_it(
     plugin, repo, commands = build(tmp_path, client)
     payload = shell(client, repo, "rm -rf /")
     set_toggles(repo, {BUNDLE_ID: {GUARD_ID: "off"}}, recorded=False)
-    procs = outcomes(commands, plugin, repo, payload, home)
+    procs = outcomes(commands, plugin, repo, in_session(payload, "s1"), home)
     assert any(refused(p) for p in procs), "an unrecorded off switches nothing off"
     assert any(toggle.DRIFTED in p.stderr for p in procs)
     _switch(repo, monkeypatch, "status", "--adopt")
-    assert not any_refused(commands, plugin, repo, payload, home), "honoured once the person adopted it"
+    assert not any_refused(commands, plugin, repo, in_session(payload, "s2"), home), (
+        "honoured once adopted, next session"
+    )
 
 
 def test_the_cli_refuses_to_build_on_a_file_it_did_not_record(
@@ -290,3 +302,18 @@ def test_an_unreadable_stop_is_refused_by_the_turn_end_check(tmp_path: Path, hom
     env = {**os.environ, **dict.fromkeys(ALL_ROOTS, plugin.as_posix()), "HOME": str(home)}
     proc = run_hook_command(verify, repo, "not json", env=env)
     assert "could not read" in proc.stderr + proc.stdout, (proc.returncode, proc.stdout, proc.stderr)
+
+
+@pytest.mark.parametrize("client", MERGED_CLIENTS)
+def test_a_record_changed_during_the_session_refuses_its_turn_end(
+    tmp_path: Path, home: Path, client: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, judge = _at_turn_end(client, tmp_path, home)
+    assert judge() == "allowed", "no file when the session began"
+    _switch(repo, monkeypatch, "off", GUARD_ID)  # a matching record, as an agent's script can write it
+    assert judge() == "refused", "the record changed during the session"
+    assert judge("s2") == "allowed", "a session that began after the change"
+    _switch(repo, monkeypatch, "on", GUARD_ID)
+    assert judge("s2") == "allowed", "a change that switches nothing off loosens nothing"
+    _switch(repo, monkeypatch, "off", GATE_ID)
+    assert judge("s2") == "refused"
