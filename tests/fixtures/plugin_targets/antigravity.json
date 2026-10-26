@@ -15,6 +15,7 @@
     "scripts/chock_bundle.json",
     "scripts/chock_bundle.py",
     "scripts/chock_bundle_log.py",
+    "scripts/chock_bundle_state.py",
     "scripts/chock_chain.py",
     "scripts/chock_journal.py",
     "scripts/demo-shell-guard/demo-shell-guard.py",
@@ -36,12 +37,12 @@
       "Stop": [
         {
           "type": "command",
-          "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"__CHOCK_PLUGIN_ROOT__/scripts/launch.sh\" \"__CHOCK_PLUGIN_ROOT__/scripts/chock_bundle.py\" --bundle demo-bundle --member demo-write-gate \"__CHOCK_PLUGIN_ROOT__/scripts/antigravity.py\" --gate \"__CHOCK_PLUGIN_ROOT__/scripts/demo-write-gate/gate.json\" --stop",
+          "command": "git -c alias.chock-sh=!test${IFS}-f${IFS}$1^|^|^(echo${IFS}chock:${IFS}the${IFS}plugin${IFS}launcher${IFS}is${IFS}missing,${IFS}so${IFS}this${IFS}call${IFS}cannot${IFS}be${IFS}checked.${IFS}Refusing.^>^&2;exit${IFS}2^)^&^&sh chock-sh __CHOCK_PLUGIN_ROOT__/scripts/launch.sh __CHOCK_PLUGIN_ROOT__/scripts/chock_bundle.py --bundle demo-bundle --member demo-write-gate __CHOCK_PLUGIN_ROOT__/scripts/antigravity.py --gate __CHOCK_PLUGIN_ROOT__/scripts/demo-write-gate/gate.json --stop",
           "timeout": 45
         },
         {
           "type": "command",
-          "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"__CHOCK_PLUGIN_ROOT__/scripts/launch.sh\" \"__CHOCK_PLUGIN_ROOT__/scripts/chock_bundle.py\" --verify \"__CHOCK_PLUGIN_ROOT__/scripts/antigravity.py\" --gate \"__CHOCK_PLUGIN_ROOT__/scripts/chock-guardrails-protect/gate.json\" --stop",
+          "command": "git -c alias.chock-sh=!test${IFS}-f${IFS}$1^|^|^(echo${IFS}chock:${IFS}the${IFS}plugin${IFS}launcher${IFS}is${IFS}missing,${IFS}so${IFS}this${IFS}call${IFS}cannot${IFS}be${IFS}checked.${IFS}Refusing.^>^&2;exit${IFS}2^)^&^&sh chock-sh __CHOCK_PLUGIN_ROOT__/scripts/launch.sh __CHOCK_PLUGIN_ROOT__/scripts/chock_bundle.py --verify __CHOCK_PLUGIN_ROOT__/scripts/antigravity.py --gate __CHOCK_PLUGIN_ROOT__/scripts/chock-guardrails-protect/gate.json --stop",
           "timeout": 45
         }
       ],
@@ -50,7 +51,7 @@
           "hooks": [
             {
               "type": "command",
-              "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"__CHOCK_PLUGIN_ROOT__/scripts/launch.sh\" \"__CHOCK_PLUGIN_ROOT__/scripts/chock_bundle.py\" --bundle demo-bundle --member demo-shell-guard \"__CHOCK_PLUGIN_ROOT__/scripts/antigravity.py\" --guard \"__CHOCK_PLUGIN_ROOT__/scripts/demo-shell-guard/demo-shell-guard.py\"",
+              "command": "git -c alias.chock-sh=!test${IFS}-f${IFS}$1^|^|^(echo${IFS}chock:${IFS}the${IFS}plugin${IFS}launcher${IFS}is${IFS}missing,${IFS}so${IFS}this${IFS}call${IFS}cannot${IFS}be${IFS}checked.${IFS}Refusing.^>^&2;exit${IFS}2^)^&^&sh chock-sh __CHOCK_PLUGIN_ROOT__/scripts/launch.sh __CHOCK_PLUGIN_ROOT__/scripts/chock_bundle.py --bundle demo-bundle --member demo-shell-guard __CHOCK_PLUGIN_ROOT__/scripts/antigravity.py --guard __CHOCK_PLUGIN_ROOT__/scripts/demo-shell-guard/demo-shell-guard.py",
               "timeout": 45
             }
           ],
@@ -60,7 +61,7 @@
           "hooks": [
             {
               "type": "command",
-              "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"__CHOCK_PLUGIN_ROOT__/scripts/launch.sh\" \"__CHOCK_PLUGIN_ROOT__/scripts/antigravity.py\" --guard \"__CHOCK_PLUGIN_ROOT__/scripts/chock-guardrails-protect/chock-guardrails-protect.py\"",
+              "command": "git -c alias.chock-sh=!test${IFS}-f${IFS}$1^|^|^(echo${IFS}chock:${IFS}the${IFS}plugin${IFS}launcher${IFS}is${IFS}missing,${IFS}so${IFS}this${IFS}call${IFS}cannot${IFS}be${IFS}checked.${IFS}Refusing.^>^&2;exit${IFS}2^)^&^&sh chock-sh __CHOCK_PLUGIN_ROOT__/scripts/launch.sh __CHOCK_PLUGIN_ROOT__/scripts/antigravity.py --guard __CHOCK_PLUGIN_ROOT__/scripts/chock-guardrails-protect/chock-guardrails-protect.py",
               "timeout": 45
             }
           ],
@@ -70,7 +71,7 @@
           "hooks": [
             {
               "type": "command",
-              "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"__CHOCK_PLUGIN_ROOT__/scripts/launch.sh\" \"__CHOCK_PLUGIN_ROOT__/scripts/antigravity.py\" --stop-check",
+              "command": "git -c alias.chock-sh=!test${IFS}-f${IFS}$1^|^|^(echo${IFS}chock:${IFS}the${IFS}plugin${IFS}launcher${IFS}is${IFS}missing,${IFS}so${IFS}this${IFS}call${IFS}cannot${IFS}be${IFS}checked.${IFS}Refusing.^>^&2;exit${IFS}2^)^&^&sh chock-sh __CHOCK_PLUGIN_ROOT__/scripts/launch.sh __CHOCK_PLUGIN_ROOT__/scripts/antigravity.py --stop-check",
               "timeout": 45
             }
           ],
