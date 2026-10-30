@@ -1,0 +1,33 @@
+# Dogfoods the report adopters run on their own repos (chock-catalog's CI runs it too).
+# Its own file because ci.yml is at the 300-line budget (tests/test_repo_standards.py).
+# Read-only: it fails when the report cannot be built, not when a control is uncovered.
+name: Compliance report
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  owasp-asi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install chock
+        run: |
+          python -m pip install --require-hashes --upgrade -r requirements/pip.txt
+          python -m pip install --require-hashes -r requirements/runtime.txt
+          pip wheel --no-deps --no-build-isolation -w dist .
+          pip install --no-deps dist/*.whl
+
+      - name: Compliance report (OWASP Agentic) on chock itself
+        run: chock compliance report --repo . --framework owasp_asi

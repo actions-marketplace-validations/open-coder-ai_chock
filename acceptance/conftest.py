@@ -39,6 +39,13 @@ from policy_fixtures import FIXTURE_MANIFEST, FIXTURE_SUITE, FIXTURE_TOKEN, GUAR
 FRAMEWORK_ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.fixture(autouse=True)
+def human_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run as a person's shell: an agent running this suite sets markers that make every commit an agent's."""
+    for name in ("CHOCK_AGENT_COMMIT", "CLAUDECODE", "AI_AGENT", "CHOCK_ALLOW"):
+        monkeypatch.delenv(name, raising=False)
+
+
 @dataclass
 class Result:
     """What an adopter observes from running a command."""
@@ -130,7 +137,7 @@ class Adopter:
         settings = self.read_json(".claude/settings.json")
         for entry in settings.get("hooks", {}).get("PreToolUse", []):
             for hook in entry.get("hooks", []):
-                cmd = hook["command"].replace("${CLAUDE_PROJECT_DIR}", str(self.repo))
+                cmd = hook["command"]
                 # This harness runs the installed hook COMMAND STRING exactly as the
                 # client does, shell interpretation included; an argv list would test
                 # a different mechanism than the one adopters get.

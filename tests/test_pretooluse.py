@@ -10,19 +10,19 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from conftest import baseline_policy
+from conftest import baseline_policy, run_hook_command
+from runtime_support import write_runtime
 
-from chock.gate import runtime_bundle
-from chock.gate.guard_runner import find_bash
+from chock.gate.guard_runner import find_interpreter
 
 FRAMEWORK_ROOT = Path(__file__).resolve().parents[1]
-GUARD = baseline_policy("block-destructive-commands") / "implementations" / "block-destructive.sh"
+GUARD = baseline_policy("block-destructive-commands") / "implementations" / "block-destructive-commands.py"
 
 
 @pytest.fixture(scope="module")
 def claude_code_runtime(tmp_path_factory) -> Path:
     path = tmp_path_factory.mktemp("runtime") / "claude_code.py"
-    path.write_text(runtime_bundle.render("claude_code"), encoding="utf-8")
+    write_runtime(path, "claude_code")
     return path
 
 
@@ -75,29 +75,31 @@ def test_safe_commands_are_allowed(command: str, claude_code_runtime: Path) -> N
 
 def test_argv_guard_receives_the_stdin_command(claude_code_runtime: Path) -> None:
     """The original defect: guards read argv, Claude sends JSON on stdin."""
-    bash = find_bash(GUARD)
-    assert bash, "no usable bash on this machine; cannot exercise the guard"
-    direct = subprocess.run([bash, str(GUARD)], input=_payload("rm -rf /"), capture_output=True, text=True)
+    interpreter = find_interpreter(GUARD)
+    assert interpreter, "no usable interpreter on this machine; cannot exercise the guard"
+    direct = subprocess.run([interpreter, str(GUARD)], input=_payload("rm -rf /"), capture_output=True, text=True)
     assert direct.returncode == 0, "precondition: the bare guard ignores stdin"
     assert _denied(_adapter(claude_code_runtime, "rm -rf /")), "the runtime must bridge stdin to argv"
 
 
-def test_unparseable_input_allows(claude_code_runtime: Path) -> None:
-    """Failing closed here would block every Bash call on a malformed payload."""
+def test_unparseable_input_refuses(claude_code_runtime: Path) -> None:
+    """A payload nothing could read is refused, not passed: the guard never judged the call."""
     result = subprocess.run(
         [sys.executable, str(claude_code_runtime), "--guard", str(GUARD)],
         input="not json",
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0
-    assert result.stdout.strip() == ""
+    assert _denied(result), (result.returncode, result.stdout)
+    assert "could not read" in result.stderr
 
 
-def test_missing_guard_allows(tmp_path: Path, claude_code_runtime: Path) -> None:
+def test_missing_guard_denies_and_says_to_sync(tmp_path: Path, claude_code_runtime: Path) -> None:
+    """The hook names the guard; a missing one is a broken install, never "nothing to check"."""
     result = _adapter(claude_code_runtime, "rm -rf /", guard=tmp_path / "absent.sh")
     assert result.returncode == 0
-    assert not _denied(result)
+    assert _denied(result)
+    assert "chock sync" in result.stdout
 
 
 def test_non_command_tool_input_is_ignored(claude_code_runtime: Path) -> None:
@@ -158,13 +160,19 @@ def test_install_writes_claude_settings_schema() -> None:
     install_hooks(repo, "claude_code")
 
     settings = json.loads((repo / ".claude" / "settings.json").read_text(encoding="utf-8"))
-    entries = settings["hooks"]["PreToolUse"]
+    *entries, stop_check = settings["hooks"]["PreToolUse"]
     assert entries, "no PreToolUse entries installed"
+    assert "matcher" not in stop_check, "the repo stop check sees every tool"
+    assert stop_check["hooks"][0]["command"].endswith(".chock/bin/claude_code.py --stop-check")
     for entry in entries:
-        assert entry["matcher"] == "Bash"
+        assert entry["matcher"] == "Bash|PowerShell"
         hook = entry["hooks"][0]
         assert hook["type"] == "command"
-        assert "${CLAUDE_PROJECT_DIR}" in hook["command"], "paths must survive a repo move"
+        assert hook["command"].startswith(
+            'git -c "alias.chock-hook=!test -f .chock/bin/launch.sh || { echo chock: no .chock/bin/launch.sh here, run chock sync --repo . >&2; exit 2; }; sh .chock/bin/launch.sh" chock-hook '
+        )
+        assert "${" not in hook["command"], "repo-relative: git runs the launcher from the top level"
+        assert sys.executable not in hook["command"], "no interpreter path may be committed"
     assert (repo / ".chock" / "bin" / "claude_code.py").exists()
 
 
@@ -247,20 +255,20 @@ def test_end_to_end_installed_hooks_block_real_commands() -> None:
     subprocess.run([sys.executable, "-m", "chock.cli", "install-hooks", "."], cwd=repo, capture_output=True, env=env)
     settings = json.loads((repo / ".claude" / "settings.json").read_text(encoding="utf-8"))
     entries = settings["hooks"]["PreToolUse"]
-    env = {**env, "CLAUDE_PROJECT_DIR": str(repo)}
+    nested = repo / "pkg" / "sub"
+    nested.mkdir(parents=True)
 
-    def blocked(command: str) -> bool:
+    def blocked(command: str, cwd: Path = repo) -> bool:
         for entry in entries:
-            cmd = entry["hooks"][0]["command"].replace("${CLAUDE_PROJECT_DIR}", str(repo))
-            proc = subprocess.run(
-                cmd, cwd=repo, shell=True, env=env, capture_output=True, text=True, input=_payload(command)
-            )
+            proc = run_hook_command(entry["hooks"][0]["command"], cwd, _payload(command), env=env)
             if _denied(proc):
                 return True
         return False
 
     assert blocked("rm -rf /")
+    assert blocked("rm -rf /", nested), "a session started below the repo root is still guarded"
     assert blocked("git push --force origin main")
     assert blocked("git commit --no-verify -m x")
     assert not blocked("git push --force-with-lease origin main")
     assert not blocked("ls -la")
+    assert not blocked("ls -la", nested)

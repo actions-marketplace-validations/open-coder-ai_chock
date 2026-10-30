@@ -11,8 +11,9 @@ from typing import Any
 from chock import vendors
 from chock.compile.compiler import _load_manifest, compile_policy
 from chock.compile.levels import DISABLED, Grade
-from chock.config import agents_from_config, load_config, policy_status
+from chock.config import agents_from_config, guidance_mcp_enabled, load_config, policy_status
 from chock.emit import write_generated_json
+from chock.hooks import sync_notes
 from chock.hooks.in_agent_install import (
     WIRED_VENDORS,
     agent_hooks_rel,
@@ -22,18 +23,25 @@ from chock.hooks.in_agent_install import (
     uninstall_hooks,
 )
 from chock.hooks.installers import get_hooks_dir, install_policy_hooks
-from chock.hooks.runtime_vendor import owned_markers, runtime_rel
+from chock.hooks.runtime_vendor import owned_markers, prune_shared_runtime, runtime_rel
 from chock.hooks.sessionstart_install import install_sessionstart_hook
+from chock.hooks.wiring_drift import wiring_differences
 from chock.index.cli import cmd_refresh
 from chock.output import warn
 from chock.policies import discover_policy_dirs
 from chock.registry.core import save_registry, scan
+from chock.scaffold.gitrules import ensure_git_rules
+from chock.scaffold.mcp_register import McpConfigError, mcp_differences, register
 from chock.vendored import vendored_differences
 from chock.vendors import CHOCK_AGENT
 
 
 class BookkeepingError(RuntimeError):
     """Bookkeeping the attestation chain depends on failed after a successful compile."""
+
+
+class HookWiringError(BookkeepingError):
+    """An agent's hooks could not be wired; everything else sync does has already been done."""
 
 
 def _compile_all(repo_root: Path, agents: list[str], compiled_root: Path) -> dict[str, dict[str, dict[str, object]]]:
@@ -115,6 +123,38 @@ def _uninstall_unwired_vendors(repo_root: Path, wired: tuple[str, ...]) -> None:
             print(f"Removed {runtime_rel(vendor).as_posix()} ({vendor} not in supported_agents)")
 
 
+def _register_mcp(repo_root: Path, wired: tuple[str, ...]) -> str:
+    """Apply the `guidance_mcp` opt-in to every client's MCP config; the refusal, or "" when done."""
+    try:
+        for line in register(repo_root, wired, enabled=guidance_mcp_enabled(repo_root)):
+            print(line)
+    except McpConfigError as exc:
+        return f"chock MCP server: {exc}"
+    return ""
+
+
+def _install_vendors(repo_root: Path, wired: tuple[str, ...]) -> list[str]:
+    """Install every wired vendor's hooks, then the MCP opt-in; one line per failure."""
+    unwired: list[str] = []
+    for vendor in wired:
+        try:
+            installed = install_hooks(repo_root, vendor)
+        except ValueError as exc:
+            warn(str(exc))
+            unwired.append(f"{vendor}: {exc}")
+        else:
+            if installed:
+                print(f"Registered {len(installed)} {install_label(vendor)}")
+                for line in sync_notes.notes(vendor):
+                    print(line)
+                if hint := vendors.trust_hint(vendor):
+                    # Codex skips an untrusted project hook without a word: wired is not live.
+                    print(f"  ACTION NEEDED ({vendor}): hooks are not live until trusted -- {hint}")
+    if refused := _register_mcp(repo_root, wired):
+        unwired.append(refused)
+    return unwired
+
+
 def compiled_differences(repo_root: Path | str, agents: list[str]) -> list[str]:
     """Every way the committed compiled tree differs from what the manifests produce now."""
     repo_root = Path(repo_root)
@@ -142,6 +182,8 @@ def compiled_differences(repo_root: Path | str, agents: list[str]) -> list[str]:
         ]
 
     diffs += vendored_differences(repo_root)
+    diffs += wiring_differences(repo_root, wired_vendors(agents))
+    diffs += mcp_differences(repo_root, wired_vendors(agents), enabled=guidance_mcp_enabled(repo_root))
 
     coverage_path = repo_root / ".chock" / "coverage.json"
     committed = json.loads(coverage_path.read_text(encoding="utf-8")) if coverage_path.exists() else {}
@@ -210,8 +252,12 @@ def recompile(repo_root: Path | str, agents: list[str], *, skip_hooks: bool = Fa
             (chock_dir / "bin").mkdir(parents=True, exist_ok=True)
             shutil.copy2(str(staged_runner), str(chock_dir / "bin" / "gate.py"))
 
+    # An adopter who ran `init` before the runtime was tracked explicitly gets the rule here.
+    ensure_git_rules(repo_root)
+
     write_generated_json(coverage_path, coverage)
 
+    unwired: list[str] = []
     if not skip_hooks:
         install_policy_hooks(repo_root, get_hooks_dir(repo_root))
 
@@ -227,14 +273,8 @@ def recompile(repo_root: Path | str, agents: list[str], *, skip_hooks: bool = Fa
             return tuple(installed_policy_ids(repo_root, vendor) for vendor in wired)
 
         before = _witness()
-        for vendor in wired:
-            try:
-                installed = install_hooks(repo_root, vendor)
-            except ValueError as exc:
-                warn(str(exc))
-            else:
-                if installed:
-                    print(f"Registered {len(installed)} {install_label(vendor)}")
+        unwired = _install_vendors(repo_root, wired)
+        prune_shared_runtime(repo_root)
         if _witness() != before:
             with tempfile.TemporaryDirectory(prefix="chock-coverage-", dir=chock_dir) as tmp2:
                 coverage = _compile_all(repo_root, agents, Path(tmp2) / "compiled")
@@ -242,4 +282,8 @@ def recompile(repo_root: Path | str, agents: list[str], *, skip_hooks: bool = Fa
 
     _refresh_bookkeeping(repo_root)
 
+    if not skip_hooks and unwired:
+        # A vendor left unwired runs no gate at all; a warning scrolled past is how that went unseen.
+        msg = "hooks were NOT wired for: " + "; ".join(unwired)
+        raise HookWiringError(msg)
     return coverage

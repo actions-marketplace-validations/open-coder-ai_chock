@@ -1,0 +1,7 @@
+-r runtime.in
+pyinstaller>=6.0
+# pyinstaller's per-OS deps (sys_platform markers): pip-compile on Linux drops them,
+# but the binary jobs also run on macOS and Windows, where --require-hashes needs them.
+macholib>=1.8
+pefile>=2022.5.30
+pywin32-ctypes>=0.2.1

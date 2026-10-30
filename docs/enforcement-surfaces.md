@@ -13,7 +13,7 @@ each guarantee holds.
 | `ambient-rule` | Advisory | Yes | Compiled `AGENTS.md` block the agent is asked to follow |
 | `pre-tool-use` | Hard, pre-execution | No | Blocks a command **before** the agent runs it, in each client's own deny dialect — every matrix-blocking vendor with a repo-level config (see the Cursor caveat) |
 | `stop` | Hard, **post-execution** | No, but it fires after the tool calls it judges | Reads what the turn left in the worktree and refuses to end the turn. Credited with **no coverage word** -- see the backstop note below |
-| `agent-hooks` | Hard, pre-execution | No | The same exit-2 deny for Copilot CLI + VS Code agent mode, from `.github/hooks/chock.json` (witnessed blocking on both, 2026-08-23) |
+| `agent-hooks` | Hard, pre-execution | No | The same exit-2 deny for Copilot CLI + VS Code agent mode, from `.github/hooks/chock.json` (witnessed blocking on both, 2026-08-23). A content gate also gets a `PreToolUse` entry over `Edit\|Write` there (a top-level `permissionDecision` deny stopped an `Edit` in VS Code agent mode, 2026-09-28), and its turn-end gate is a `Stop` entry in the same file |
 | `managed-setting` | Hard, org-level | No | Admin-deployed allow/ask/deny rules |
 | `gateway` | Hard, un-circumventable | No | Budget/egress backstop — *modeled now, emitted later* |
 | `mcp-gateway` | Hard, **MCP-routed tools only** | Yes (P3c) | A stdio proxy the client launches instead of the real MCP server; refuses matching `tools/call` payloads. Emitted today; **credits no agent** until the per-client config witness ships |
@@ -22,7 +22,7 @@ each guarantee holds.
 > `pre-tool-use` structurally *cannot* see: a pre-tool hook is handed the tool call, so it
 > matches only a recorded write vocabulary, and a heredoc or a redirect carries no file argument
 > at all. A turn-end hook is handed nothing and reads the worktree, so it sees those bytes
-> however they got there -- and it takes no matcher, so it wires **seven vendors** where the
+> however they got there -- and it takes no matcher, so it wires **eight vendors** where the
 > write path wires three.
 >
 > What it does not buy is coverage, and `coverage_cell` refuses it any (`UNCREDITED_SURFACES`).
@@ -32,8 +32,35 @@ each guarantee holds.
 > CI, never a substitute -- and a policy reads the same word whether or not `stop` is wired.
 > Because it reads the worktree, `applies_to.paths` is what keeps it off files the policy was
 > never about; a pattern broad enough to hit documentation needs that bound first. A per-line
-> `allowlist_pragma` is **not** honoured here or at the write path -- only where a human staged
-> the text (`WAIVABLE_EVENTS`). The agent that was refused is the one holding the pen.
+> `allowlist_pragma` is honoured here and at the write path only on a line already in HEAD: a
+> human's committed waiver still counts, one the agent adds this turn does not (`WAIVABLE_EVENTS`
+> are the staged events where any waiver counts). The agent that was refused is the one holding
+> the pen. Only lines the turn changed against HEAD are judged, so an old violation in a touched
+> file does not block the turn.
+>
+> **An agent's commit is not a human's.** The commit hook cannot ask who ran `git commit`, and an agent
+> that can run it could add the waiver itself, so chock reads the environment the hook inherits from git.
+> A commit is an agent's when `CHOCK_AGENT_COMMIT` is truthy (any value but empty, `0`, `false`, `no`,
+> `off`), or `CLAUDECODE=1`, or `AI_AGENT` is non-empty, or a variable named under `agent_commit_env:` in
+> `.chock/config.yaml` is set. The pre-commit gate then judges the commit at the event `agent-commit`: a
+> waiver the commit adds is not honoured, one already in HEAD still is, and a refusal says which marker
+> it saw. `CHOCK_AGENT_COMMIT=0` unsets that one variable and clears no vendor marker (an agent could set
+> it too): a person commits from their own shell, which has none. The guards on an agent's own commands
+> are the separate backstop, and `sync`, `add`, `remove`, `enable`, `disable`, `init`, `compile`,
+> `install-hooks` and `recompile` refuse under any marker, as `chock stop` does. Claude Code's two
+> variables are witnessed reaching a git hook (a probe from the Bash tool, 2026-09-29); Codex, Cursor and
+> Copilot markers are unverified, so add them once captured: `agent_commit_env: [CODEX_SANDBOX]`.
+> Pre-push and CI are unchanged, and CI honours a waiver in the range it reads.
+>
+> **`action: warn | ask`.** A gate's `action` picks what a violation does (full table:
+> `spec/gate-dsl.md`). `warn` never blocks: at commit, push and ci the reason is printed (a
+> `::warning::` annotation in CI) and the exit is 0; in the agent it reaches Claude as PreToolUse
+> `additionalContext` (other vendors have no verified channel, so they get stderr and the gate log),
+> and at Stop it is a message to the user, never a block. `ask` puts the decision to a person: in
+> the agent it is a `permissionDecision: ask` where the vendor honours one (the others deny); at
+> commit and push, where no prompt is possible, it refuses unless a person runs that one command with
+> `CHOCK_ALLOW=<policy-id>[,<policy-id>...]` and it is not an agent commit; in CI it is a warning. A
+> policy whose only mechanism warns is not credited as enforcing in the coverage report; an ask is.
 
 > **`agent-hooks` shell caveat, stated rather than glossed.** The surface genuinely
 > enforces: it runs the guard before the tool call and honours exit 2 as deny (witnessed on
@@ -42,9 +69,24 @@ each guarantee holds.
 > bash-syntax commands but not PowerShell-native destructive syntax. 0.0.6 closes that gap
 > with a PowerShell/cmd guard matched against the raw command (`CHOCK_RAW_COMMAND`); other
 > guards remain pattern filters, so the "non-standard shell" bypass class they document
-> still applies to them. The hook's interpreter is resolved at run time (skipping the
-> Windows Store `python3` alias stub) and the repo root via `git rev-parse`, so the
-> committed file is portable with no baked path.
+> still applies to them. The hook runs through the launcher below, so the committed file is
+> portable with no baked path.
+
+> **Every in-agent hook runs through one committed launcher.** Each entry chock writes, on
+> every vendor, is the same string -- read identically by bash, PowerShell and cmd.exe:
+>
+> ```
+> git -c "alias.chock-hook=!test -f .chock/bin/launch.sh || { echo chock: no .chock/bin/launch.sh here, run chock sync --repo . >&2; exit 2; }; sh .chock/bin/launch.sh" chock-hook .chock/bin/<agent>.py [--guard|--gate "<repo-relative path>"]
+> ```
+>
+> git runs the alias from the repository's top level, so relative paths resolve even when a
+> session starts in a subdirectory. `.chock/bin/launch.sh` runs the first of
+> `git config chock.python` (written to the clone's local `.git/config` by `chock sync`,
+> never committed), `python3`, `python` and `py` that actually runs Python 3.11+ (the
+> Windows Store `python3` stub, or a venv whose base Python is gone, is skipped). With none
+> it exits 2 with a fix-it message -- never allow. With no launcher at git's top level (a
+> nested repository, or a clone never synced) the command exits 2 the same way. Installed entries equal compiled ones exactly, so `chock sync` on any machine
+> is a zero diff; entries in the old baked-interpreter form are recognised and replaced.
 
 **`git-hook` + `ci-gate` are the universal hard floor** every agent shares. `pre-tool-use` and
 `agent-hooks` are the premium tier on agents that expose native controls; membership
@@ -84,12 +126,11 @@ per gateway process; wrap N servers with N entries.
 > hook returning exit 2 alone was **witnessed NOT blocking** on a real install
 > (2026-08-24). The vendored adapter therefore also emits Cursor's stdout
 > `{"permission": "deny"}` response, which is what actually blocks (witnessed). Cursor
-> **fails open** on any other non-zero exit unless the hook entry sets `failClosed` —
-> and `failClosed: true` would brick
-> every shell command on a clone whose baked interpreter path does not resolve yet. Chock
-> ships fail-open entries and mitigates the gap the same way as Claude's exit-127 case:
-> install bakes an interpreter that provably runs. The guard covers shell commands
-> (`beforeShellExecution`); other tool classes are not intercepted.
+> **fails open** on any other non-zero exit unless the hook entry sets `failClosed`. Chock's
+> `beforeShellExecution` and `preToolUse` entries set `failClosed: true` (a hook that cannot
+> start blocks); `stop` entries do not. With no interpreter baked into the entry, a fresh
+> clone is not bricked: the launcher finds one or refuses with a fix-it message. The guard
+> covers shell commands (`beforeShellExecution`); other tool classes are not intercepted.
 
 > **`managed-setting` is compiled but not installed.** The compiler writes
 > `.chock/compiled/<id>/managed-setting/managed-settings.json` and nothing reads it — there is
@@ -112,7 +153,7 @@ Which surfaces each agent supports today (from `src/chock/compile/surfaces.py`):
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Claude Code** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | **Cursor** | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
-| Copilot | ✅ | ✅ | ✅ | — | — | — | ✅ |
+| Copilot | ✅ | ✅ | ✅ | — | ✅ | — | ✅ |
 | Codex | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
 | Gemini | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
 | Windsurf | ✅ | ✅ | ✅ | ✅ | — | — | — |
@@ -123,22 +164,27 @@ Which surfaces each agent supports today (from `src/chock/compile/surfaces.py`):
 | Kimi Code | ✅ | ✅ | ✅ | — | — | — | — |
 | Replit | ✅ | ✅ | ✅ | — | — | — | — |
 | Tabnine | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
-| VS Code | ✅ | ✅ | ✅ | — | — | — | ✅ |
+| VS Code | ✅ | ✅ | ✅ | — | ✅ | — | ✅ |
 | Antigravity CLI | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
+| Factory Droid | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
+| goose | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
+| OpenHands | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
+| Mistral Vibe | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
+| Cline | ✅ | ✅ | ✅ | — | — | — | — |
 
-In-agent membership derives from agentseam's matrix: every adapted vendor whose row can block
-a pre-tool call from a repo-level JSON hook config gets `pre-tool-use` (Copilot CLI and VS Code:
-`agent-hooks`, chock's owned file). `stop` is derived the same way from the **turn-end** row, which
-is a different question with a different answer: Grok and Windsurf can observe a finished turn
-but not refuse one, so they are `detect` and get no column mark. Cursor cannot hold a turn either,
-but its `stop` hook hands a refusal back to the agent as a `followup_message` (witnessed live on
-3.21.18), which is `best-effort` and worth a mark: the agent is sent back to what the turn left
-behind rather than the user being told after the fact. Copilot and VS Code *can*
-refuse one and are still held back -- their hooks live in chock's own file in a shape witnessed
-live, that witness covers the pre-tool key alone, and a guessed turn-end key installs a hook that
-silently never runs while the table claims it does. Junie and Kimi Code block only via home-level configs (Kimi
-Code's in TOML), outside what `chock sync --repo` may write; Aider and Replit cannot block. A
-checkmark is a wiring claim: new-vendor cells stay `witnessed: false` until a real client run is recorded.
+In-agent membership derives from agentseam's matrix: every adapted vendor whose row can block a pre-tool call
+from a repo-level JSON or TOML hook config gets `pre-tool-use` (Copilot CLI and VS Code: `agent-hooks`, chock's
+owned file). `stop` is derived the same way from the **turn-end** row, which is a different question with a
+different answer: Grok and Windsurf can observe a finished turn but not refuse one, so they are `detect` and get
+no column mark. Cursor cannot hold a turn either, but its `stop` hook hands a refusal back to the agent as a
+`followup_message` (witnessed live on 3.21.18), which is `best-effort` and worth a mark: the agent is sent back
+to what the turn left behind rather than the user being told after the fact. Copilot and VS Code refuse one too:
+their `Stop` key in chock's own file was witnessed firing in VS Code agent mode (2026-09-28), and a block answer
+made the agent carry on with the turn. It is registered under `Stop` alone, since `agentStop` fires beside it
+and would run the gate twice; which of the top-level or nested block answers Copilot reads is not isolated, so
+chock writes both. Junie and Kimi Code block only via home configs, outside what `chock sync --repo` may write;
+Cline's per-event hooks directory is not wired yet; Aider and Replit cannot block. A checkmark is a wiring
+claim: new-vendor cells stay `witnessed: false` until a real client run is recorded; sync calls them "Untested". chock's Claude Code plugin does not protect OpenHands, even though OpenHands reads `.claude-plugin/`: its matchers never match OpenHands' `terminal` or `file_editor`. Use `chock install --client openhands`.
 
 ## Coverage levels
 
@@ -148,34 +194,56 @@ evidence cap that bounds every grade -- is on its own page: **[Coverage Levels](
 
 ## How a policy picks its surfaces
 
-A hook that must stop a command targets `git-hook` + `ci-gate` (the universal floor) and, where
-available, `pre-tool-use` + `managed-setting`. A hook whose `on:` includes `tool_use` is compiled to
-the `pre-tool-use` surface on agents that support it (nine of them, Claude Code and Cursor
-among them; Copilot
-CLI and VS Code get the same guard via `agent-hooks`). A best-practice rule with
-no deterministic check compiles only to `ambient-rule`. The compiler always pairs a control with the
-**strongest available backstop** — e.g. a git hook plus a CI gate, because a git hook alone can be
-skipped with `--no-verify`.
+A hook that must stop a command targets `git-hook` + `ci-gate` (the universal floor) and, where available,
+`pre-tool-use` + `managed-setting`. A hook whose `on:` includes `tool_use` is compiled to the `pre-tool-use`
+surface on agents that support it (thirteen of them, Claude Code and Cursor among them; Copilot CLI and VS Code
+get the same guard via `agent-hooks`, and a content gate's write check as a `PreToolUse` entry over `Edit|Write`
+there). A hook whose `on:` includes `tool_call` (a `content_regex` or `script` gate with `params.tools`, globs
+over tool names such as `mcp__Firecrawl__*` or `WebFetch`) gates PreToolUse for any tool by name, on the nine
+agents whose vendor facts record a tool vocabulary (Claude Code, Codex CLI, Cursor, Gemini CLI, Factory Droid,
+goose, Mistral Vibe, OpenHands, and Copilot via `agent-hooks`); the others get no `tool_call` entry and are
+credited nothing for it. A gate's `outside_repo` globs let its PreToolUse write check see declared files outside
+the repository (the turn-end check cannot). A `script` gate on `tool_call` also keeps a local per-session
+tool-call log under `.chock/state/` that its script can read; see
+[`spec/session-log.md`](../spec/session-log.md). A best-practice rule with no deterministic check compiles only
+to `ambient-rule`. The compiler always pairs a control with the **strongest available backstop** — e.g. a git
+hook plus a CI gate, because a git hook alone can be skipped with `--no-verify`.
 
 ## What happens when the guard cannot decide
 
 The levels above grade the **outer** boundary: what the client does when chock's hook never
 runs or dies outright. There is an inner one too — what the hook says when it *did* run and
 could not reach a verdict — and the two answers are not the same. `gate/guard_runner.py`
-distinguishes five such causes and answers two of them differently from the other three.
+distinguishes six such causes and answers only one of them with an allow.
 
 | Cause | What chock returns | Why |
 | :--- | :--- | :--- |
-| The command will not tokenize (unbalanced quotes) | allow | Common and usually benign — PowerShell quoting, a Windows path. A prompt here fires on a large share of ordinary tool calls. |
+| The command will not tokenize (unbalanced quotes, trailing backslash, PowerShell quoting) | the guard's own verdict | The guard still runs: argv is a whitespace split (`CHOCK_ARGV_FALLBACK=1`) and `CHOCK_RAW_COMMAND` carries the exact string. `rm -rf / #'` is valid bash and invalid shlex, so a guard that reads the raw command must get the chance to refuse it. |
 | The command is empty after tokenizing | allow | There is nothing to check. |
-| No bash on the machine can resolve the guard | allow | Uniform: it holds for every command, not this one, so a prompt says nothing per call and would fire on every tool call on a platform without Git Bash. The fix is an install step. |
-| The guard crashed, or exited a code that is none of 0, 1 or 3 | **ask** | The control was installed, reachable and runnable, and still produced no answer. Rare, and anomalous. (Exit 3 is not this: it is the guard asking on purpose, and its own first line is the prompt.) |
+| No bash on the machine can resolve the guard | **ask** | No guard ran. The prompt names the fix: install Git for Windows (it ships bash), or put bash on PATH. |
+| The guard the hook names is not on disk | **deny** | The hook config names it, so its absence is a broken install, not nothing to check. The reason says to run `chock sync --repo .`. |
+| The guard crashed, exited a code that is none of 0, 1 or 3, or exited 1 with no reason or a traceback / syntax error | **ask** | The control was installed, reachable and runnable, and still produced no answer. (Exit 3 is not this: it is the guard asking on purpose, and its own first line is the prompt. Exit 1 blocks only with a reason on stderr, as `spec/script-backed-gates.md` states.) |
 | The guard hit its 30-second timeout | **ask** | Same: the control ran and did not decide. |
 
-The split is deliberate, and it is a budget decision rather than a safety maximum. Oversight
-capacity is finite; a control that prompts on every unparseable command trains a developer to
-approve without reading, which costs the prompts that matter more than the extra coverage
-gains.
+A guard that fails refuses or asks; it never reports an allow it never established.
+
+**The engine's time limits always fire before the client's.** A client's hook timeout fails **open** (the command runs); the engine's own limits ask a person or deny. So chock keeps one budget, `ENGINE_BUDGET_SECONDS` (30 s, `gate/budget.py`), per hook invocation: the bash probes, `git status`, the guard, the gate runner and a tool-call script all draw on the same deadline, and each subprocess gets only what is left. A `git status` that does not finish at the turn's end is a refusal, never a clean worktree. The timeout written into the client's hook config is that budget plus a 15 s interpreter start-up margin (`TIMEOUT_SECONDS`, 45 s), in each client's own unit.
+
+| Surface | Clients | Timeout written |
+| :--- | :--- | :--- |
+| In-agent (`chock sync`: `.claude/`, `.cursor/`, `.codex/`, `.github/hooks/`, ...) | Claude Code, Codex, Copilot, Cursor, Devin, Antigravity, Gemini CLI, Grok, Tabnine | yes, every hook entry |
+| In-agent | Windsurf | **no key**: its documented hook entry takes `command`, `powershell`, `show_output` and `working_directory` only, so its own default (not documented) applies |
+| Plugin package (`hooks.json`) | Claude Code, Codex, Copilot, Cursor, Devin, goose, Grok, Antigravity, OpenHands, Kimi Code, Factory Droid | yes, every hook entry |
+
+| Client | Field | Unit | Written | Client default when the key is absent |
+| :--- | :--- | :--- | :--- | :--- |
+| Claude Code, Codex, Devin, Antigravity, Grok, Kimi Code (in `kimi.plugin.json`), Factory Droid | `timeout` | seconds | 45 | Codex 600 s; Devin 600 s (command hooks); Antigravity 30 s; Grok 5 s; Kimi Code 30 s; Factory Droid 60 s |
+| Gemini CLI, Tabnine | `timeout` | milliseconds | 45000 | 60000 (60 s) both |
+| Copilot | `timeout` and `timeoutSec` | seconds | 45 | not checked |
+| Cursor | `timeout` (with `failClosed`) | seconds | 45 | not checked |
+| Windsurf | none | n/a | n/a | undocumented |
+
+A default below 45 s is exactly the hole this closes: Grok's 5 s and Antigravity's and Kimi Code's 30 s would end the hook before the engine's own 30 s limit and the command would run unchecked. `tests/test_hook_timeout_budget.py` walks every emitted hooks document and fails on a hook entry that lacks a timeout above the budget, unless its client is in the no-key allow-list (`NO_TIMEOUT_KEY_VENDORS`). Sources are in `src/chock/data/hook_timeouts.json`.
 
 **What an `ask` becomes depends on the client, and no client turns it into a silent allow.**
 
@@ -209,9 +277,8 @@ recheck it rather than take this table's word:
   non-rejected arm alone — so a literal `ask` there would let the call through.
 
 **This raises no coverage grade.** A control is only as strong as its worst degradation, and
-three of the five causes above still allow — so chock's in-agent controls stay at the level
-the ladder gives a control that degrades to allowing. The ask is a real improvement on two
-paths, not a new tier.
+the empty command above still allows — so chock's in-agent controls stay at the level the
+ladder gives a control that degrades to allowing until that grade is re-derived deliberately.
 
 ## Gate runner semantics
 
@@ -221,6 +288,10 @@ non-ASCII paths arrive unescaped and are scanned like any other file. `dependenc
 gates match their watched manifest basenames (e.g. `package.json`) anywhere in the tree, not
 only at the repo root. In CI range mode, a base ref that cannot be resolved fails **closed** —
 the gate exits 2 rather than passing an unscanned range.
+A compiled gate never judges chock's generated tree (`.chock/`) or its own policy's folder
+(`.agents/policies/<id>/`): that folder's evals and references show the very content the gate
+refuses, so judging them refused the policy's own adoption commit. Every other path, another
+policy's folder included, is judged as before.
 
 ## Reading the coverage report
 

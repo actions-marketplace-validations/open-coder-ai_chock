@@ -18,40 +18,48 @@ from agentseam import contract, matrix
 from chock import vendors
 from chock.compile.emitters.in_agent import GATE_FILE
 from chock.compile.emitters.in_agent_hooks import cursor_entry, hook_entry
-from chock.gate import runtime_bundle
+from chock.gate import assemble
 from chock.gate.runner import SCRIPT_BASE_GATE
+from chock.gate.write_gate import STOP_FLAG
 
 RUNNER_FILE = "gate.py"
 IMPLEMENTATIONS = "implementations"
 
 _STOP_ONLY_POSTURE = (
-    "Session-enforced at the turn's end by a Stop hook; needs python3. This client records no "
+    "Session-enforced at the turn's end by a Stop hook; needs git and a Python 3.11+. This client records no "
     "file-writing tool vocabulary, so the write itself is not judged: what the turn actually left "
     "on disk is re-read, and a construct a rule denies is refused then, however it was written. "
-    "Without python3, fail-open clients allow silently. A gate that cannot reach a decision "
+    "With no working Python the hook exits 2; without git, fail-open clients allow silently. "
+    "A gate that cannot reach a decision "
     "refuses rather than allowing one it never judged. Enforcement at every commit and in CI "
     "still needs chock installed in the repo."
 )
 _WRITE_AND_STOP_POSTURE = (
-    "Session-enforced via PreToolUse and Stop hooks; needs python3. PreToolUse judges the file "
+    "Session-enforced via PreToolUse and Stop hooks; needs git and a Python 3.11+. PreToolUse "
+    "judges the file "
     "a tool call would write; Stop re-reads what the turn actually left on disk, so a file "
-    "written through a shell heredoc is judged too. Without python3, fail-open clients allow "
-    "silently. A gate that cannot reach a decision refuses rather than allowing one it never "
+    "written through a shell heredoc is judged too. With no working Python the hook exits 2; "
+    "without git, fail-open clients allow silently. A gate that cannot reach a decision refuses rather than allowing one it never "
     "judged. Enforcement at every commit and in CI still needs chock installed in the repo."
 )
 _STOP_ONLY_NOTE = (
-    "This policy is enforced in this client by the Stop hook installed with the plugin: the "
+    "This policy __LEAD__ the Stop hook installed with the plugin: the "
     "write itself is not judged here, because the client records no write-tool vocabulary, "
     "and what the turn left on disk is judged at its end instead. Subject to the fail "
     "conditions stated in the plugin description. Repo-wide enforcement across every commit "
     "and in CI still needs `chock sync`. See https://github.com/open-coder-ai/chock"
 )
 _WRITE_AND_STOP_NOTE = (
-    "This policy is enforced in this client by the PreToolUse and Stop hooks installed with "
+    "This policy __LEAD__ the PreToolUse and Stop hooks installed with "
     "the plugin, subject to the fail conditions stated in the plugin description. Repo-wide "
     "enforcement across every commit and in CI still needs `chock sync`. "
     "See https://github.com/open-coder-ai/chock"
 )
+_ACTION_LEAD = {
+    "block": "is enforced in this client by",
+    "ask": "asks the person before the action proceeds, through",
+    "warn": "warns, and does not block, through",
+}
 
 
 def gate_reach(vendor: str) -> tuple[str | None, bool]:
@@ -74,10 +82,13 @@ def gate_hooks_file(vendor: str, command: str) -> dict[str, Any]:
         # A flat entry carries no matcher: the runtime answers every tool and judges only a
         # write it recognises, so an unmatched tool is allowed with nothing said.
         entries[vendors.pre_tool_event(vendor)] = [
-            cursor_entry(command) if flat else hook_entry(command, matcher=matcher)
+            cursor_entry(command, fail_closed=True) if flat else hook_entry(command, matcher=matcher)
         ]
     if stop:
-        entries[vendors.stop_event(vendor)] = [cursor_entry(command) if flat else hook_entry(command)]
+        # The Stop hook shares the pre-tool gate file, so it says which event it serves: an unreadable
+        # Stop payload then earns the vendor's Stop refusal, not the pre-tool grammar.
+        stop_command = f"{command} {STOP_FLAG}"
+        entries[vendors.stop_event(vendor)] = [cursor_entry(stop_command) if flat else hook_entry(stop_command)]
     if flat:
         return {**vendors.config_envelope(vendor), "hooks": entries}
     return entries if vendors.hook_entry_bare(vendor) else {"hooks": entries}
@@ -90,15 +101,16 @@ def gate_posture(vendor: str, caveat: str = "") -> str:
     return f"{text} {caveat}".strip()
 
 
-def gate_skill_note(vendor: str) -> str:
-    """The note the packaged skill ends with when it carries a gate."""
+def gate_skill_note(vendor: str, action: str | None = None) -> str:
+    """The note the packaged skill ends with when it carries a gate: block unless the gate asks or warns."""
     matcher, _ = gate_reach(vendor)
-    return _WRITE_AND_STOP_NOTE if matcher is not None else _STOP_ONLY_NOTE
+    note = _WRITE_AND_STOP_NOTE if matcher is not None else _STOP_ONLY_NOTE
+    return note.replace("__LEAD__", _ACTION_LEAD.get(action or "block", _ACTION_LEAD["block"]))
 
 
 def runner_source() -> str:
-    """The stdlib-only gate runner, verbatim -- the one `chock sync` vendors under .chock/bin."""
-    return (Path(runtime_bundle.__file__).resolve().parent / "runner.py").read_text(encoding="utf-8")
+    """The stdlib-only gate runner, assembled byte for byte as `chock sync` vendors it under .chock/bin."""
+    return assemble.runner_source()
 
 
 def packaged_gate_files(policy_dir: Path, spec: dict[str, Any], scripts_template: str) -> dict[Path, str]:

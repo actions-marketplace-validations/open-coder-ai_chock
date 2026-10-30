@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import yaml
-
+from chock import yamlio
 from chock.compile.surfaces import Surface
 from chock.config import agents_from_config, load_config, policy_status
 from chock.output import warn
@@ -23,9 +22,9 @@ def compile_one_dropin(
     mf_path = pack_dir / "manifest.yaml"
     if not mf_path.exists():
         return False
-    manifest = yaml.safe_load(mf_path.read_text(encoding="utf-8")) or {}
+    manifest = yamlio.safe_load(mf_path.read_text(encoding="utf-8")) or {}
 
-    if manifest.get("artifact") != "hook":
+    if manifest.get("artifact") != "hook" and not manifest.get("hook"):
         return False
 
     policy_id = manifest.get("id") or pack_dir.name
@@ -36,8 +35,11 @@ def compile_one_dropin(
     if Surface.GIT_HOOK.value not in status.get("targets", []):
         return False
 
-    expected = compiled_root / policy_id / "git-hook"
-    if expected.is_dir() and any(expected.iterdir()):
+    # Any compiled surface means `chock sync` already owns this policy. A guard-only or
+    # tool_use-only policy has no git-hook output by design; compiling that one surface
+    # here would overwrite its coverage entry with a git-hook-only view.
+    compiled = compiled_root / policy_id
+    if compiled.is_dir() and any(any(d.iterdir()) for d in compiled.iterdir() if d.is_dir()):
         return False
 
     # Tests patch chock.compile.compiler.compile_policy directly (test_engine_scan.py,
@@ -56,7 +58,7 @@ def compile_one_dropin(
 
 
 def auto_compile(repo_root: Path) -> None:
-    """Compile any policy that has a hook gate but no compiled git-hook output yet."""
+    """Compile any policy that has a hook gate but no compiled output yet."""
     try:
         config = load_config(repo_root)
         agents = agents_from_config(repo_root)

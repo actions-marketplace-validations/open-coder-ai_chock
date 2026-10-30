@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
+from typing import TextIO
+
+from chock.gatelog import FORMATS, GROUP_KEYS, LEVELS, ROUTES, VERDICTS, positive_days
+from chock.stop import print_stop
 
 
 def _run(label: str, fn, argv: list[str]) -> int:
@@ -21,8 +26,10 @@ def sync_main(argv: list[str] | None) -> int:
     parser.add_argument("--check", action="store_true", help="Report drift and exit non-zero; write nothing")
     parser.add_argument("--ci", action="store_true", help="Also install the GitHub Actions CI gate workflow")
     parser.add_argument("--skills", action="store_true", help="Also install bundled authoring skills")
+    parser.add_argument("--committed", action="store_true", help="Arm from what is committed (takes only --repo)")
     args = parser.parse_args(argv)
-
+    if args.committed and (args.agents is not None or any((args.skip_hooks, args.check, args.ci, args.skills))):
+        parser.error("--committed takes only --repo")
     from chock.toggles import recompile_main
 
     passthrough = ["--repo", args.repo]
@@ -33,8 +40,18 @@ def sync_main(argv: list[str] | None) -> int:
     if args.check:
         passthrough.append("--check")
     rc = int(recompile_main(passthrough) or 0)
+    if not args.check:
+        from chock.guardrails.reviewed import record_reviewed
+
+        # Independent of the recompile: a teammate's clone honours the reviewed toggle file once synced.
+        record_reviewed(Path(args.repo).resolve())
     if rc or args.check:
         return rc
+
+    from chock.hooks.launch import record_interpreter
+
+    # The launcher every agent hook runs prefers this interpreter; local config, never committed.
+    record_interpreter(Path(args.repo))
 
     if args.ci:
         from chock.scaffold.install_ci import main as install_ci_main
@@ -85,20 +102,70 @@ def _run_mechanisms(args: argparse.Namespace) -> int:
     return _run("matrix mechanisms", mechanisms_main, ["--repo", args.repo])
 
 
-def check_main(argv: list[str] | None) -> int:
-    """Run every truth check: validate, verify, evals, matrix, index freshness, conflicts."""
+def _sarif_main(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    """The ci gates' findings as SARIF; the exit code is the gate step's own (0, 1 on a block, 2 undecided)."""
+    if args.format != "sarif":
+        parser.error("--output and --head-ref go with --format sarif")
+    if args.event != "ci" or not args.base or args.only or args.mode:
+        parser.error("--format sarif needs --event ci and --base, and takes no --only or --mode")
+    from chock.gate.sarif import emit
+
+    return emit(Path(args.repo), args.base, args.head_ref, args.output)
+
+
+def _check_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="chock check")
     parser.add_argument("--repo", default=".", help="Repo root")
     parser.add_argument("--only", default=None, help=f"Comma-separated subset of: {', '.join(CHECKS)}")
     parser.add_argument("--mode", default=None, help="Validation mode (passed to validate, e.g. frontier-claude)")
     parser.add_argument("--event", default=None, help="Hook event context (passed to validate, e.g. commit)")
     parser.add_argument("--base", default=None, help="Git ref the policy set may not be weaker than (baseline)")
-    args = parser.parse_args(argv)
+    parser.add_argument(
+        "--format",
+        choices=("text", "sarif"),
+        default="text",
+        help="sarif: run the compiled ci gates (needs --event ci and --base) and print their findings as SARIF 2.1.0",
+    )
+    parser.add_argument("--output", default=None, help="With --format sarif: write the log to this file, not stdout")
+    parser.add_argument(
+        "--head-ref", default=None, help="With --format sarif: the branch under test ($GITHUB_HEAD_REF)"
+    )
+    return parser
 
-    selected = [s.strip() for s in args.only.split(",")] if args.only else list(CHECKS)
+
+def _run_freshness_checks(selected: list[str], repo: str) -> int:
+    """Index freshness and ambient conflicts."""
+    rc = 0
+    if "index" in selected:
+        from chock.index.cli import cmd_refresh
+
+        rc = max(rc, _run("index freshness", cmd_refresh, ["--repo", repo, "--check"]))
+    if "conflicts" in selected:
+        from chock.validation.checks_conflicts import main as conflicts_main
+
+        rc = max(rc, _run("ambient conflicts", conflicts_main, ["--repo", repo]))
+    return rc
+
+
+def _selected_checks(only: str | None) -> list[str] | None:
+    """The checks named by `--only` (all when unset); None, after saying so, when one is unknown."""
+    selected = [s.strip() for s in only.split(",")] if only else list(CHECKS)
     unknown = sorted(set(selected) - set(CHECKS))
     if unknown:
         print(f"Unknown check(s): {', '.join(unknown)}. Choose from: {', '.join(CHECKS)}", file=sys.stderr)
+        return None
+    return selected
+
+
+def check_main(argv: list[str] | None) -> int:
+    """Run every truth check: validate, verify, evals, matrix, index freshness, conflicts."""
+    parser = _check_parser()
+    args = parser.parse_args(argv)
+    if args.format == "sarif" or args.output or args.head_ref:
+        return _sarif_main(args, parser)
+
+    selected = _selected_checks(args.only)
+    if selected is None:
         return 2
 
     rc = 0
@@ -116,16 +183,10 @@ def check_main(argv: list[str] | None) -> int:
         rc = max(rc, _run_matrix(args))
     if "mechanisms" in selected:
         rc = max(rc, _run_mechanisms(args))
-    if "index" in selected:
-        from chock.index.cli import cmd_refresh
-
-        rc = max(rc, _run("index freshness", cmd_refresh, ["--repo", args.repo, "--check"]))
-    if "conflicts" in selected:
-        from chock.validation.checks_conflicts import main as conflicts_main
-
-        rc = max(rc, _run("ambient conflicts", conflicts_main, ["--repo", args.repo]))
+    rc = max(rc, _run_freshness_checks(selected, args.repo))
     if "baseline" in selected:
         rc = max(rc, _run_baseline(args))
+    print(f"== result: FAIL (exit {rc}; see the FAIL above)" if rc else "== result: PASS")
     return rc
 
 
@@ -141,12 +202,62 @@ def _run_baseline(args: argparse.Namespace) -> int:
     return _run("policy baseline", baseline_main, ["--repo", args.repo, "--base", args.base])
 
 
+def _log_args(args: argparse.Namespace) -> list[str]:
+    """The `status` flags that belong to the gate log, in `chock.gatelog`'s own spelling."""
+    flags = [("--policy", args.policy), ("--since", args.since), ("--by", args.by), ("--format", args.format)]
+    flags += [("--route", args.route), ("--level", args.level), ("--verdict", args.verdict), ("--plugin", args.plugin)]
+    given = [part for flag, value in flags if value is not None for part in (flag, str(value))]
+    return given + [flag for flag, on in (("--json", args.json), ("--follow", args.follow)) if on]
+
+
+def _print_rollout(repo: Path, stream: TextIO = sys.stdout) -> None:
+    """Lead with a level below enforce, where it came from, and what it does not reach."""
+    from chock.gate.runner import ROLLOUT_ENFORCE, ROLLOUT_ENV, agent_signal, rollout
+
+    signal = agent_signal(repo)
+    level = rollout(repo, "pre-commit", signal)
+    if level == ROLLOUT_ENFORCE:
+        return
+    from_env = signal is None and os.environ.get(ROLLOUT_ENV, "").strip() == level
+    source = f"{ROLLOUT_ENV}={level} in this shell" if from_env else "`rollout:` in .chock/config.yaml"
+    ceiling = "warn" if level == "observe" else "ask (and an ask does not fail CI)"
+    print(
+        f"ROLLOUT: {level}, from {source} -- compiled gates {ceiling} instead of blocking and record what "
+        "enforce would have stopped (`chock status --only log`); command guards, tool_call gates and the "
+        "MCP gateway still block. Remove it to enforce.",
+        file=stream,
+    )
+
+
 def status_main(argv: list[str] | None) -> int:
     """Read-only picture of the repo: policy table, plus registry and gate log on request."""
     parser = argparse.ArgumentParser(prog="chock status")
     parser.add_argument("--repo", default=".", help="Repo root")
     parser.add_argument("--only", default=None, help="Comma-separated subset of: policies, registry, log")
+    parser.add_argument("--summary", action="store_true", help="Log summary: rates, latency vs timeout, faults")
+    parser.add_argument(
+        "--verify-log", action="store_true", help="Walk each decision log's hash chain; exit 1 at its first break"
+    )
+    parser.add_argument(
+        "--head", metavar="SEQ:SHA256", help="With --verify-log: confirm a head kept earlier is still there"
+    )
+    log_flags = parser.add_argument_group("log section")
+    log_flags.add_argument("--policy", help="Log: restrict to one policy id")
+    log_flags.add_argument("--since", type=positive_days, metavar="DAYS", help="Log: only records from the last N days")
+    log_flags.add_argument("--json", action="store_true", help="Log: machine-readable output")
+    log_flags.add_argument("--by", choices=GROUP_KEYS, help="Log: group by policy, rule, agent or event")
+    log_flags.add_argument("--format", choices=FORMATS, help="Log: md prints a markdown summary")
+    log_flags.add_argument("--route", choices=ROUTES, help="Log: only the sync route (this repo) or the plugin route")
+    log_flags.add_argument("--level", choices=LEVELS, help="Log: info shows policy decisions only; debug adds allows")
+    log_flags.add_argument("--verdict", choices=VERDICTS, help="Log: only records with this verdict")
+    log_flags.add_argument("--plugin", help="Log: only records from this plugin (plugin route)")
+    log_flags.add_argument("--follow", action="store_true", help="Log: print new records as they are written")
     args = parser.parse_args(argv)
+    print_stop(Path(args.repo).resolve(), sys.stderr if args.json or args.format == "md" else sys.stdout)
+    if args.verify_log or args.head or args.summary:
+        from chock.status_modes import summary, verify_log
+
+        return verify_log(args) if args.verify_log or args.head else summary(args)
 
     sections = ("policies", "registry", "log")
     selected = [s.strip() for s in args.only.split(",")] if args.only else ["policies"]
@@ -154,6 +265,20 @@ def status_main(argv: list[str] | None) -> int:
     if unknown:
         print(f"Unknown section(s): {', '.join(unknown)}. Choose from: {', '.join(sections)}", file=sys.stderr)
         return 2
+
+    if "log" not in selected and _log_args(args):
+        print(
+            "--policy, --since, --json, --by, --format, --route, --level, --verdict, --plugin and --follow apply to `--only log`",
+            file=sys.stderr,
+        )
+        return 2
+
+    if (args.json or args.format == "md") and selected != ["log"]:
+        print("--json and --format md print the log alone: use `--only log`", file=sys.stderr)
+        return 2
+
+    # Machine output stays parseable: the level notice goes to stderr beside it.
+    _print_rollout(Path(args.repo).resolve(), sys.stderr if args.json or args.format == "md" else sys.stdout)
 
     rc = 0
     if "policies" in selected:
@@ -167,5 +292,9 @@ def status_main(argv: list[str] | None) -> int:
     if "log" in selected:
         from chock.gatelog import main as gatelog_main
 
-        rc = max(rc, _run("gate log", gatelog_main, ["--repo", args.repo]))
+        log_argv = ["--repo", args.repo, *_log_args(args)]
+        if args.json or args.format == "md" or args.follow:
+            rc = max(rc, int(gatelog_main(log_argv) or 0))
+        else:
+            rc = max(rc, _run("gate log", gatelog_main, log_argv))
     return rc

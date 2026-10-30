@@ -15,6 +15,7 @@ from typing import Any
 
 import yaml
 
+from chock import yamlio
 from chock.compile.emitters.advisory import advisory_lines
 from chock.emit import write_generated, write_generated_json
 from chock.eval.suites import Policy, discover_policies
@@ -95,7 +96,7 @@ def path_slug(text: str) -> str:
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
-    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return yamlio.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
 def tier3_cases(policy: Policy) -> list[Tier3Case]:
@@ -135,6 +136,9 @@ def render_subject(policy_id: str, lines: list[str]) -> str:
 
 def _frontmatter(data: dict[str, Any], body: str) -> str:
     return "---\n" + yaml.safe_dump(data, sort_keys=False) + "---\n" + body.rstrip() + "\n"
+
+
+POLICY_ID = re.compile(r"[a-z][a-z0-9-]{2,63}")
 
 
 def _write(path: Path, text: str) -> None:
@@ -209,6 +213,9 @@ def export(repo_root: Path, out_dir: Path, policy_ids: list[str] | None = None) 
     result = ExportResult()
     policies = _resolve(repo_root, policy_ids, result)
     for policy in policies:
+        if not POLICY_ID.fullmatch(policy.id):
+            result.errors.append(f"{policy.id!r}: not a valid policy id ({POLICY_ID.pattern}); nothing exported")
+            continue
         try:
             notice = _export_one(policy, repo_root, out_dir)
         except SuiteShapeError as exc:

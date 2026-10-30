@@ -3,10 +3,11 @@ name = "chock"
 # Version contract (docs/compatibility.md): PATCH releases are emitter-byte-identical;
 # MINOR releases may change compiled output. 0.1.0 is the first public release; the
 # 0.0.1a0 pre-release exists only because PyPI names are claimed by uploading.
-version = "0.11.2"
-description = "Governance-as-code for AI coding agents: write a rule once, enforce it on git hooks, CI, and every agent"
+version = "0.15.2"
+description = "Blocks your coding agent's wrong moves before they land."
 readme = "README.md"
-# PEP 639 SPDX expression; needs setuptools >= 77 (pinned in build-system below).
+# PEP 639 SPDX expression; needs setuptools >= 77 (range in build-system below; CI and release use the hash-pinned
+# setuptools==84.0.0 from requirements/*.txt with --no-build-isolation).
 license = "Apache-2.0"
 requires-python = ">=3.11"
 # No email: SECURITY.md routes vulnerability reports through GitHub advisories, and a
@@ -58,9 +59,10 @@ dependencies = [
     # Build-time only: chock's plugin packaging consumes agentseam's per-agent layout
     # data (packaging.plan/supports/plugin_root/executable_ref) to render plugin bundles.
     # It never ships to an adopter repo -- the vendored PreToolUse/SessionStart runners
-    # stay self-contained stdlib-only files, unaffected by this dependency. Pinned exact
-    # per plan/spine-a/contract.md: the wave boundary is the published PyPI artifact.
-    "agentseam==0.3.3",
+    # stay self-contained stdlib-only files, unaffected by this dependency. Pre-1.0 it is
+    # pinned to an agentseam main commit (its newest adapters are unreleased); release week
+    # swaps this for the released version, since PyPI refuses a direct reference.
+    "agentseam @ git+https://github.com/open-coder-ai/agentseam@683f95b5f2784dc3446acb1c91636ebc5ee7bee6",
 ]
 
 [project.optional-dependencies]
@@ -106,20 +108,24 @@ where = ["src"]
 # Emitter, scaffold and vendored-runtime templates (chock W48): non-Python artifact
 # templates read at emit time via importlib.resources, never Python string literals.
 "chock.compile.emitters" = ["data/*"]
-"chock.scaffold" = ["data/*"]
+"chock.scaffold" = ["data/*", "data/kinds/**/*"]
 "chock.gate" = ["data/*.tmpl"]
+"chock.guidance" = ["data/*.json"]
 # `**/*` does NOT match dotfiles or dot-directories, so the chock-init
 # template tree (.chock/, .agents/, .claude/, adapter dotfiles) was absent
 # from every built wheel -- 42 files. The explicit dot-prefixed patterns below are
 # required; verified by tests/test_wheel_install.py against a real wheel install.
 "chock.packs" = ["**/*", "**/.*", "**/.*/**/*", "**/.*/**/.*"]
 "chock.authoring" = ["data/*.json"]
+"chock.install" = ["data/*.json"]
 # The per-package LICENSE text and icon `chock plugin build` emits into every published
 # package, plus each store's owned-subtrees data `plugin/store.py` reads at emit time.
 # Not `data/*.json` like the line above: these are a .txt and a .svg, and a json-only
 # glob would ship neither -- the emitter would then work from a source checkout and
 # raise FileNotFoundError from a `pip install`. Pinned by tests/test_wheel_install.py.
 "chock.plugin" = ["data/*", "data/stores/*"]
+# The toggle wrapper's skill template and evals, and the built-in self-protection policy every merged plugin carries.
+"chock.guardrails" = ["data/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -182,6 +188,9 @@ max-statements = 50
 ]
 "acceptance/**" = ["S101", "FBT", "PLR2004", "PLW1510", "S105", "S108", "S602", "S603"]
 "fuzz/**" = ["S101"]
+# Installed chock-catalog guards are vendored, catalog-owned and refreshed verbatim, never hand-edited
+# here. They are CLI hooks: a verdict reason on stderr is the protocol (T201).
+".agents/policies/**/implementations/*.py" = ["T201"]
 # docs/assets/gen_brand_assets.py derives docs/assets/social-preview.svg from repo data
 # (see the ci.yml brand-assets job) -- a dev/build script, not shipped source.
 "docs/assets/**" = ["ERA001", "PLR0913", "PLR0917", "PLR2004", "PLW2901", "RUF001", "RUF003", "RUF005", "S101", "S603", "T201"]
@@ -221,9 +230,19 @@ max-statements = 50
 "src/chock/authoring/matrix.py" = ["T201"]
 "src/chock/compile/compiler.py" = ["T201"]
 "src/chock/eval/cli.py" = ["T201"]
+"src/chock/install/cli.py" = ["T201"]
+"src/chock/guardrails/cli.py" = ["T201"]
+"src/chock/guardrails/reviewed.py" = ["T201"]
 "src/chock/gate/guard_runner.py" = ["T201", "PLR0911"]
-"src/chock/gate/runner.py" = ["T201", "PLR0913", "PLR0917", "PLR0911"]
+"src/chock/gate/runner/*.py" = ["T201", "PLR0913", "PLR0917", "PLR0911"]
 "src/chock/gateway/__main__.py" = ["T201"]
+"src/chock/guidance/cli.py" = ["T201"]
+# History scan: its print() is the report; `chock check` imports it lazily so the other checks stay import-light.
+# Refusal messages sit beside the condition that refuses (the externalized-text exception), so TRY003 is file-scoped.
+"src/chock/history/cli.py" = ["T201", "PLC0415", "TRY003"]
+"src/chock/history/gates.py" = ["TRY003"]
+"src/chock/history/gitlog.py" = ["TRY003"]
+"src/chock/history/scan.py" = ["TRY003"]
 "src/chock/hooks/autocompile.py" = ["T201"]
 "src/chock/hooks/install.py" = ["T201"]
 "src/chock/hooks/installers.py" = ["T201"]
@@ -240,6 +259,7 @@ max-statements = 50
 "src/chock/registry/core.py" = ["T201", "C901"]
 "src/chock/review/cli.py" = ["T201"]
 "src/chock/scaffold/add.py" = ["T201", "PLR0913"]
+"src/chock/scaffold/pin.py" = ["T201"]
 "src/chock/scaffold/init.py" = ["T201", "C901", "PLR0912", "PLR0915"]
 "src/chock/scaffold/install_ci.py" = ["T201"]
 "src/chock/scaffold/new.py" = ["T201"]

@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-import json
 import os
+import re
 import shlex
+import shutil
 import subprocess
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
+
+from .budget import BYTECODE_OFF, ENGINE_BUDGET_SECONDS, engine_deadline, engine_remaining, time_left
+from .runner.journal import log_write
 
 GUARD_VIOLATION = 1
 #: A guard that wants the user asked before the command runs, with its own reason.
@@ -16,19 +19,39 @@ GUARD_ASK_EXIT = 3
 
 PYTHON_SUFFIX = ".py"
 
-_BASH_CANDIDATES = (
-    "bash",
-    r"C:\Program Files\Git\usr\bin\bash.exe",
-    r"C:\Program Files\Git\bin\bash.exe",
-    r"C:\Program Files (x86)\Git\usr\bin\bash.exe",
-    "/bin/bash",
-    "/usr/bin/bash",
+#: How an interpreter's own crash opens the output: a Python traceback or a `File "...", line N` syntax error,
+#: or bash's `[<script>: ]line N: syntax error`. Exit 1 with one of these as the first line (or with no output
+#: at all) is a guard that failed, not one that refused, so it asks. A refusal's words are the guard's own,
+#: so text the agent chose can never be the start of the output.
+_CRASH_OPENING = re.compile(
+    r"""(?ix)\A\s*(traceback\ \(most\ recent\ call\ last\)|file\ ".*",\ line\ \d+|(\S+:\ )?line\ \d+:\ (syntax\ error|unexpected\ eof))"""
 )
+#: What CHOCK_TOOL says when the hook payload names no shell tool this runner recognises.
+TOOL_UNKNOWN = "unknown"
+#: Set to 1 in the guard's environment when argv is a plain whitespace split, not a shell parse.
+ARGV_FALLBACK_ENV = "CHOCK_ARGV_FALLBACK"
+CAN_ASK_ENV = "CHOCK_CAN_ASK"  # "1"/"0": the client prompts on a guard's ask; unset when the caller cannot say
 
-GATE_LOG_ENV = "CHOCK_GATE_LOG"
-_LOG_MAX_BYTES = 1_048_576
+_POSIX_BASH = ("bash", "/bin/bash", "/usr/bin/bash")
+#: Where Git for Windows installs when `git` is not on PATH to say where it is.
+_GIT_FOR_WINDOWS = (r"C:\Program Files\Git", r"C:\Program Files (x86)\Git")
+#: Git's own launcher first: bin/bash.exe sets up the environment usr/bin/bash.exe expects.
+_GIT_BASH_DIRS = (("bin",), ("usr", "bin"))
+_BASH_EXE = "bash.exe"
+#: `bash` on a bare Windows PATH is System32's WSL launcher or a Store stub, neither of which
+#: can see a Windows path: never a guard's interpreter.
+_WINDOWS_STUB_DIRS = ("/system32/", "/windowsapps/")
+#: Git's coreutils (sed, grep) live in usr/bin; a guard calling them needs it on PATH.
+_COREUTILS_MARKER = "sed.exe"
+_WINDOWS = "nt"
+#: The bash found by the first probe, reused for every later guard in this process.
+_FOUND_BASH = {}
 
-_GUARD_TIMEOUT_SECONDS = 30
+#: The last guard run in this process: its `outcome` and exit `code`, for the decision log.
+GUARD_LAST = {}
+GUARD_MISSING = "missing"
+
+_BASH_PROBE_SECONDS = 10
 
 GUARD_BLOCKED = "blocked"
 GUARD_CLEAN = "clean"
@@ -49,52 +72,123 @@ def guard_path_from_argv(argv: list[str]) -> Path | None:
     return None
 
 
-def find_bash(guard: Path) -> str | None:
-    """First interpreter that can actually see `guard`, or None."""
-    for candidate in _BASH_CANDIDATES:
+def _git_roots() -> list[Path]:
+    """Git for Windows install roots: from `git` on PATH (cmd/ or mingw64/bin/), then the defaults."""
+    git = shutil.which("git")
+    near = [Path(git).parent.parent, Path(git).parent.parent.parent] if git else []
+    return [*near, *(Path(root) for root in _GIT_FOR_WINDOWS)]
+
+
+def bash_candidates() -> list[str]:
+    """Bash interpreters to try, best first; on Windows Git's own, never the WSL launcher."""
+    if os.name != _WINDOWS:
+        return list(_POSIX_BASH)
+    found = [str(root.joinpath(*sub, _BASH_EXE)) for root in _git_roots() for sub in _GIT_BASH_DIRS]
+    on_path = shutil.which("bash")
+    if on_path and not any(stub in on_path.lower().replace("\\", "/") for stub in _WINDOWS_STUB_DIRS):
+        found.append(on_path)
+    return [c for i, c in enumerate(found) if c not in found[:i] and Path(c).is_file()]
+
+
+def interpreter_env(interpreter: str) -> dict[str, str]:
+    """The environment a guard runs in: on Windows, Git's usr/bin ahead on PATH for sed and grep."""
+    env = {**os.environ, **BYTECODE_OFF}
+    env.pop(CAN_ASK_ENV, None)  # only a caller that knows the client may say; never inherited
+    if os.name != _WINDOWS:
+        return env
+    home = Path(interpreter).parent
+    usr_bin = next((d for d in (home.parent / "usr" / "bin", home) if (d / _COREUTILS_MARKER).is_file()), None)
+    if usr_bin is not None:
+        env["PATH"] = str(usr_bin) + os.pathsep + env.get("PATH", "")
+    return env
+
+
+#: The probe's shell text is fixed; the guard path arrives as `$1`, so no character in it is ever shell syntax.
+_PROBE_SCRIPT = 'test -f "$1"'
+
+
+def find_bash(guard: Path, deadline: float | None = None) -> str | None:
+    """First bash that can actually see `guard`, probed once per process; the probes draw on `deadline`."""
+    if "bash" in _FOUND_BASH:
+        return _FOUND_BASH["bash"]
+    for candidate in bash_candidates():
+        argv = [candidate, "-c", _PROBE_SCRIPT, "_", guard.as_posix()]
         try:
-            proc = subprocess.run(  # noqa: S603 -- probing candidate shells is this function's job
-                [candidate, "-c", f'test -f "{guard.as_posix()}"'],
-                capture_output=True,
-                timeout=10,
-                check=False,
-            )
+            limit = _BASH_PROBE_SECONDS if deadline is None else min(_BASH_PROBE_SECONDS, time_left(deadline, argv))
+            proc = subprocess.run(argv, capture_output=True, timeout=limit, check=False)  # noqa: S603 -- probing is the job
         except (OSError, subprocess.SubprocessError):
+            if deadline is not None and engine_remaining(deadline) <= 0:
+                return None
             continue
         if proc.returncode == 0:
+            _FOUND_BASH["bash"] = candidate
             return candidate
     return None
 
 
-def find_interpreter(guard: Path) -> str | None:
+def find_interpreter(guard: Path, deadline: float | None = None) -> str | None:
     """The interpreter that can run `guard`: this Python for `.py`, otherwise a usable bash."""
     if guard.suffix == PYTHON_SUFFIX:
         return sys.executable or None
-    return find_bash(guard)
+    return find_bash(guard, deadline)
 
 
-def run_guard(guard: Path, command: str) -> str:
-    """`GUARD_BLOCKED` / `GUARD_ASKED` / `GUARD_CLEAN` when the guard ran, otherwise why it did not."""
-    return run_guard_detailed(guard, command)[0]
+def normalize_tool(tool: str | None) -> str:
+    """The hook payload's tool name as `bash` | `powershell` | `shell` | `unknown`."""
+    name = (tool or "").lower()
+    if name in ("powershell", "pwsh"):
+        return "powershell"
+    if name == "bash":
+        return "bash"
+    if name == "sh" or "shell" in name:
+        return "shell"
+    return TOOL_UNKNOWN
 
 
-def run_guard_detailed(guard: Path, command: str) -> tuple[str, str]:
-    """`run_guard`'s verdict plus the guard's own first line, which an ask carries to the user."""
+def is_guard_crash(output: str) -> bool:
+    """True when a guard's exit-1 output is empty or shows an interpreter crash, not a refusal."""
+    return not output.strip() or _CRASH_OPENING.match(output) is not None
+
+
+def split_command(command: str) -> tuple[list[str], bool]:
+    """POSIX `shlex.split` argv, else a whitespace split; the flag is True on the fallback."""
     try:
-        args = shlex.split(command)
+        return shlex.split(command), False
     except ValueError:
-        print("chock: could not parse command (unbalanced quotes), not checked", file=sys.stderr)
-        return GUARD_UNCHECKED, ""
+        return command.split(), True
+
+
+def run_guard(guard: Path, command: str, tool: str = "") -> str:
+    """`GUARD_BLOCKED` / `GUARD_ASKED` / `GUARD_CLEAN` when the guard ran, otherwise why it did not."""
+    return run_guard_detailed(guard, command, tool)[0]
+
+
+def _no_interpreter(guard: Path, deadline: float) -> tuple[str, str]:
+    """The ask a guard earns when no shell could run it: the budget ran out probing, or none can see it."""
+    if engine_remaining(deadline) <= 0:
+        print(f"chock: guard timed out after {ENGINE_BUDGET_SECONDS}s finding a shell, not checked", file=sys.stderr)
+        return GUARD_ERRORED, ""
+    reason = f"no usable bash was found to run {guard.name}; on Windows install Git for Windows (it ships bash), elsewhere put bash on PATH"
+    print(f"chock: {reason}", file=sys.stderr)
+    return GUARD_ERRORED, reason
+
+
+def run_guard_detailed(guard: Path, command: str, tool: str = "", *, can_ask: bool | None = None) -> tuple[str, str]:
+    """`run_guard`'s verdict plus the guard's own first line, which an ask carries to the user."""
+    args, fallback = split_command(command)
     if not args:
         return GUARD_UNCHECKED, ""
 
-    interpreter = find_interpreter(guard)
+    deadline = engine_deadline()
+    interpreter = find_interpreter(guard, deadline)
     if interpreter is None:
-        print(f"chock: no usable interpreter found, {guard.name} not checked", file=sys.stderr)
-        return GUARD_UNCHECKED, ""
+        return _no_interpreter(guard, deadline)
 
     try:
-        env = {**os.environ, "CHOCK_RAW_COMMAND": command}
+        env = {**interpreter_env(interpreter), "CHOCK_RAW_COMMAND": command, "CHOCK_TOOL": normalize_tool(tool)}
+        if fallback:
+            env[ARGV_FALLBACK_ENV] = "1"
+        env.update({} if can_ask is None else {CAN_ASK_ENV: "1" if can_ask else "0"})
         proc = subprocess.run(  # noqa: S603 -- running the guard script against the command is the feature
             [interpreter, str(guard), *args],
             capture_output=True,
@@ -102,12 +196,12 @@ def run_guard_detailed(guard: Path, command: str) -> tuple[str, str]:
             encoding="utf-8",
             errors="replace",
             env=env,
-            timeout=_GUARD_TIMEOUT_SECONDS,
+            timeout=time_left(deadline, [interpreter, str(guard)]),
             check=False,
         )
     except subprocess.TimeoutExpired:
         print(
-            f"chock: guard timed out after {_GUARD_TIMEOUT_SECONDS}s, not checked",
+            f"chock: guard timed out after {ENGINE_BUDGET_SECONDS}s, not checked",
             file=sys.stderr,
         )
         return GUARD_ERRORED, ""
@@ -115,13 +209,15 @@ def run_guard_detailed(guard: Path, command: str) -> tuple[str, str]:
         print(f"chock: guard could not run, not checked: {exc}", file=sys.stderr)
         return GUARD_ERRORED, ""
 
+    GUARD_LAST["code"] = proc.returncode
     output = ((proc.stderr or "") + (proc.stdout or "")).strip()
     first_line = output.splitlines()[0].strip() if output else ""
     if proc.returncode == GUARD_VIOLATION:
+        if is_guard_crash(output):
+            print(f"chock: guard {Path(guard).name} exited 1 without a reason (crash?), not checked", file=sys.stderr)
+            return GUARD_ERRORED, ""
         sys.stderr.write(proc.stdout or "")
         sys.stderr.write(proc.stderr or "")
-        if not output:
-            print(f"chock: blocked by {Path(guard).name} (guard gave no reason)", file=sys.stderr)
         return GUARD_BLOCKED, first_line
     if proc.returncode == GUARD_ASK_EXIT:
         sys.stderr.write(proc.stdout or "")
@@ -136,50 +232,26 @@ def run_guard_detailed(guard: Path, command: str) -> tuple[str, str]:
     return GUARD_CLEAN, ""
 
 
-def log_outcome(guard: Path, tool: str, *, verdict: str) -> None:
-    """Append one outcome record. Best effort: never raises, never changes the verdict."""
-    try:
-        if os.environ.get(GATE_LOG_ENV) == "0":
-            return
-        guard = guard.resolve()
-        if guard.parent.name != "implementations":
-            return
-        artifact_root = None
-        for parent in guard.parents:
-            if (parent / ".chock").is_dir():
-                artifact_root = parent / ".chock"
-                break
-        if artifact_root is None:
-            return
-        log_dir = artifact_root / "log"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        log_path = log_dir / "gate-events.jsonl"
-        if log_path.exists() and log_path.stat().st_size > _LOG_MAX_BYTES:
-            log_path.replace(log_dir / "gate-events.1.jsonl")
-        record = {
-            "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "policy_id": guard.parent.parent.name,
-            "surface": "pre-tool-use",
-            "event": "tool_use",
-            "kind": guard.stem,
-            "tool": tool,
-            "verdict": verdict,
-        }
-        with log_path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
-    except Exception:  # noqa: BLE001 -- best effort logging: never raises, never changes the verdict
-        return
+def append_gate_log(chock_root: Path, record: dict) -> None:
+    """Append one sync-route record to `<chock_root>/log/gate-events.jsonl` at the level in force; raises on I/O."""
+    log_write(Path(chock_root) / "log" / "gate-events.jsonl", {"route": "sync", **record}, Path(chock_root).parent)
 
 
-def evaluate(argv: list[str], command: str, tool: str = "") -> tuple[str, str] | None:
+def evaluate(argv: list[str], command: str, tool: str = "", *, can_ask: bool | None = None) -> tuple[str, str] | None:
     """Run the guard named on `argv` (`--guard <path>`) against `command`."""
     guard = guard_path_from_argv(argv)
-    if guard is None or not guard.exists():
+    if guard is None:
         return None
-    verdict, message = run_guard_detailed(guard, command)
-    logged = {GUARD_BLOCKED: "block", GUARD_ASKED: "ask", GUARD_CLEAN: "allow"}
-    if verdict in logged:
-        log_outcome(guard, tool, verdict=logged[verdict])
+    if not guard.exists():
+        GUARD_LAST["outcome"] = GUARD_MISSING
+        # The hook config names this guard, so its absence is a broken install, not "nothing to check".
+        return (
+            VERDICT_DENY,
+            f"chock guard {guard} is missing, so this command cannot be checked. "
+            "Run `chock sync --repo .` to reinstall the policy's guards.",
+        )
+    verdict, message = run_guard_detailed(guard, command, tool, can_ask=can_ask)
+    GUARD_LAST["outcome"] = verdict
     if verdict == GUARD_BLOCKED:
         return (VERDICT_DENY, f"Blocked by chock policy: {guard.stem}")
     if verdict == GUARD_ASKED:
@@ -192,9 +264,9 @@ def evaluate(argv: list[str], command: str, tool: str = "") -> tuple[str, str] |
             else f"chock policy {guard.stem} asks for confirmation before this runs (guard gave no reason).",
         )
     if verdict == GUARD_ERRORED:
+        why = message or f"the {guard.stem} guard did not complete (see this hook's stderr)"
         return (
             VERDICT_ESCALATE,
-            f"chock could not check this command: the {guard.stem} guard did not complete "
-            f"(see this hook's stderr). Approving runs it unchecked.",
+            f"chock could not check this command against {guard.stem}: {why}. Approving runs it unchecked.",
         )
     return None

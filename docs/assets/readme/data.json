@@ -1,0 +1,182 @@
+{
+  "source": {
+    "file": "chock-catalog registry.yaml and */*/manifest.yaml",
+    "commit": "9a64623e30769c49d7011ec3f559592d84e3f657"
+  },
+  "policies": 71,
+  "tiers": {
+    "commit": 35,
+    "in-agent": 11,
+    "advisory": 25
+  },
+  "claude_code_labels": {
+    "advise": 24,
+    "block": 39,
+    "warn": 5,
+    "ask": 3
+  },
+  "eval_cases": 4280,
+  "eval_executed": 4098,
+  "asi": {
+    "with_policy": 10,
+    "refused_at_commit": [
+      "ASI01",
+      "ASI02",
+      "ASI03",
+      "ASI04",
+      "ASI05",
+      "ASI07",
+      "ASI09"
+    ],
+    "in_agent_only": [
+      "ASI10"
+    ],
+    "warn_or_ask_only": [
+      "ASI06"
+    ],
+    "advisory_only": [
+      "ASI08"
+    ],
+    "fully_covered": 0
+  },
+  "incidents": [
+    {
+      "incident": "Log4Shell (CVE-2021-44228)",
+      "policy": "java-security",
+      "tier": "commit",
+      "eval_cases": 177
+    },
+    {
+      "incident": "Spring4Shell (CVE-2022-22965), Text4Shell (CVE-2022-42889)",
+      "policy": "java-security",
+      "tier": "commit",
+      "eval_cases": 177
+    },
+    {
+      "incident": "Struts OGNL (CVE-2017-5638)",
+      "policy": "java-security",
+      "tier": "commit",
+      "eval_cases": 177
+    },
+    {
+      "incident": "SSRF, then an over-broad cloud role",
+      "policy": "block-wildcard-iam",
+      "tier": "commit",
+      "eval_cases": 38
+    },
+    {
+      "incident": "tj-actions moved tag (2025)",
+      "policy": "pin-github-actions",
+      "tier": "commit",
+      "eval_cases": 63
+    },
+    {
+      "incident": "Codecov bash uploader (2021), curl piped to a shell",
+      "policy": "block-curl-pipe-sh",
+      "tier": "in-agent",
+      "eval_cases": 72
+    },
+    {
+      "incident": "MCP server at @latest",
+      "policy": "block-unpinned-agent-components",
+      "tier": "commit",
+      "eval_cases": 54
+    },
+    {
+      "incident": "Leaked keys",
+      "policy": "scan-secrets",
+      "tier": "commit",
+      "eval_cases": 55
+    },
+    {
+      "incident": "Trojan Source (CVE-2021-42574)",
+      "policy": "block-invisible-unicode",
+      "tier": "commit",
+      "eval_cases": 72
+    }
+  ],
+  "agentseam": {
+    "source": {
+      "file": "agentseam matrix.enforcement_level()",
+      "commit": "104da73533e1dcff98f37ee6c9e517947599359b"
+    },
+    "agents": 16,
+    "adapted_agents": 12,
+    "events": 12,
+    "cells": 192,
+    "grades": {
+      "enforced": 0,
+      "enforceable": 2,
+      "best-effort": 34,
+      "detect": 55,
+      "none": 101
+    }
+  },
+  "repos": [
+    {
+      "name": "agentseam",
+      "kind": "Core",
+      "line": "One handler API over every coding agent."
+    },
+    {
+      "name": "chock",
+      "kind": "Core",
+      "line": "Author a policy once, enforce it on every agent."
+    },
+    {
+      "name": "chock-catalog",
+      "kind": "Policies",
+      "line": "The policies, each labelled by what it enforces, with replayed evals."
+    },
+    {
+      "name": "context-report",
+      "kind": "Evidence",
+      "line": "A signed report of whether an agent artifact works."
+    },
+    {
+      "name": "chock-threat-intel",
+      "kind": "Evidence",
+      "line": "A weekly threat ledger, each entry scored against the catalog."
+    },
+    {
+      "name": "chock-claude-plugins",
+      "kind": "Plugins",
+      "line": "The catalog as Claude Code plugins (generated)."
+    },
+    {
+      "name": "chock-copilot-plugins",
+      "kind": "Plugins",
+      "line": "The catalog as Copilot CLI and VS Code plugins (generated)."
+    },
+    {
+      "name": "chock-cursor-plugins",
+      "kind": "Plugins",
+      "line": "The catalog as Cursor plugins (generated)."
+    },
+    {
+      "name": "chock-codex-plugins",
+      "kind": "Plugins",
+      "line": "The catalog as Codex plugins (generated)."
+    },
+    {
+      "name": "chock-devin-plugins",
+      "kind": "Plugins",
+      "line": "The catalog as Devin plugins (generated)."
+    },
+    {
+      "name": "chock-quickstart",
+      "kind": "Template",
+      "line": "What chock init leaves behind."
+    },
+    {
+      "name": "chock-example",
+      "kind": "Template",
+      "line": "A working adoption, one policy per layer."
+    },
+    {
+      "name": ".github",
+      "kind": "Community",
+      "line": "Org profile and community health files."
+    }
+  ]
+}

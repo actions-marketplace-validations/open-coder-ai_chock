@@ -30,6 +30,7 @@ from chock.validation.checks_drift import (
     check_registry_freshness,
 )
 from chock.validation.checks_evals import check_eval_first
+from chock.validation.checks_hook_targets import check_dangling_hook_targets
 from chock.validation.checks_manifest_advice import check_manifest_advice
 from chock.validation.checks_manifest_schema import check_manifest_schema
 from chock.validation.checks_orchestration import (
@@ -44,7 +45,6 @@ from chock.validation.checks_repo import (
     check_adapter_integrity,
     check_ambient_rule_blocks,
     check_ambient_token_budget,
-    check_dangling_hook_targets,
     check_gate_log_untracked,
     check_release_consistency,
 )
@@ -54,6 +54,7 @@ from chock.validation.checks_security import (
     check_effects_and_approval,
     check_security_baseline,
 )
+from chock.validation.checks_write_path import check_write_path_pairing
 from chock.validation.frontier import check_frontier_mode
 from chock.validation.loading import (
     MANIFEST_SCHEMA,
@@ -112,7 +113,6 @@ def validate_artifact(
     check_security_baseline(artifact_dir, manifest, artifact_type, report)
     check_effects_and_approval(artifact_dir, manifest, artifact_type, report)
     check_scripts_shipped(artifact_dir, manifest, artifact_type, report)
-    check_script_integrity(artifact_dir, manifest, artifact_type, root, report)
     check_determinization_heuristic(artifact_dir, manifest, artifact_type, report)
     check_description_parity(artifact_dir, manifest, artifact_type, report)
     check_composition_contract(artifact_dir, manifest, artifact_type, report)
@@ -125,8 +125,10 @@ def validate_artifact(
     check_manifest_schema(artifact_dir, manifest, artifact_type, report)
     check_manifest_advice(artifact_dir, manifest, artifact_type, report)
     check_script_events(artifact_dir, manifest, artifact_type, report)
+    check_write_path_pairing(artifact_dir, manifest, artifact_type, report)
 
     if registry_check:
+        check_script_integrity(artifact_dir, manifest, artifact_type, root, report)
         check_registry_freshness(artifact_dir, manifest, artifact_type, root, report)
 
     if mode.startswith("frontier-"):

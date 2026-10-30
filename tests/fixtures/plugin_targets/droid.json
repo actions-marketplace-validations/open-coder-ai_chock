@@ -1,0 +1,120 @@
+{
+  "files": [
+    ".factory-plugin/plugin.json",
+    "hooks/hooks.json",
+    "scripts/_chock_runtime.py",
+    "scripts/chock-guardrails-protect/chock-guardrails-protect-gate.py",
+    "scripts/chock-guardrails-protect/chock-guardrails-protect.py",
+    "scripts/chock-guardrails-protect/chock_guardrails_protect/__init__.py",
+    "scripts/chock-guardrails-protect/gate.json",
+    "scripts/chock-guardrails-protect/gate.py",
+    "scripts/chock-guardrails-protect/implementations/chock-guardrails-protect-gate.py",
+    "scripts/chock-guardrails-protect/implementations/chock-guardrails-protect.py",
+    "scripts/chock-guardrails-protect/implementations/chock_guardrails_protect/__init__.py",
+    "scripts/chock_bundle.json",
+    "scripts/chock_bundle.py",
+    "scripts/chock_bundle_log.py",
+    "scripts/chock_bundle_state.py",
+    "scripts/chock_chain.py",
+    "scripts/chock_journal.py",
+    "scripts/demo-shell-guard/demo-shell-guard.py",
+    "scripts/demo-shell-guard/tinyparse/__init__.py",
+    "scripts/demo-write-gate/gate.json",
+    "scripts/demo-write-gate/gate.py",
+    "scripts/factory_droid.py",
+    "scripts/launch.sh",
+    "skills/customize-guardrails/SKILL.md",
+    "skills/demo-advice/SKILL.md",
+    "skills/demo-shell-guard/SKILL.md",
+    "skills/demo-write-gate/SKILL.md"
+  ],
+  "manifest": {
+    "name": "demo-bundle",
+    "version": "0.1.0",
+    "description": "Two demo policies. Members: demo-write-gate: blocks on an agent's file writes and at turn end; demo-shell-guard: refuses a matched shell command before it runs; demo-advice: advisory only. It is skill text, and nothing stops a violation. [Advisory skill only; enforcement needs chock installed in the repo.]"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${DROID_PLUGIN_ROOT}/scripts/launch.sh\" \"${DROID_PLUGIN_ROOT}/scripts/chock_bundle.py\" --bundle demo-bundle --member demo-write-gate \"${DROID_PLUGIN_ROOT}/scripts/factory_droid.py\" --gate \"${DROID_PLUGIN_ROOT}/scripts/demo-write-gate/gate.json\"",
+            "timeout": 45
+          }
+        ],
+        "matcher": "Create|Edit|MultiEdit|ApplyPatch"
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${DROID_PLUGIN_ROOT}/scripts/launch.sh\" \"${DROID_PLUGIN_ROOT}/scripts/chock_bundle.py\" --bundle demo-bundle --member demo-shell-guard \"${DROID_PLUGIN_ROOT}/scripts/factory_droid.py\" --guard \"${DROID_PLUGIN_ROOT}/scripts/demo-shell-guard/demo-shell-guard.py\"",
+            "timeout": 45
+          }
+        ],
+        "matcher": "Execute"
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${DROID_PLUGIN_ROOT}/scripts/launch.sh\" \"${DROID_PLUGIN_ROOT}/scripts/factory_droid.py\" --guard \"${DROID_PLUGIN_ROOT}/scripts/chock-guardrails-protect/chock-guardrails-protect.py\"",
+            "timeout": 45
+          }
+        ],
+        "matcher": "Execute"
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${DROID_PLUGIN_ROOT}/scripts/launch.sh\" \"${DROID_PLUGIN_ROOT}/scripts/factory_droid.py\" --gate \"${DROID_PLUGIN_ROOT}/scripts/chock-guardrails-protect/gate.json\"",
+            "timeout": 45
+          }
+        ],
+        "matcher": "Create|Edit|MultiEdit|ApplyPatch"
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${DROID_PLUGIN_ROOT}/scripts/launch.sh\" \"${DROID_PLUGIN_ROOT}/scripts/factory_droid.py\" --stop-check",
+            "timeout": 45
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${DROID_PLUGIN_ROOT}/scripts/launch.sh\" \"${DROID_PLUGIN_ROOT}/scripts/chock_bundle.py\" --bundle demo-bundle --member demo-write-gate \"${DROID_PLUGIN_ROOT}/scripts/factory_droid.py\" --gate \"${DROID_PLUGIN_ROOT}/scripts/demo-write-gate/gate.json\" --stop",
+            "timeout": 45
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${DROID_PLUGIN_ROOT}/scripts/launch.sh\" \"${DROID_PLUGIN_ROOT}/scripts/chock_bundle.py\" --verify \"${DROID_PLUGIN_ROOT}/scripts/factory_droid.py\" --gate \"${DROID_PLUGIN_ROOT}/scripts/chock-guardrails-protect/gate.json\" --stop",
+            "timeout": 45
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || { echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }; sh' chock-sh \"${DROID_PLUGIN_ROOT}/scripts/launch.sh\" \"${DROID_PLUGIN_ROOT}/scripts/chock_bundle.py\" --session-start \"${DROID_PLUGIN_ROOT}/scripts/factory_droid.py\"",
+            "timeout": 45
+          }
+        ]
+      }
+    ]
+  }
+}

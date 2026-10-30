@@ -105,6 +105,8 @@ def test_sync_recognises_legacy_runtime_names_as_its_own() -> None:
     settings = json.loads((repo / ".claude" / "settings.json").read_text(encoding="utf-8"))
     pre_tool_use = settings["hooks"]["PreToolUse"]
     session_start = settings["hooks"]["SessionStart"]
+    assert pre_tool_use[-1]["hooks"][0]["command"].endswith("--stop-check"), "the repo stop check, last"
+    pre_tool_use = pre_tool_use[:-1]
     assert len(pre_tool_use) == 1, (
         f"legacy pretooluse.py entry must be replaced, not kept beside the new one: {pre_tool_use}"
     )

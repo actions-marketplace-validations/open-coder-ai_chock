@@ -10,8 +10,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+from runtime_support import write_runtime
+
 from chock.gate import runtime_bundle
-from chock.hooks.in_agent_install import INTERPRETER_PLACEHOLDER
+from chock.hooks.launch import LAUNCHER_REL, hook_command
 from chock.hooks.sessionstart_install import install_sessionstart_hook
 
 FRAMEWORK_ROOT = Path(__file__).resolve().parents[1]
@@ -27,8 +29,9 @@ SESSION_START_PAYLOAD = json.dumps(
 
 
 def _rendered_runtime(tmp_path: Path) -> Path:
-    path = tmp_path / "claude_code.py"
-    path.write_text(runtime_bundle.render("claude_code"), encoding="utf-8")
+    path = tmp_path / ".chock" / "bin" / "claude_code.py"  # where `chock sync` vendors it: the sync route arms
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_runtime(path, "claude_code")
     return path
 
 
@@ -46,16 +49,18 @@ def _entry_command(settings: dict) -> str:
     return settings["hooks"]["SessionStart"][-1]["hooks"][0]["command"]
 
 
-def test_install_bakes_interpreter_and_vendors_runtime() -> None:
+def test_install_writes_the_launcher_form_and_vendors_runtime() -> None:
     repo = _bare_repo()
     assert install_sessionstart_hook(repo) is True
     command = _entry_command(_settings(repo))
-    assert INTERPRETER_PLACEHOLDER not in command
-    assert sys.executable in command
+    assert command == hook_command(".chock/bin/claude_code.py")
+    assert sys.executable not in command, "no interpreter path may be committed"
+    assert "${" not in command
     vendored = repo / ".chock" / "bin" / "claude_code.py"
     assert vendored.read_text(encoding="utf-8") == runtime_bundle.render("claude_code"), (
         "vendored copy must match the render exactly"
     )
+    assert (repo / LAUNCHER_REL).is_file(), "the arm command runs through the launcher"
 
 
 def test_reinstall_is_a_no_op() -> None:
@@ -78,43 +83,36 @@ def test_adopter_sessionstart_entries_survive() -> None:
     assert len(entries) == 2
 
 
-def _fake_but_real_interpreter(tmp_path: Path) -> str:
-    """A path that is not `sys.executable` but genuinely resolves on this machine."""
-    import shutil
-
-    fake = tmp_path / "another-machine-python3"
-    shutil.copy(sys.executable, fake)
-    fake.chmod(0o755)
-    return str(fake)
-
-
-def test_committed_entry_from_another_machine_is_kept_byte_for_byte(tmp_path: Path) -> None:
+def test_reinstall_on_another_machine_is_a_no_op(monkeypatch) -> None:
+    """Nothing machine-specific is written, so a different interpreter changes nothing."""
     repo = _bare_repo()
     install_sessionstart_hook(repo)
-    settings_path = repo / ".claude" / "settings.json"
-    settings = _settings(repo)
-    hook = settings["hooks"]["SessionStart"][0]["hooks"][0]
-    other = _fake_but_real_interpreter(tmp_path)
-    hook["command"] = f'"{other}"' + hook["command"][hook["command"].index(' "') :]
-    settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
-    before = settings_path.read_text(encoding="utf-8")
+    before = (repo / ".claude" / "settings.json").read_bytes()
+    monkeypatch.setattr(sys, "executable", "/opt/elsewhere/bin/python3")
     assert install_sessionstart_hook(repo) is False
-    assert settings_path.read_text(encoding="utf-8") == before
+    assert (repo / ".claude" / "settings.json").read_bytes() == before
 
 
-def test_reinstalls_when_the_committed_interpreter_no_longer_resolves(tmp_path: Path) -> None:
+def test_an_old_baked_entry_is_replaced_and_foreign_entries_kept() -> None:
     repo = _bare_repo()
-    install_sessionstart_hook(repo)
     settings_path = repo / ".claude" / "settings.json"
-    settings = _settings(repo)
-    hook = settings["hooks"]["SessionStart"][0]["hooks"][0]
-    hook["command"] = (
-        '"/usr/local/bin/definitely-not-a-real-interpreter3"' + hook["command"][hook["command"].index(' "') :]
-    )
-    settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+    settings_path.parent.mkdir(parents=True)
+    theirs = {"hooks": [{"type": "command", "command": "echo hello"}]}
+    old = {
+        "hooks": [
+            {
+                "type": "command",
+                "command": '"/usr/bin/python3" "${CLAUDE_PROJECT_DIR}/.chock/bin/claude_code.py"',
+                "timeout": 300,
+            }
+        ]
+    }
+    settings_path.write_text(json.dumps({"hooks": {"SessionStart": [theirs, old]}}), encoding="utf-8")
     assert install_sessionstart_hook(repo) is True
-    command = _entry_command(_settings(repo))
-    assert sys.executable in command, "a dead interpreter path must be rebaked to one that runs here"
+    entries = _settings(repo)["hooks"]["SessionStart"]
+    assert entries[0] == theirs
+    assert len(entries) == 2, "the old entry is recognised as ours and replaced, not duplicated"
+    assert entries[1]["hooks"][0]["command"] == hook_command(".chock/bin/claude_code.py")
 
 
 def _load_runtime(path: Path):
@@ -167,6 +165,8 @@ def test_adapter_instructs_when_chock_is_not_importable(tmp_path: Path, monkeypa
     context = decision["hookSpecificOutput"]["additionalContext"]
     assert "chock sync --repo ." in context
     assert "NOT installed" in context
+    # The reader is an agent, and `chock sync` refuses an agent's shell: the advice is to ask a person.
+    assert "a person runs, from their own shell" in context and "Ask them to run it" in context
 
 
 def test_adapter_arms_a_fresh_clone_end_to_end(tmp_path: Path) -> None:

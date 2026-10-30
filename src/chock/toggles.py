@@ -14,6 +14,8 @@ from chock.compile.levels import Grade, render_grade
 from chock.compile.surfaces import AGENTS_ARG_REQUIRED_MSG
 from chock.config import agents_from_config as _agents_from_config
 from chock.config import load_config, policy_status, set_disabled
+from chock.display import inert
+from chock.gate.build import CatastrophicPatternError
 from chock.index.cli import cmd_refresh
 from chock.manifest import ManifestSourceError, load_manifest
 from chock.output import error, warn
@@ -24,7 +26,7 @@ from chock.scaffold.recompile import BookkeepingError, compiled_differences, rec
 
 def _cell(value: Any) -> str:
     """One coverage cell as a table prints it; a pre-cell coverage.json still reads as its word."""
-    return value if isinstance(value, str) else render_grade(Grade(**value))
+    return value if isinstance(value, str) else render_grade(Grade.read(value))
 
 
 def _parser_fail(parser: argparse.ArgumentParser, message: str) -> NoReturn:
@@ -150,7 +152,7 @@ def policies_main(argv: list[str] | None) -> int:
             cov_str = next(iter(cov.values()))
         else:
             cov_str = "; ".join(f"{a}: {v}" for a, v in sorted(cov.items()))
-        rows.append((policy_id, status["state"], cov_str, "yes" if status["mandatory"] else "no"))
+        rows.append((inert(policy_id), inert(status["state"]), inert(cov_str), "yes" if status["mandatory"] else "no"))
 
     if not rows:
         print("No policies installed. This repo enforces nothing.")
@@ -209,7 +211,7 @@ def recompile_main(argv: list[str] | None) -> int:
 
     try:
         coverage = recompile(repo_root, agents, skip_hooks=args.skip_hooks)
-    except BookkeepingError as exc:
+    except (BookkeepingError, CatastrophicPatternError) as exc:
         error(str(exc))
         return 1
     print(f"Recompiled {len(coverage)} policies")

@@ -1,8 +1,8 @@
 """The packaged gate in every hook-carrying store, reaching exactly what agentseam records.
 
 Claude Code records a write-tool vocabulary and a blocking turn-end hook, so its package gates
-both. Codex, Devin and Copilot record no write tools but block at the turn's end, so their
-packages carry the gate at `Stop` alone and say so. Cursor records `Write` at its generic
+both, as does Codex with `apply_patch`. Devin and Copilot record no write tools but block at
+the turn's end, so their packages carry the gate at `Stop` alone and say so. Cursor records `Write` at its generic
 `preToolUse` and a turn-end hook that hands a refusal back as a follow-up message, so its
 package gates the write and reports at `stop`, in Cursor's own flat entry shape. None of that
 is typed here: the test asks agentseam the same question the emitter does.
@@ -18,10 +18,12 @@ from types import SimpleNamespace
 
 import pytest
 from conftest import init_repo
+from runtime_support import load_runtime
 from test_plugin_gate import POLICY_ID, SCRIPT, _manifest
 from test_plugin_gate import policy as shared_policy
 
-from chock.gate import runtime_bundle
+from chock.gate.stop_reentry import REENTRY_CAP
+from chock.hooks import stop_check
 from chock.plugin import codex, copilot, cursor, devin
 from chock.plugin.gate_package import gate_reach, gate_reaches
 
@@ -54,13 +56,14 @@ def test_the_gate_reaches_what_the_vendor_records(gate_policy, tmp_path: Path, s
         assert not (out / "scripts").exists()
         return
 
-    hooks = _hooks_doc(out, vendor, hooks_rel)
+    hooks = stop_check.without(_hooks_doc(out, vendor, hooks_rel))
     events = set(hooks)
     assert ("PreToolUse" in events or "preToolUse" in events) == (matcher is not None)
     assert ("Stop" in events or "stop" in events) == stop
     for entries in hooks.values():
         entry = entries[0]
         assert "--gate" in (entry["command"] if "command" in entry else entry["hooks"][0]["command"])
+    assert stop_check.STOP_CHECK_FLAG in (out / hooks_rel).read_text(encoding="utf-8")
     gate = json.loads((out / "scripts" / "gate.json").read_text(encoding="utf-8"))
     assert gate["script_base"] == "gate" and gate["params"]["script"] == f"implementations/{SCRIPT}"
     assert (out / "scripts" / "gate.py").exists()
@@ -70,13 +73,13 @@ def test_the_gate_reaches_what_the_vendor_records(gate_policy, tmp_path: Path, s
 def test_which_vendors_the_gate_reaches_is_agentseam_s_answer() -> None:
     """Pinned so a change upstream surfaces here rather than silently widening or narrowing a package."""
     assert gate_reach("claude_code") == ("Write|Edit|MultiEdit|NotebookEdit", True)
-    assert gate_reach("codex_cli") == (None, True)
+    assert gate_reach("codex_cli") == ("apply_patch", True)
     assert gate_reach("devin") == (None, True)
     assert gate_reach("vscode_copilot") == (None, True)
     assert gate_reach("cursor") == ("Write", True)
 
 
-@pytest.mark.parametrize("store", ["codex", "devin", "copilot"])
+@pytest.mark.parametrize("store", ["devin", "copilot"])
 def test_a_stop_only_package_says_the_write_is_not_judged(gate_policy, tmp_path: Path, store: str) -> None:
     vendor, build, _, _ = STORES[store]
     manifest = _manifest()
@@ -106,20 +109,22 @@ def _run_cursor_hook(out: Path, repo: Path, payload: str) -> subprocess.Complete
         env={**os.environ, "CURSOR_PLUGIN_ROOT": str(out)},
         capture_output=True,
         text=True,
+        encoding="utf-8",
         input=payload,
         check=False,
     )
 
 
 def test_the_cursor_package_gates_the_write_flat_and_reports_at_stop(gate_policy, tmp_path: Path) -> None:
-    """Cursor's hooks file is its own shape: flat entries, no matcher, no failClosed, `version: 1`."""
+    """Cursor's hooks file is its own shape: flat entries, no matcher, failClosed on the pre-tool gate, `version: 1`."""
     manifest = _manifest()
     out = tmp_path / "dist" / "cursor" / POLICY_ID
     cursor.build_cursor_plugin(gate_policy(manifest), manifest, tmp_path, out)
     doc = json.loads((out / cursor.HOOKS_REL).read_text(encoding="utf-8"))
     assert doc["version"] == 1 and set(doc["hooks"]) == {"preToolUse", "stop"}
-    for entries in doc["hooks"].values():
-        assert set(entries[0]) == {"command", "timeout"}, "flat, unmatched, and never failClosed"
+    for event, entries in doc["hooks"].items():
+        expected = {"command", "timeout", "failClosed"} if event == "preToolUse" else {"command", "timeout"}
+        assert set(entries[0]) == expected, "flat, unmatched, failClosed on the pre-tool gate only"
     description = json.loads((out / ".cursor-plugin" / "plugin.json").read_text(encoding="utf-8"))["description"]
     assert "PreToolUse and Stop hooks" in description and "follow-up message" in description
     assert cursor.POSTURE_ADVISORY not in description
@@ -147,7 +152,11 @@ def test_the_cursor_package_runs_against_the_witnessed_payloads(gate_policy, tmp
     assert stop.returncode == 0, stop.stderr
     assert "Leak.java" in json.loads(stop.stdout)["followup_message"]
     again = _run_cursor_hook(out, repo, _cursor_payload(repo, hook_event_name="stop", status="completed", loop_count=1))
-    assert again.returncode == 0 and again.stdout.strip() == "", "a follow-up that re-entered once is not sent twice"
+    assert "Leak.java" in json.loads(again.stdout)["followup_message"], "the secret is still there"
+    last = _cursor_payload(repo, hook_event_name="stop", status="completed", loop_count=REENTRY_CAP + 1)
+    ended = _run_cursor_hook(out, repo, last)
+    assert ended.returncode == 0 and ended.stdout.strip() == "", "past the cap no follow-up: the turn ends"
+    assert "still on disk" in ended.stderr
 
 
 @pytest.mark.parametrize("store", sorted(STORES))
@@ -169,8 +178,7 @@ def test_codex_s_packaged_gate_reads_the_turn_from_where_the_agent_works(gate_po
     repo.mkdir()
     init_repo(repo)
     (repo / "Leak.java").write_text("FORBIDDEN\n", encoding="utf-8")
-    ns: dict = {"__name__": "chock_runtime_under_test"}
-    exec(compile(runtime_bundle.render("codex_cli"), "<codex_cli bundle>", "exec"), ns)  # noqa: S102 -- the rendered runtime is the unit under test
+    ns = load_runtime(tmp_path / "runtime", "codex_cli")
     event = SimpleNamespace(event="stop", tool=None, command=None, path=None, content=None, cwd=str(repo), raw={})
     refused = ns["evaluate_gate"](["--gate", str(out / "scripts" / "gate.json")], event)
     assert refused is not None and "Leak.java" in refused[1]

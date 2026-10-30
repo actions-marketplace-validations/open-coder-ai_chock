@@ -6,9 +6,11 @@ from __future__ import annotations
 
 import re
 
-from chock.compile.emitters import ci, git_hook, in_agent
-from chock.gate import runtime_bundle
-from chock.hooks import installers
+import pytest
+
+from chock.compile.emitters import ci, git_hook
+from chock.gate import runtime_bundle, runtime_shared
+from chock.hooks import installers, launch
 
 _TOKEN_RE = re.compile(r"__[A-Z0-9_]+__")
 
@@ -41,26 +43,22 @@ def test_git_hook_shim_template_tokens() -> None:
 def test_git_hook_script_shim_template_tokens() -> None:
     rendered = _assert_round_trips(
         git_hook.SCRIPT_SHIM_TEMPLATE,
-        {"__POLICY_ID__": "demo-policy", "__GUARD_REL__": "policies/demo/implementations/demo-pre-commit.py"},
+        {
+            "__POLICY_ID__": "demo-policy",
+            "__GUARD_REL__": "policies/demo/implementations/demo-pre-commit.py",
+            "__ARGV__": "",
+            "__EVENT__": "pre-commit",
+        },
     )
     assert "demo-policy" in rendered
     assert "demo-pre-commit.py" in rendered
 
 
-def test_in_agent_bash_template_tokens() -> None:
-    rendered = _assert_round_trips(
-        in_agent._BASH_TEMPLATE, {"__ADAPTER__": ".chock/bin/x.py", "__GUARD__": "impl/x.sh"}
-    )
-    assert ".chock/bin/x.py" in rendered
-    assert "impl/x.sh" in rendered
-
-
-def test_in_agent_powershell_template_tokens() -> None:
-    rendered = _assert_round_trips(
-        in_agent._POWERSHELL_TEMPLATE, {"__ADAPTER__": ".chock/bin/x.py", "__GUARD__": "impl/x.sh"}
-    )
-    assert ".chock/bin/x.py" in rendered
-    assert "impl/x.sh" in rendered
+def test_launcher_template_tokens() -> None:
+    rendered = _assert_round_trips(launch._TEMPLATE, {"__MIN_PYTHON__": "3, 11", "__MIN_PYTHON_TEXT__": "3.11"})
+    assert rendered == launch.launcher_text(), "launcher_text() substitutes every token"
+    assert "sys.version_info < (3, 11,)" in rendered
+    assert "Python 3.11+" in rendered
 
 
 def test_dispatcher_template_tokens() -> None:
@@ -95,18 +93,35 @@ def test_runtime_bundle_dispatch_template_token() -> None:
     assert "session_start" in rendered_branch
 
 
+@pytest.mark.parametrize("commit", ["0" * 40, None])
+def test_ci_workflow_template_tokens(monkeypatch: pytest.MonkeyPatch, commit: str | None) -> None:
+    from chock.scaffold import install_ci
+
+    _assert_round_trips(install_ci.WORKFLOW_TEMPLATE, {"__ENGINE_SPEC__": "chock", "__ENGINE_PIN_NOTE__": "note"})
+    for pin in install_ci.PIN.values():
+        assert set(_TOKEN_RE.findall(pin["spec"] + pin["note"])) <= {"__COMMIT__", "__VERSION__"}
+    monkeypatch.setattr(install_ci, "engine_commit", lambda: commit)
+    assert not _TOKEN_RE.search(install_ci.render())
+
+
+def test_every_rendered_runtime_file_carries_no_orphan_token() -> None:
+    """The shared runtime and every entry, with the loader's pin and file name filled in."""
+    for agent in runtime_bundle.RUNTIME_AGENTS:
+        for name, text in runtime_bundle.runtime_files(agent).items():
+            assert not _TOKEN_RE.search(text), f"{agent}: unfilled placeholder in {name}"
+
+
 def test_static_templates_carry_no_orphan_tokens() -> None:
     """Templates with no placeholders at all must stay that way."""
-    from chock.scaffold import agents_md, install_ci, skills_bridge, templates
+    from chock.scaffold import agents_md, skills_bridge, templates
 
     for text in (
-        install_ci.WORKFLOW_TEMPLATE,
         templates.GITATTRIBUTES_TEMPLATE,
         templates.POLICIES_GUARDRAIL,
         templates.SKILLS_GUARDRAIL,
         agents_md.POINTER_BLOCK,
         skills_bridge._BRIDGE_MARKER_BODY,
-        runtime_bundle._IMPORTS,
+        runtime_shared._IMPORTS,
         runtime_bundle._SESSION_START_BRANCH,
         runtime_bundle._SESSION_START_ORCHESTRATION,
     ):

@@ -8,6 +8,22 @@
 # platform. Both halves are required: the attribute governs checkout, the writer
 # governs regeneration.
 
+# Catch-all, not a list: a file with no extension, or an extension added later, must not
+# be the one that checks out CRLF. The rules below document intent and pin the cases.
+* text=auto eol=lf
+
+# Binaries are named so git's heuristic is not trusted for them.
+*.png binary
+*.gif binary
+*.mp4 binary
+*.ico binary
+*.jpg binary
+*.jpeg binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+.coverage binary
+
 .git/hooks/** text eol=lf
 *.sh text eol=lf
 *.ps1 text eol=lf

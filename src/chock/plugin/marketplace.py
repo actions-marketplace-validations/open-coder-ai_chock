@@ -27,6 +27,7 @@ from chock.plugin.marketplace_devin import (
     build_devin_root_manifest,
     devin_root_manifest_differences,
 )
+from chock.plugin.marketplace_repo import repo_files_differences, write_repo_files
 
 __all__ = ["CATALOG_PAGE", "DESCRIPTION", "INDEX_PATHS", "LOCKFILE_NAME", "main"]
 
@@ -81,6 +82,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             + lock_differences(dist_root)
             + catalog_page_differences(dist_root, args.tree)
+            + repo_files_differences(dist_root, args.tree)
         )
         if differences:
             print(f"Marketplace index is out of date ({len(differences)} difference(s)):")
@@ -110,7 +112,9 @@ def main(argv: list[str] | None = None) -> int:
     write_generated(dist_root / LOCKFILE_NAME, lock)
 
     write_generated(dist_root / CATALOG_PAGE, render_catalog_page(dist_root, args.tree))
+    repo_files = write_repo_files(dist_root, args.tree)
 
     print(f"Wrote {LOCKFILE_NAME}: sha256 per published plugin directory")
     print(f"Wrote {CATALOG_PAGE}: {len(entries)} plugins with their posture")
+    print(f"Wrote {' and '.join(p.as_posix() for p in repo_files)}")
     return 0

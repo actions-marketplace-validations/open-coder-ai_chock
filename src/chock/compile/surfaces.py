@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from chock.compile.levels import (
+    AT_COMMIT,
     IN_AGENT_TODAY,
     STOP_TODAY,
     Grade,
@@ -51,7 +52,7 @@ del _agent, _surface
 #: answer: grok and windsurf can observe a finished turn but not refuse one, and four of the
 #: agents here (antigravity, codex_cli, devin, tabnine) have no write vocabulary recorded, so
 #: neither set contains the other. `stop` takes no matcher, so no vendor is held back for want of a tool vocabulary;
-#: vscode_copilot is held back for want of a witnessed key (chock.vendors.stop_vendors).
+#: vscode_copilot's `Stop` key in chock's own hooks file is witnessed (chock.vendors.stop_vendors).
 for _agent in STOP_TODAY:
     if not _stop_can_block(_agent):  # pragma: no cover - membership already derives from can_block
         _msg = (
@@ -87,17 +88,17 @@ def coverage_cell(
     if not active:
         return Grade("none", None, witnessed=False)
 
+    commit_time = active & INSTALLED_SURFACES & {Surface.GIT_HOOK}
+    if ci_gate_installed:
+        commit_time |= active & INSTALLED_SURFACES & {Surface.CI_GATE}
     for installed, surface in (
         (pre_tool_use_installed, Surface.PRE_TOOL_USE),
         (agent_hooks_installed, Surface.AGENT_HOOKS),
     ):
         if installed and surface in active and agent in IN_AGENT_TODAY:
-            return in_agent_grade(agent, surface.value)
-    commit_time = active & INSTALLED_SURFACES & {Surface.GIT_HOOK}
-    if ci_gate_installed:
-        commit_time |= active & INSTALLED_SURFACES & {Surface.CI_GATE}
+            return in_agent_grade(agent, surface.value, at_commit=bool(commit_time))
     if commit_time:
-        return Grade("enforced-at-commit", None, witnessed=False)
+        return Grade(AT_COMMIT, None, witnessed=False, at_commit=True)
     if Surface.AMBIENT_RULE in active & INSTALLED_SURFACES:
         return Grade("advisory", None, witnessed=False)
     return Grade("none", None, witnessed=False)

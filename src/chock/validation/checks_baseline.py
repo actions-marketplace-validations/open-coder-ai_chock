@@ -10,8 +10,13 @@ from typing import Any
 
 import yaml
 
+from chock import yamlio
 from chock.config import policy_status
+from chock.gate.runner import ROLLOUT_RANK, committed_rollout, rollout_from_text
+from chock.validation.guardrails_baseline import check_guardrails
 from chock.validation.report import Finding, Report, emit
+from chock.validation.selection_baseline import KINDS, SelectionInvalidError, loosened
+from chock.validation.selection_source import NOT_COMPARED, selection_text
 
 CONFIG_REL = Path(".chock") / "config.yaml"
 _CATEGORY = "policy_baseline"
@@ -32,7 +37,7 @@ def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess:
 
 def _parse(text: str, where: str) -> dict[str, Any]:
     try:
-        loaded = yaml.safe_load(text)
+        loaded = yamlio.safe_load(text)
     except yaml.YAMLError as exc:
         msg = f"{CONFIG_REL.as_posix()} at {where} is not valid YAML: {exc}"
         raise BaselineError(msg) from exc
@@ -99,13 +104,51 @@ def weakenings(base: dict[str, Any] | None, head: dict[str, Any] | None) -> list
     return found
 
 
+def rollout_weakening(repo_root: Path, base: str) -> Weakening | None:
+    """A rollout level the head lowers below the base's, read the way the runtime reads it.
+
+    The runtime reads `rollout:` line by line, without YAML; comparing parsed YAML here would let a
+    config that the two read differently (a quoted multi-line value, a file that is not a mapping)
+    run at observe while this check saw enforce. A symlinked config counts at its target's level,
+    the looser reading, so a link can never hide a downgrade from this check.
+    """
+    path = Path(repo_root) / CONFIG_REL
+    try:
+        now = rollout_from_text(path.read_text(encoding="utf-8")) if path.is_file() else rollout_from_text("")
+    except (OSError, UnicodeDecodeError):
+        now = rollout_from_text("")
+    was = committed_rollout(Path(repo_root), base)
+    return Weakening("rollout", was, now) if ROLLOUT_RANK[now] < ROLLOUT_RANK[was] else None
+
+
+def check_selections(repo_root: Path, base: str, report: Report) -> None:
+    """One error per rule verdict the rule-selection files loosen against `base`, or cannot be read."""
+    for kind in KINDS:
+        path = str(repo_root / kind.filename)
+        try:
+            base_text = selection_text(repo_root, kind, base)
+            head_text = selection_text(repo_root, kind, None)
+            found = loosened(kind, base_text, head_text)
+        except (SelectionInvalidError, OSError, UnicodeDecodeError) as exc:
+            report.add(Finding(path, _CATEGORY, "error", f"{exc}{NOT_COMPARED}"))
+            continue
+        for item in found:
+            msg = (
+                f"{item.render()} -- looser than {base}. A rule's verdict is loosened in a pull request "
+                "a human approves, never as a side effect of the change that needed it gone."
+            )
+            report.add(Finding(path, _CATEGORY, "error", msg))
+
+
 def check_baseline(repo_root: Path, base: str, report: Report) -> None:
-    """One error per policy `.chock/config.yaml` weakens relative to `base`."""
+    """One error per policy `.chock/config.yaml` weakens against `base`, a lowered rollout, a loosened rule, a guardrail off."""
     repo_root = Path(repo_root)
     try:
         found = weakenings(config_at(repo_root, base), config_in_worktree(repo_root))
+        lowered = rollout_weakening(repo_root, base)
+        found = [lowered, *found] if lowered else found
     except BaselineError as exc:
-        report.add(Finding(str(repo_root / CONFIG_REL), _CATEGORY, "error", f"{exc} -- nothing was compared"))
+        report.add(Finding(str(repo_root / CONFIG_REL), _CATEGORY, "error", f"{exc}{NOT_COMPARED}"))
         return
     for weakening in found:
         report.add(
@@ -117,6 +160,8 @@ def check_baseline(repo_root: Path, base: str, report: Report) -> None:
                 "pull request a human approves, never as a side effect of the change that needed it gone.",
             )
         )
+    check_selections(repo_root, base, report)
+    check_guardrails(repo_root, base, report)
 
 
 def main(argv: list[str] | None = None) -> int:

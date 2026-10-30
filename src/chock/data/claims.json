@@ -78,5 +78,37 @@
     "honours": false,
     "evidence": "tested",
     "test": "tests/test_guard_fail_to_ask.py::test_a_crashed_guard_asks_rather_than_allowing"
+  },
+  {
+    "agent": "factory_droid",
+    "claim": "honours_ask",
+    "verdict": "deny",
+    "honours": false,
+    "evidence": "tested",
+    "test": "tests/test_guard_fail_to_ask.py::test_a_crashed_guard_asks_rather_than_allowing"
+  },
+  {
+    "agent": "goose",
+    "claim": "honours_ask",
+    "verdict": "block",
+    "honours": false,
+    "evidence": "tested",
+    "test": "tests/test_guard_fail_to_ask.py::test_a_crashed_guard_asks_rather_than_allowing"
+  },
+  {
+    "agent": "openhands",
+    "claim": "honours_ask",
+    "verdict": "deny",
+    "honours": false,
+    "evidence": "tested",
+    "test": "tests/test_guard_fail_to_ask.py::test_a_crashed_guard_asks_rather_than_allowing"
+  },
+  {
+    "agent": "mistral_vibe",
+    "claim": "honours_ask",
+    "verdict": "deny",
+    "honours": false,
+    "evidence": "tested",
+    "test": "tests/test_guard_fail_to_ask.py::test_a_crashed_guard_asks_rather_than_allowing"
   }
 ]

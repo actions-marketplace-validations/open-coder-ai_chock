@@ -11,57 +11,16 @@ from __future__ import annotations
 
 import copy
 import json
-import re
-import sys
 from pathlib import Path
 from typing import NamedTuple
 
 from chock import vendors
-from chock.emit import write_generated_json
+from chock.hooks import heartbeat, stop_check
 from chock.hooks.in_agent_generic import load_config as _load_config
 from chock.hooks.runtime_vendor import owned_markers, runtime_rel, vendor_runtime
+from chock.scaffold.mcp_write import _lstat_checked, write_file
 
-INTERPRETER_PLACEHOLDER = "@CHOCK_PYTHON@"
-
-_COMMAND_TAIL_RE = re.compile(r'^.*?(?="\$\{CLAUDE_PROJECT_DIR\}[^"]*?/\.chock/bin/[a-z_]+\.py")')
-_BIN_MARKER = "/.chock/bin/"
-
-
-def bake_interpreter(fragment: dict) -> dict:
-    """A copy of `fragment` with the interpreter placeholder replaced by this machine's python."""
-    exe = f'"{sys.executable}"'
-    baked = copy.deepcopy(fragment)
-    for hook in baked.get("hooks", []) or []:
-        if isinstance(hook, dict) and isinstance(hook.get("command"), str):
-            hook["command"] = hook["command"].replace(INTERPRETER_PLACEHOLDER, exe)
-    return baked
-
-
-def normalize_fragment(fragment: dict) -> dict:
-    """A copy of `fragment` with the interpreter token normalised to the placeholder."""
-    normalized = copy.deepcopy(fragment)
-    for hook in normalized.get("hooks", []) or []:
-        command = hook.get("command") if isinstance(hook, dict) else None
-        if isinstance(command, str) and _BIN_MARKER in command:
-            hook["command"] = _COMMAND_TAIL_RE.sub(f"{INTERPRETER_PLACEHOLDER} ", command, count=1)
-    return normalized
-
-
-def interpreter_runs_here(fragment: dict) -> bool:
-    """Whether every baked interpreter in `fragment` still resolves on this machine."""
-    for hook in fragment.get("hooks", []) or []:
-        command = hook.get("command") if isinstance(hook, dict) else None
-        if not isinstance(command, str) or _BIN_MARKER not in command:
-            continue
-        match = _COMMAND_TAIL_RE.match(command)
-        if not match:
-            continue
-        interpreter = match.group(0).strip().strip('"')
-        if not interpreter or interpreter == INTERPRETER_PLACEHOLDER:
-            continue
-        if not Path(interpreter).is_file():
-            return False
-    return True
+_CONFIG_MODE = 0o600
 
 
 class Wiring(NamedTuple):
@@ -103,6 +62,20 @@ MERGED = {
                 flat=False,
                 report_key="matcher",
             ),
+            # The session-log recorders of a `tool_call` script gate: after a call, and instead
+            # of that when the call failed (Claude fires PostToolUseFailure, not PostToolUse).
+            Wiring(
+                event=vendors.wire_event("claude_code", "post_tool"),
+                fragment_glob="*/pre-tool-use/posttooluse.json",
+                flat=False,
+                report_key="matcher",
+            ),
+            Wiring(
+                event=str(vendors.tool_failure_event("claude_code")),
+                fragment_glob="*/pre-tool-use/posttoolusefailure.json",
+                flat=False,
+                report_key="matcher",
+            ),
         ),
         unlink_runtime_when_empty=True,
         write_when_absent=True,
@@ -120,7 +93,8 @@ MERGED = {
             # gate judges the file a Write would leave, the shell guard judges a command.
             Wiring(
                 event=vendors.pre_tool_event("cursor"),
-                fragment_glob="*/pre-tool-use/cursor-write-hooks.json",
+                # cursor-write-hooks.json and cursor-tool-call-hooks.json: both land under preToolUse.
+                fragment_glob="*/pre-tool-use/cursor-[wt]*-hooks.json",
                 flat=True,
                 report_key="command",
             ),
@@ -130,16 +104,24 @@ MERGED = {
                 flat=True,
                 report_key="command",
             ),
+            Wiring(
+                event=vendors.wire_event("cursor", "post_tool"),
+                fragment_glob="*/pre-tool-use/cursor-post-hooks.json",
+                flat=True,
+                report_key="command",
+            ),
+            Wiring(
+                event=str(vendors.tool_failure_event("cursor")),
+                fragment_glob="*/pre-tool-use/cursor-postfailure-hooks.json",
+                flat=True,
+                report_key="command",
+            ),
         ),
         unlink_runtime_when_empty=False,
         write_when_absent=False,
         label="Cursor hook entr(y/ies) in .cursor/hooks.json",
     ),
 }
-
-
-def _wrap(entry: dict) -> dict:
-    return {"hooks": [copy.deepcopy(entry)]}
 
 
 def _compiled(repo_root: Path, wiring: Wiring) -> list[dict]:
@@ -162,11 +144,6 @@ def _compiled(repo_root: Path, wiring: Wiring) -> list[dict]:
     return found
 
 
-def _norm_entry(entry: dict, wiring: Wiring) -> dict:
-    """`entry` with its interpreter normalised, in whichever shape this wiring speaks."""
-    return normalize_fragment(_wrap(entry))["hooks"][0] if wiring.flat else normalize_fragment(entry)
-
-
 def _ours_under(entry: dict, wiring: Wiring, markers: tuple[str, ...]) -> bool:
     """Whether this installed entry is one chock put there, by the vendored-runtime path in it."""
     if wiring.flat:
@@ -183,19 +160,11 @@ def _merge_event(hooks: dict, wiring: Wiring, wanted: list[dict], markers: tuple
     """Replace chock's entries under one event key in place, keeping entries that are not ours."""
     existing = hooks.get(wiring.event)
     existing = existing if isinstance(existing, list) else []
-    ours_before = [e for e in existing if _ours_under(e, wiring, markers)]
     kept = [e for e in existing if not _ours_under(e, wiring, markers)]
 
-    def _install_form(entry: dict) -> dict:
-        target = _norm_entry(entry, wiring)
-        for installed in ours_before:
-            runs = interpreter_runs_here(_wrap(installed) if wiring.flat else installed)
-            if _norm_entry(installed, wiring) == target and runs:
-                return installed
-        return bake_interpreter(_wrap(entry))["hooks"][0] if wiring.flat else bake_interpreter(entry)
-
+    # Ours are replaced wholesale: an entry carries nothing machine-specific worth keeping.
     if wanted:
-        hooks[wiring.event] = kept + [_install_form(entry) for entry in wanted]
+        hooks[wiring.event] = kept + [copy.deepcopy(entry) for entry in wanted]
     elif kept:
         hooks[wiring.event] = kept
     else:
@@ -219,7 +188,9 @@ def install_merged(repo_root: Path, vendor: str, *, uninstall: bool = False) -> 
     repo_root = Path(repo_root)
     markers = owned_markers(vendor)
 
-    config_path = repo_root / vendors.config_path(vendor)
+    config_rel = Path(vendors.config_path(vendor))
+    config_path = repo_root / config_rel
+    _lstat_checked(repo_root, config_rel.as_posix())
     settings = _load_config(config_path)
     hooks = settings.setdefault("hooks", {}) if isinstance(settings.get("hooks", {}), dict) else {}
     settings["hooks"] = hooks
@@ -227,11 +198,13 @@ def install_merged(repo_root: Path, vendor: str, *, uninstall: bool = False) -> 
         settings.setdefault(key, value)
 
     reported: list[str] = []
-    installed_any = False
-    for wiring in vendor_wiring.wirings:
-        wanted = [] if uninstall else _compiled(repo_root, wiring)
-        installed_any = installed_any or bool(wanted)
-        reported.extend(_merge_event(hooks, wiring, wanted, markers))
+    wanted_by = [([] if uninstall else _compiled(repo_root, wiring)) for wiring in vendor_wiring.wirings]
+    installed_any = any(wanted_by)
+    stopping = _stop_check_entries(vendor) if installed_any else {}
+    for wiring, wanted in zip(vendor_wiring.wirings, wanted_by, strict=True):
+        stops = stopping.get(wiring.event, [])  # last, matching every tool, whatever the policies match
+        reported.extend(_merge_event(hooks, wiring, [*wanted, *stops], markers)[: len(wanted)])
+    _merge_heartbeat(hooks, vendor, markers, wanted=installed_any)
 
     if installed_any or _runtime_referenced(hooks, vendor):
         vendor_runtime(repo_root, vendor)
@@ -245,9 +218,25 @@ def install_merged(repo_root: Path, vendor: str, *, uninstall: bool = False) -> 
         if not vendor_wiring.write_when_absent and not hooks and not config_path.exists():
             return []
 
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    write_generated_json(config_path, settings)
+    write_file(repo_root, config_rel.as_posix(), json.dumps(settings, indent=2).encode("utf-8"), _CONFIG_MODE)
     return reported
+
+
+def _stop_check_entries(vendor: str) -> dict[str, list[dict]]:
+    """The stop check's entries by event key: wired with any of chock's, whatever tools the policies match."""
+    if vendor == "claude_code":
+        return {vendors.pre_tool_event(vendor): [stop_check.claude_entry()]}
+    return stop_check.cursor_entries()
+
+
+def _merge_heartbeat(hooks: dict, vendor: str, markers: tuple[str, ...], *, wanted: bool) -> None:
+    """chock's session-start heartbeat entry, while any other entry of chock's is installed; none otherwise."""
+    beat = heartbeat.sync_doc(vendor)
+    if beat is None:
+        return
+    event = vendors.wire_event(vendor, "session_start")
+    flat = MERGED[vendor].wirings[0].flat
+    _merge_event(hooks, Wiring(event, "", flat, "command"), list(beat["hooks"][event]) if wanted else [], markers)
 
 
 def _runtime_referenced(hooks: dict, vendor: str) -> bool:
@@ -261,7 +250,7 @@ def _runtime_referenced(hooks: dict, vendor: str) -> bool:
 
 
 def installed_merged_ids(repo_root: Path, vendor: str) -> set[str]:
-    """Policy ids whose compiled entries are present under any event key chock wires here."""
+    """Policy ids whose compiled entries are all present, under every event key chock wires here."""
     repo_root = Path(repo_root)
     config_path = repo_root / vendors.config_path(vendor)
     if not config_path.exists():
@@ -275,19 +264,20 @@ def installed_merged_ids(repo_root: Path, vendor: str) -> set[str]:
         return set()
 
     compiled = repo_root / ".chock" / "compiled"
-    installed: set[str] = set()
+    wanted_by: set[str] = set()
+    missing: set[str] = set()
     for wiring in MERGED[vendor].wirings:
         entries = hooks.get(wiring.event)
-        if not isinstance(entries, list):
-            continue
+        entries = entries if isinstance(entries, list) else []
         for path in sorted(compiled.glob(wiring.fragment_glob)):
             try:
                 fragment = json.loads(path.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
                 continue
+            policy_id = path.parent.parent.name
             wanted = list(fragment.get(wiring.event, []) or []) if wiring.flat else [fragment]
             for candidate in wanted:
-                target = _norm_entry(candidate, wiring)
-                if any(_norm_entry(e, wiring) == target for e in entries if isinstance(e, dict)):
-                    installed.add(path.parent.parent.name)
-    return installed
+                wanted_by.add(policy_id)
+                if not any(e == candidate for e in entries if isinstance(e, dict)):
+                    missing.add(policy_id)
+    return wanted_by - missing

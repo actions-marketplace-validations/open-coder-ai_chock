@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -12,8 +11,9 @@ import pytest
 import yaml
 from conftest import baseline_policy
 
+from chock.gate.assemble import runner_source
+
 FRAMEWORK_ROOT = Path(__file__).resolve().parents[1]
-RUNNER = FRAMEWORK_ROOT / "src" / "chock" / "gate" / "runner.py"
 POLICY_ID = "verify-dependency-exists"
 POLICY = baseline_policy(POLICY_ID) / "manifest.yaml"
 
@@ -65,7 +65,7 @@ def _repo(tmp_path: Path, allowlist: str, filename: str, committed: str | None) 
     (repo / ".chock").mkdir(parents=True, exist_ok=True)
     (repo / gate["params"]["allowlist_file"]).write_text(allowlist, encoding="utf-8")
     (repo / "gate.json").write_text(json.dumps(gate), encoding="utf-8")
-    shutil.copy2(RUNNER, repo / "gate.py")
+    (repo / "gate.py").write_text(runner_source(), encoding="utf-8")
 
     if committed is not None:
         (repo / filename).write_text(committed, encoding="utf-8")
@@ -155,8 +155,8 @@ def test_malformed_manifest_does_not_block(tmp_path: Path) -> None:
     assert result.returncode == 0, f"a malformed manifest must not block:\n{result.stdout}{result.stderr}"
 
 
-def test_policy_claims_full_coverage_backed_by_the_matrix(tmp_path: Path) -> None:
-    """ASI04 may claim `full` only while every watched format is exercised above."""
+def test_policy_claims_partial_coverage_backed_by_the_matrix(tmp_path: Path) -> None:
+    """ASI04 is `partial` (an allowlist gate, not registry verification); every watched format must still be exercised above."""
     manifest = yaml.safe_load(POLICY.read_text(encoding="utf-8"))
     watched = set(manifest["hook"]["gate"]["params"]["manifests"])
     assert watched == set(FORMAT_IDS), (
@@ -164,7 +164,8 @@ def test_policy_claims_full_coverage_backed_by_the_matrix(tmp_path: Path) -> Non
         f"watched={sorted(watched)} tested={sorted(FORMAT_IDS)}"
     )
     asi04 = [c for c in manifest["compliance"]["owasp_asi"] if c.get("control") == "ASI04"]
-    assert asi04 and asi04[0]["coverage"] == "full"
+    assert asi04 and asi04[0]["coverage"] == "partial"
+    assert "NOT existence in the upstream registry" in asi04[0]["note"], "the claim must say what it does not check"
 
 
 def test_init_disables_the_policy_only_when_it_is_installed(tmp_path: Path) -> None:

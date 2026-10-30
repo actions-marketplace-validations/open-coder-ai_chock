@@ -89,6 +89,8 @@ def test_a_rule_may_declare_the_script_that_enforces_it(tmp_path: Path) -> None:
     source = baseline_policy("protect-commit-privacy")
     policy_dir = tmp_path / ".agents" / "policies" / source.name
     shutil.copytree(source, policy_dir)
+    # The baseline ships a commit-msg script for its own hook; these tests replace the hook, so drop it from the copy.
+    (policy_dir / "implementations" / f"{source.name}-commit-msg.py").unlink()
     manifest = yaml.safe_load((policy_dir / "manifest.yaml").read_text(encoding="utf-8"))
     assert manifest["artifact"] == "rule", "this test needs a rule artifact to add a hook to"
 
@@ -128,6 +130,8 @@ def test_the_cross_check_runs_inside_the_validator(tmp_path: Path) -> None:
     source = baseline_policy("protect-commit-privacy")
     policy_dir = tmp_path / ".agents" / "policies" / source.name
     shutil.copytree(source, policy_dir)
+    # The baseline ships a commit-msg script for its own hook; these tests replace the hook, so drop it from the copy.
+    (policy_dir / "implementations" / f"{source.name}-commit-msg.py").unlink()
     manifest = yaml.safe_load((policy_dir / "manifest.yaml").read_text(encoding="utf-8"))
     manifest["enforcement"] = "block"
     manifest["hook"] = {"script": {"on": ["commit"]}}  # declared, and deliberately not shipped
@@ -169,27 +173,6 @@ def test_block_with_neither_gate_nor_script_is_still_refused(tmp_path: Path) -> 
     validate_artifact("rule", policy_dir, "agnostic", report, Path(tmp_path), registry_check=False)
 
     assert [f for f in report.errors if f.check == "manifest_block_needs_gate"]
-
-
-def test_a_rule_may_not_carry_a_declarative_gate(tmp_path: Path) -> None:
-    """Two mechanisms would be two answers to what enforces this policy."""
-    manifest = _manifest(
-        hook={
-            "gate": {
-                "kind": "forbidden_ref",
-                "on": ["commit"],
-                "action": "block",
-                "message": "no",
-                "params": {"refs": ["main"]},
-            }
-        }
-    )
-    policy_dir = _policy(tmp_path, manifest)
-
-    report = Report()
-    validate_artifact("rule", policy_dir, "agnostic", report, Path(tmp_path), registry_check=False)
-
-    assert [f for f in report.errors if f.check == "manifest_payload"]
 
 
 def test_the_declaration_decides_what_is_wired_not_the_directory(tmp_path: Path) -> None:

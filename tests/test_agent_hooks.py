@@ -13,7 +13,7 @@ from conftest import working_bash
 
 from chock.compile.emitters.in_agent import SHELL_MATCHER, build_entry
 from chock.compile.emitters.in_agent import emit_agent_hooks as emit
-from chock.gate import runtime_bundle
+from chock.hooks.runtime_vendor import vendor_runtime
 
 
 def _payload(command: str) -> str:
@@ -28,19 +28,27 @@ def _payload(command: str) -> str:
 
 
 def _guard_body() -> str:
-    return '#!/usr/bin/env bash\nset -eu\ncase "$*" in *rm*-rf*) exit 1;; esac\nexit 0\n'
+    return '#!/usr/bin/env bash\nset -eu\ncase "$*" in *rm*-rf*) echo "BLOCKED: rm -rf" >&2; exit 1;; esac\nexit 0\n'
+
+
+def _py_guard_body() -> str:
+    """A self-contained Python guard, named as the catalog's are: the runtime picks the interpreter by suffix."""
+    return (
+        "import sys\n"
+        "line = ' '.join(sys.argv[1:])\n"
+        "if 'rm' in line and '-rf' in line:\n"
+        "    print('BLOCKED: recursive force delete', file=sys.stderr)\n"
+        "    raise SystemExit(1)\n"
+    )
 
 
 def _synced_repo(tmp_path: Path) -> tuple[Path, dict]:
     """A git repo with the vendored runtime and one guard at the paths the entry references."""
     repo = tmp_path / "adopter"
-    (repo / ".chock" / "bin").mkdir(parents=True)
     pol = repo / ".agents" / "policies" / "block-destructive-commands" / "implementations"
     pol.mkdir(parents=True)
-    (repo / ".chock" / "bin" / "vscode_copilot.py").write_text(
-        runtime_bundle.render("vscode_copilot"), encoding="utf-8"
-    )
-    (pol / "block-destructive.sh").write_text(_guard_body(), encoding="utf-8")
+    vendor_runtime(repo, "vscode_copilot")
+    (pol / "block-destructive-commands.py").write_text(_py_guard_body(), encoding="utf-8")
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     manifest = {"id": "block-destructive-commands"}
     return repo, manifest
@@ -55,6 +63,9 @@ def test_build_entry_has_all_four_command_fields(tmp_path):
     assert set(entry) >= {"bash", "command", "powershell", "windows", "matcher", "type"}
     assert entry["bash"] == entry["command"]
     assert entry["powershell"] == entry["windows"]
+    assert entry["powershell"] == f"& {entry['bash']}; if ($null -eq $LASTEXITCODE) {{ exit 2 }}; exit $LASTEXITCODE", (
+        "the same launcher command, keeping its exit code under pwsh -Command, and refusing when none ran"
+    )
     assert entry["matcher"] == SHELL_MATCHER
 
 
@@ -83,16 +94,21 @@ def test_emitted_bash_command_denies_end_to_end(tmp_path):
     entry = build_entry(Path(".agents/policies/block-destructive-commands"), manifest)
     bash_cmd = entry["bash"]
 
-    blocked = subprocess.run(
-        [bash, "-c", bash_cmd], cwd=repo, input=_payload("rm -rf /"), capture_output=True, text=True
-    )
-    assert blocked.returncode == 0, (blocked.stdout, blocked.stderr)
-    decision = json.loads(blocked.stdout)
-    assert decision["hookSpecificOutput"]["permissionDecision"] == "deny", (blocked.stdout, blocked.stderr)
+    nested = repo / "src" / "deep"
+    nested.mkdir(parents=True)
+    for cwd in (repo, nested):
+        blocked = subprocess.run(
+            [bash, "-c", bash_cmd], cwd=cwd, input=_payload("rm -rf /"), capture_output=True, text=True
+        )
+        assert blocked.returncode == 0, (cwd, blocked.stdout, blocked.stderr)
+        decision = json.loads(blocked.stdout)
+        assert decision["hookSpecificOutput"]["permissionDecision"] == "deny", (cwd, blocked.stdout, blocked.stderr)
 
-    allowed = subprocess.run([bash, "-c", bash_cmd], cwd=repo, input=_payload("ls -la"), capture_output=True, text=True)
-    assert allowed.returncode == 0, (allowed.stdout, allowed.stderr)
-    assert allowed.stdout.strip() == "", (allowed.stdout, allowed.stderr)
+        allowed = subprocess.run(
+            [bash, "-c", bash_cmd], cwd=cwd, input=_payload("ls -la"), capture_output=True, text=True
+        )
+        assert allowed.returncode == 0, (cwd, allowed.stdout, allowed.stderr)
+        assert allowed.stdout.strip() == "", (cwd, allowed.stdout, allowed.stderr)
 
 
 def _pwsh() -> str | None:

@@ -8,6 +8,7 @@ from typing import Any
 
 import yaml
 
+from chock import yamlio
 from chock.manifest import CANONICAL_MANIFEST, CONTENT_INSTRUCTIONS_KEY
 from chock.validation.loading import (
     find_manifest,
@@ -31,7 +32,7 @@ def _split_eval_suite(path: Path) -> tuple[str, list[str]] | None:
     if "evals" not in path.parts:
         return None
     try:
-        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        doc = yamlio.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, yaml.YAMLError):
         return None
     if not isinstance(doc, dict):
@@ -104,7 +105,7 @@ def check_security_baseline(artifact_dir: Path, manifest: dict[str, Any], artifa
     script_dirs: list[Path] = []
     if artifact_type == "skill" and skill_type in {"code", "hybrid"}:
         script_dirs.append(artifact_dir / "scripts")
-    if artifact_type == "hook":
+    if artifact_type == "hook" or manifest.get("hook"):
         script_dirs.append(artifact_dir / "implementations")
 
     for scripts_dir in (d for d in script_dirs if d.exists()):
@@ -206,8 +207,7 @@ def check_ambient_tier(artifact_dir: Path, manifest: dict[str, Any], artifact_ty
     if trust_tier in {"community", "verified", "certified"}:
         return
 
-    ambient_override = manifest.get("ambient_override", False)
-    if not ambient_override:
+    if manifest.get("ambient_override") is not True:
         manifest_path = find_manifest(artifact_dir, artifact_type) or (artifact_dir / CANONICAL_MANIFEST)
         report.add(
             Finding(
@@ -216,7 +216,7 @@ def check_ambient_tier(artifact_dir: Path, manifest: dict[str, Any], artifact_ty
                 "error",
                 "Rule is wired into ambient context (SEC-5). sandbox is the scaffold default and is fine "
                 "while drafting; before the rule ships, either set provenance.trust_tier >= community "
-                "(it has been reviewed) or ambient_override: true with a documented rationale "
+                "(it has been reviewed) or ambient_override: true with ambient_override_reason "
                 "(it is trusted without review, and the manifest says why).",
             )
         )

@@ -18,7 +18,7 @@ SECRET_PARAMS = {
 AWS_KEY = 'KEY = "AKIAIOSFODNN7EXAMPLE"\n'  # pragma: allowlist secret  (documented AWS test fixture)
 
 
-def _secret_gate(tmp_path: Path) -> Path:
+def _akia_gate(tmp_path: Path) -> Path:
     return write_gate(
         tmp_path,
         {"kind": "content_regex", "on": ["commit"], "action": "block", "message": "secret", "params": SECRET_PARAMS},
@@ -36,13 +36,13 @@ def test_renamed_and_edited_file_is_scanned(tmp_path: Path) -> None:
     subprocess.run(["git", "mv", "notes.txt", "config.txt"], cwd=tmp_path, check=True)
     (tmp_path / "config.txt").write_text("just notes\n" + AWS_KEY, encoding="utf-8")
     subprocess.run(["git", "add", "config.txt"], cwd=tmp_path, check=True)
-    assert run(_secret_gate(tmp_path), "pre-commit", None, tmp_path) == 1
+    assert run(_akia_gate(tmp_path), "pre-commit", None, tmp_path) == 1
 
 
 def test_non_ascii_filename_is_scanned(tmp_path: Path) -> None:
     init_repo(tmp_path)
     stage(tmp_path, "sécrets.txt", AWS_KEY)
-    assert run(_secret_gate(tmp_path), "pre-commit", None, tmp_path) == 1
+    assert run(_akia_gate(tmp_path), "pre-commit", None, tmp_path) == 1
 
 
 def test_nested_manifest_dependency_is_scanned(tmp_path: Path) -> None:
@@ -83,7 +83,7 @@ def test_ci_fails_closed_on_missing_base(tmp_path: Path, capsys) -> None:
     init_repo(tmp_path)
     stage(tmp_path, "app.py", "x = 1\n")
     _commit(tmp_path)
-    rc = run(_secret_gate(tmp_path), "ci", None, tmp_path, base="origin/does-not-exist")
+    rc = run(_akia_gate(tmp_path), "ci", None, tmp_path, base="origin/does-not-exist")
     assert rc == 2
     assert "does not resolve" in capsys.readouterr().err
 
@@ -97,7 +97,7 @@ def test_ci_scans_a_valid_base(tmp_path: Path) -> None:
     ).stdout.strip()
     stage(tmp_path, "leak.py", AWS_KEY)
     _commit(tmp_path, "leak")
-    assert run(_secret_gate(tmp_path), "ci", None, tmp_path, base=base) == 1
+    assert run(_akia_gate(tmp_path), "ci", None, tmp_path, base=base) == 1
 
 
 def test_merge_commit_installs_a_pre_merge_commit_dispatcher(tmp_path: Path) -> None:

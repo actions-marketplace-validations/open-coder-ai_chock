@@ -60,6 +60,7 @@ def test_wheel_contains_emitted_artifact_templates(built_wheel: Path) -> None:
         "chock.compile.emitters": "chock/compile/emitters/data",
         "chock.scaffold": "chock/scaffold/data",
         "chock.gate": "chock/gate/data",
+        "chock.guidance": "chock/guidance/data",
     }
     with zipfile.ZipFile(built_wheel) as whl:
         names = set(whl.namelist())
@@ -136,3 +137,19 @@ def test_wheel_cli_version_matches_pyproject(built_wheel: Path, tmp_path: Path) 
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == expected
+
+
+def test_wheel_contains_the_guardrails_toggle_data(built_wheel: Path) -> None:
+    """Every merged plugin ships the built-in self-protection and the customize-guardrails skill from this data."""
+    from chock.guardrails import plugin
+
+    with zipfile.ZipFile(built_wheel) as whl:
+        names = set(whl.namelist())
+    data_dir = plugin.protect_dir().parent
+    wanted = sorted(
+        p.relative_to(data_dir).as_posix() for p in data_dir.rglob("*") if p.is_file() and "__pycache__" not in p.parts
+    )
+    assert wanted, "the guardrails data directory is empty; this test no longer pins anything"
+    missing = [n for n in wanted if f"chock/guardrails/data/{n}" not in names]
+    assert not missing, f"wheel is missing guardrails data {missing}; check [tool.setuptools.package-data]"
+    assert "chock/validation/schemas/guardrails.schema.json" in names

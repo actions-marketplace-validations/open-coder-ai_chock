@@ -7,7 +7,9 @@ from pathlib import Path
 
 from conftest import baseline_policy, init_repo
 
+from chock.gate import runtime_bundle
 from chock.hooks.in_agent_install import WIRED_VENDORS
+from chock.hooks.launch import LAUNCHER_REL
 from chock.scaffold.recompile import recompile, wired_vendors
 from chock.vendors import CHOCK_AGENT
 
@@ -36,10 +38,16 @@ def test_a_claude_only_repo_gets_no_other_vendors_config(tmp_path: Path) -> None
 
     assert (repo / ".claude" / "settings.json").exists()
     assert (repo / ".chock" / "bin" / "claude_code.py").exists()
+    assert (repo / ".chock" / "bin" / runtime_bundle.SHARED_FILE).exists(), "the entry loads it from beside itself"
     for stray in (".cursor", ".codex", ".windsurf", ".devin", ".gemini", ".github/hooks", ".agents/hooks.json"):
         assert not (repo / stray).exists(), stray
-    runtimes = sorted(p.name for p in (repo / ".chock" / "bin").iterdir() if p.name != "gate.py")
+    runtimes = sorted(
+        p.name
+        for p in (repo / ".chock" / "bin").iterdir()
+        if p.name not in {"gate.py", "launch.sh", runtime_bundle.SHARED_FILE}
+    )
     assert runtimes == ["claude_code.py"], "no other vendor's runtime is vendored either"
+    assert (repo / LAUNCHER_REL).is_file(), "the launcher every hook command runs"
 
 
 def test_a_cursor_only_repo_gets_no_claude_settings(tmp_path: Path) -> None:
@@ -64,6 +72,7 @@ def test_a_vendor_dropped_from_supported_agents_has_its_runtime_pruned(tmp_path:
 
     assert not (repo / ".chock" / "bin" / "cursor.py").exists()
     assert (repo / ".chock" / "bin" / "claude_code.py").exists()
+    assert (repo / ".chock" / "bin" / runtime_bundle.SHARED_FILE).exists(), "the entry loads it from beside itself"
 
 
 def test_dropping_a_vendor_removes_its_hook_config_entries_too(tmp_path: Path) -> None:
@@ -100,3 +109,46 @@ def test_a_repo_already_broken_by_0_9_1_self_heals_on_the_next_sync(tmp_path: Pa
     recompile(repo, ["claude"], skip_hooks=False)
 
     assert not cursor_hooks.exists() or ".chock/bin/cursor.py" not in cursor_hooks.read_text(encoding="utf-8")
+
+
+def test_a_vendor_that_cannot_be_wired_fails_sync_after_wiring_the_rest(tmp_path: Path) -> None:
+    """A warning scrolled past was the only sign a vendor's gate was not installed at all."""
+    import json
+
+    import pytest
+
+    from chock.scaffold.recompile import HookWiringError
+
+    repo = _repo(tmp_path)
+    (repo / ".cursor").mkdir()
+    (repo / ".cursor" / "hooks.json").write_text("{ not json", encoding="utf-8")
+
+    with pytest.raises(HookWiringError, match="cursor"):
+        recompile(repo, ["claude", "cursor"], skip_hooks=False)
+
+    settings = json.loads((repo / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    assert settings["hooks"]["PreToolUse"], "the vendor that could be wired still was"
+    assert (repo / ".cursor" / "hooks.json").read_text(encoding="utf-8") == "{ not json", (
+        "a foreign file is never clobbered"
+    )
+
+
+def test_sync_says_when_a_wired_agent_skips_untrusted_hooks(tmp_path: Path, capsys) -> None:
+    """Wired is not live for an agent that runs a project's hooks only once trusted."""
+    from chock import vendors
+
+    trusting = [v for v in WIRED_VENDORS if vendors.trust_hint(v)]
+    assert trusting, "agentseam records at least one wired agent that needs trust"
+    agents = [a for a, v in CHOCK_AGENT.items() if v in trusting]
+    recompile(_repo(tmp_path), agents, skip_hooks=False)
+    out = capsys.readouterr().out
+    for vendor in trusting:
+        assert f"ACTION NEEDED ({vendor})" in out
+
+
+def test_no_trust_notice_for_an_agent_that_runs_hooks_untrusted(tmp_path: Path, capsys) -> None:
+    from chock import vendors
+
+    assert vendors.trust_hint("claude_code") is None
+    recompile(_repo(tmp_path), ["claude"], skip_hooks=False)
+    assert "ACTION NEEDED" not in capsys.readouterr().out

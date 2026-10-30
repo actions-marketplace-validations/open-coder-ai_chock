@@ -8,20 +8,19 @@ from typing import Any
 
 from agentseam import packaging
 
-from chock.compile.emitters.in_agent import _guard_script, tool_use_gate_spec
 from chock.compile.emitters.in_agent_hooks import hooks_map_file
-from chock.plugin import gate_package, posture, store
+from chock.hooks import launch, stop_check
+from chock.plugin import gate_package, guard_gate, posture, store
 from chock.plugin.build import (
-    _ADVISORY_NOTE_HOOK,
-    _ADVISORY_NOTE_RULE,
     LICENSE_REL,
     _one_line,
+    advisory_note,
     build_skill,
     license_text,
     plugin_name,
     skill_assets,
 )
-from chock.plugin.claude import POSTURE_ADVISORY, _adapter_source
+from chock.plugin.claude import POSTURE_ADVISORY, _runtime_files
 from chock.plugin.store import SCRIPTS_TEMPLATE as _SCRIPTS_TEMPLATE
 
 _LAYOUT = packaging.layout("devin")
@@ -65,30 +64,42 @@ DEVIN_PLUGIN_ROOT_VAR = "DEVIN_PLUGIN_ROOT"
 def _hook_command(script: str) -> str:
     """One interpreter invocation, via a shell expansion of `$DEVIN_PLUGIN_ROOT`."""
     adapter = f"${DEVIN_PLUGIN_ROOT_VAR}/{_SCRIPTS_TEMPLATE.format(name='devin.py')}"
+    launcher = launch.plugin_interpreter(
+        f"${DEVIN_PLUGIN_ROOT_VAR}/{_SCRIPTS_TEMPLATE.format(name=launch.PLUGIN_LAUNCHER)}"
+    )
     guard = f"${DEVIN_PLUGIN_ROOT_VAR}/{_SCRIPTS_TEMPLATE.format(name=script)}"
-    return f'python3 "{adapter}" --guard "{guard}"'
+    return f'{launcher} "{adapter}" --guard "{guard}"'
 
 
 POSTURE_GATE_DEVIN = gate_package.gate_posture(
     "devin",
     "In the vendor's own words, plugin hooks are best effort and fail open, documented for local Devin sessions only.",
 )
-_GATE_NOTE_DEVIN = gate_package.gate_skill_note("devin")
 
 
 def _gate_command() -> str:
     """The same adapter, handed the packaged gate instead of a guard."""
     adapter = f"${DEVIN_PLUGIN_ROOT_VAR}/{_SCRIPTS_TEMPLATE.format(name='devin.py')}"
+    launcher = launch.plugin_interpreter(
+        f"${DEVIN_PLUGIN_ROOT_VAR}/{_SCRIPTS_TEMPLATE.format(name=launch.PLUGIN_LAUNCHER)}"
+    )
     gate = f"${DEVIN_PLUGIN_ROOT_VAR}/{_SCRIPTS_TEMPLATE.format(name='gate.json')}"
-    return f'python3 "{adapter}" --gate "{gate}"'
+    return f'{launcher} "{adapter}" --gate "{gate}"'
+
+
+def manifest_posture(*, enforced: bool, gate: bool = False, guard: bool = False) -> str:
+    """The posture sentence a package's description ends with; `guard` with `gate` states both halves."""
+    if not enforced:
+        return POSTURE_ADVISORY
+    return guard_gate.posture(POSTURE_BESTEFFORT_DEVIN, POSTURE_GATE_DEVIN, guard=guard or not gate, gate=gate)
 
 
 def build_devin_manifest(
-    manifest: dict[str, Any], policy_dir: Path, *, enforced: bool, gate: bool = False
+    manifest: dict[str, Any], policy_dir: Path, *, enforced: bool, gate: bool = False, guard: bool = False
 ) -> dict[str, Any]:
     """Derive `.devin-plugin/plugin.json` from a policy manifest."""
     policy_id = str(manifest.get("id") or Path(policy_dir).name)
-    posture_text = (POSTURE_GATE_DEVIN if gate else POSTURE_BESTEFFORT_DEVIN) if enforced else POSTURE_ADVISORY
+    posture_text = manifest_posture(enforced=enforced, gate=gate, guard=guard)
 
     description = _one_line(manifest.get("description"))
 
@@ -107,21 +118,24 @@ def devin_plugin_files(policy_dir: Path, manifest: dict[str, Any], repo_root: Pa
     policy_dir = Path(policy_dir)
     policy_id = str(manifest.get("id") or policy_dir.name)
     name = plugin_name(policy_id)
-    script = _guard_script(policy_dir, policy_id)
-    gate = None if script or not gate_package.gate_reaches("devin") else tool_use_gate_spec(policy_dir, Path(repo_root))
-    enforced = script is not None or gate is not None
+    parts = guard_gate.halves("devin", policy_dir, str(policy_id), Path(repo_root))
+    script, gate, enforced = parts.script, parts.gate, parts.enforced
 
     skill = build_skill(policy_dir, manifest, Path(repo_root), hooks=HOOKS_REL if enforced else None)
-    if script:
-        skill = skill.replace(_ADVISORY_NOTE_RULE, _BESTEFFORT_NOTE_DEVIN).replace(
-            _ADVISORY_NOTE_HOOK, _BESTEFFORT_NOTE_DEVIN
-        )
-    elif gate:
-        skill = skill.replace(_ADVISORY_NOTE_RULE, _GATE_NOTE_DEVIN).replace(_ADVISORY_NOTE_HOOK, _GATE_NOTE_DEVIN)
+    generic = advisory_note(policy_dir, manifest)
+    note = guard_gate.skill_note(
+        _BESTEFFORT_NOTE_DEVIN if script else None,
+        gate_package.gate_skill_note("devin", gate.get("action")) if gate else None,
+    )
+    if note:
+        skill = skill.replace(generic, note)
 
     files: dict[Path, str] = {
         Path(_LAYOUT["manifest"]): json.dumps(
-            build_devin_manifest(manifest, policy_dir, enforced=enforced, gate=gate is not None), indent=2
+            build_devin_manifest(
+                manifest, policy_dir, enforced=enforced, gate=gate is not None, guard=script is not None
+            ),
+            indent=2,
         )
         + "\n",
         Path(packaging.supports("devin", packaging.SKILL).format(name=name)): skill,
@@ -131,16 +145,18 @@ def devin_plugin_files(policy_dir: Path, manifest: dict[str, Any], repo_root: Pa
     licence = license_text(manifest)
     if licence:
         files[LICENSE_REL] = licence
+    hooks = guard_gate.merge_hooks(
+        hooks_map_file("devin", _hook_command(script)) if script else None,
+        gate_package.gate_hooks_file("devin", _gate_command()) if gate else None,
+    )
+    if hooks is not None:
+        hooks = guard_gate.merge_hooks(hooks, stop_check.plugin_doc("devin", hooks, generic=False))
+        files[Path(HOOKS_REL)] = json.dumps(hooks, indent=2) + "\n"
+        files.update(_runtime_files("devin"))
     if script:
-        files[Path(HOOKS_REL)] = json.dumps(hooks_map_file("devin", _hook_command(script)), indent=2) + "\n"
-        files[Path(_SCRIPTS_TEMPLATE.format(name="devin.py"))] = _adapter_source("devin")
-        files[Path(_SCRIPTS_TEMPLATE.format(name=script))] = (policy_dir / "implementations" / script).read_text(
-            encoding="utf-8"
-        )
-    elif gate:
-        files[Path(HOOKS_REL)] = json.dumps(gate_package.gate_hooks_file("devin", _gate_command()), indent=2) + "\n"
-        files[Path(_SCRIPTS_TEMPLATE.format(name="devin.py"))] = _adapter_source("devin")
-        files.update(gate_package.packaged_gate_files(policy_dir, gate, _SCRIPTS_TEMPLATE))
+        guard_gate.place(files, store.guard_files(policy_dir, script))
+    if gate:
+        guard_gate.place(files, gate_package.packaged_gate_files(policy_dir, gate, _SCRIPTS_TEMPLATE))
     return files
 
 

@@ -9,7 +9,9 @@ from agentseam import contract as _contract
 from agentseam import matrix as _matrix
 from agentseam.vendor_config import VENDOR_CONFIG
 
-CHOCK_AGENT: dict[str, str] = {
+#: chock's short agent names where they differ from agentseam's vendor id, plus agents agentseam has
+#: no adapter for (aider, replit: instruction files only).
+_ALIASES: dict[str, str] = {
     "claude": "claude_code",
     "cursor": "cursor",
     "windsurf": "windsurf",
@@ -27,6 +29,21 @@ CHOCK_AGENT: dict[str, str] = {
     "antigravity": "antigravity",
 }
 
+#: Every agent name `supported_agents` accepts: the aliases, then each agentseam adapter not yet
+#: named, under its own id with `-` for `_`. A new upstream adapter needs no change here.
+CHOCK_AGENT: dict[str, str] = {
+    **_ALIASES,
+    **{v.replace("_", "-"): v for v in sorted(VENDOR_CONFIG) if v not in _ALIASES.values()},
+}
+
+#: Config formats `chock sync` merges into: a JSON document, or an owned block in a TOML file.
+#: `hook_dir` (Cline: one executable per event) is not one: it runs one command per event, and
+#: chock's per-policy entries would need a single multi-policy dispatcher there.
+SYNC_FORMATS = ("json", "toml")
+#: agentseam names its own plugin directory in a path whose owner is the installer (goose).
+_UPSTREAM_OWNER_SLOT = "/agentseam/"
+_OWNER_SLOT = "/chock/"
+
 
 def entry(vendor: str) -> dict[str, Any]:
     """agentseam's vendor-config entry for `vendor`; chock reads it, never re-records it."""
@@ -34,20 +51,27 @@ def entry(vendor: str) -> dict[str, Any]:
 
 
 def repo_wirable(vendor: str) -> bool:
-    """Whether `chock sync --repo` can reach the vendor's hook config: a repo-relative JSON file.
+    """Whether `chock sync --repo` can reach the vendor's hook config: a repo-relative JSON or TOML file.
 
-    A home-anchored config path (junie, kimi_code) or a non-JSON format is outside the
+    A home-anchored config path (junie, kimi_code) or a hooks directory (cline) is outside the
     repo-scoped install model, not outside the vendor's capability; the matrix row still
     says what the vendor could do, this says what chock's installer may touch.
     """
     facts = entry(vendor)
-    return facts["config_format"] == "json" and not str(facts["config_path"]).startswith("~")
+    return facts["config_format"] in SYNC_FORMATS and not str(facts["config_path"]).startswith("~")
+
+
+def config_format(vendor: str) -> str:
+    """The vendor's hook-config format as agentseam records it (`json`, `toml`, `hook_dir`)."""
+    return str(entry(vendor)["config_format"])
 
 
 #: Vendors chock wires through its OWN hooks file (.github/hooks/chock.json) instead of the
-#: vendor's config, in an entry shape witnessed live rather than read from agentseam. That
-#: witness covers the pre-tool key alone, so the file's turn-end spelling is unknown --
-#: which is an install cap, like repo_wirable, not a claim about what the vendor can do.
+#: vendor's config, in an entry shape witnessed live rather than read from agentseam. Witnessed
+#: in VS Code Copilot Chat agent mode (2026-09-28): `PreToolUse` and `Stop` keys in that file
+#: both fire, and a `Stop` answer that blocks makes Copilot continue the turn. Not isolated:
+#: whether Copilot reads the top-level or the nested (`hookSpecificOutput`) block answer, so
+#: the vendored runtime writes both for Stop.
 AGENT_HOOKS_VENDORS = ("vscode_copilot",)
 
 
@@ -66,27 +90,34 @@ def stop_vendors() -> tuple[str, ...]:
     A different set from `in_agent_vendors` in both directions, which is the point of
     deriving each one rather than inheriting: grok and windsurf can only observe a finished
     turn, while three vendors here can refuse one without recording any write vocabulary
-    (cursor hands a refusal back as a follow-up message, witnessed live). vscode_copilot can refuse one too and is still held back -- see
-    AGENT_HOOKS_VENDORS for the file chock would have to guess a key in.
+    (cursor hands a refusal back as a follow-up message, witnessed live). vscode_copilot is
+    admitted now that its `Stop` key in chock's own hooks file is witnessed (see
+    AGENT_HOOKS_VENDORS); it registers under `Stop` only, since `agentStop` would run the gate twice.
     """
-    return tuple(
-        sorted(
-            v
-            for v in VENDOR_CONFIG
-            if _matrix.can_block(v, _contract.STOP) and repo_wirable(v) and v not in AGENT_HOOKS_VENDORS
-        )
-    )
+    return tuple(sorted(v for v in VENDOR_CONFIG if _matrix.can_block(v, _contract.STOP) and repo_wirable(v)))
 
 
 def config_path(vendor: str) -> str:
-    """Repo-relative path of the file the vendor reads hook wiring from."""
-    return str(entry(vendor)["config_path"])
+    """Repo-relative path of the file the vendor reads hook wiring from; chock's own plugin slot for goose."""
+    return str(entry(vendor)["config_path"]).replace(_UPSTREAM_OWNER_SLOT, _OWNER_SLOT, 1)
 
 
 def repo_root_token(vendor: str) -> str | None:
     """The vendor's own wire token for the repo root, or None where agentseam records none."""
     token = entry(vendor).get("repo_root_token")
     return str(token) if token else None
+
+
+#: Said when agentseam records that the agent needs trust but gives no vendor-specific steps.
+_TRUST_FALLBACK = "this agent runs a project's hooks only after you trust them in the agent itself"
+
+
+def trust_hint(vendor: str) -> str | None:
+    """How to make `vendor` run the repo's hooks, where it skips untrusted ones silently; else None."""
+    cfg = entry(vendor)
+    if not cfg.get("needs_trust"):
+        return None
+    return str(cfg.get("trust_hint") or _TRUST_FALLBACK)
 
 
 def wire_event(vendor: str, canonical: str) -> str:
@@ -134,6 +165,30 @@ def write_matcher(vendor: str) -> str | None:
     return "|".join(tools) if tools else None
 
 
+def tool_call_vendors() -> tuple[str, ...]:
+    """Vendors whose PreToolUse can be gated by tool name: a recorded tool vocabulary, or a witnessed one.
+
+    A vendor that records shell or write tool names is one whose pre-tool hook is known to carry a
+    `tool_name` for tools other than the shell, which is what a name match needs. Antigravity, devin,
+    grok, tabnine and windsurf record none, so they get no `tool_call` entry rather than an invented one.
+    """
+    return tuple(
+        v for v in in_agent_vendors() if _adapters.shell_tools(v) or write_tools(v) or v in AGENT_HOOKS_VENDORS
+    )
+
+
+def post_tool_hook_config(vendor: str, command: str) -> Any:
+    """The vendor's hook-config document running `command` after a tool call, with no matcher."""
+    return _adapters.get(vendor).hook_config((_contract.POST_TOOL,), command, None)
+
+
+def tool_failure_event(vendor: str) -> str | None:
+    """The vendor's wire event for a failed tool call (Claude fires it INSTEAD of PostToolUse), else None."""
+    mapping = getattr(_adapters.get(vendor), "REVERSE_EVENT_MAP", {})
+    wire = mapping.get(_contract.TOOL_FAILURE)
+    return str(wire) if wire else None
+
+
 def hook_entry_bare(vendor: str) -> bool:
     """Whether `vendor`'s own hook_config is the bare event map, with no top-level `hooks` key.
 
@@ -148,6 +203,14 @@ def hook_entry_bare(vendor: str) -> bool:
     return bool((entry or {}).get("bare"))
 
 
+def hook_group(vendor: str) -> str | None:
+    """The hook name `vendor`'s hooks file nests its event map under (antigravity), or None where it has none."""
+    config = getattr(_adapters.get(vendor), "CONFIG", None)
+    entry = (config or {}).get("hook_entry") if isinstance(config, dict) else None
+    group = (entry or {}).get("group")
+    return str(group) if group else None
+
+
 def hook_entry_flat(vendor: str) -> bool:
     """Whether `vendor`'s hook entries are the flat `{"command": ...}` shape, with no matcher.
 
@@ -160,12 +223,12 @@ def hook_entry_flat(vendor: str) -> bool:
     return (entry or {}).get("wrapper") == "cursor"
 
 
-def pre_tool_hook_config(vendor: str, command: str, matcher: str | None = None) -> dict[str, Any]:
+def pre_tool_hook_config(vendor: str, command: str, matcher: str | None = None) -> Any:
     """The vendor's complete hook-config document gating pre-tool with `command`."""
     return _adapters.get(vendor).hook_config((_contract.PRE_TOOL,), command, matcher)
 
 
-def stop_hook_config(vendor: str, command: str) -> dict[str, Any]:
+def stop_hook_config(vendor: str, command: str) -> Any:
     """The vendor's complete hook-config document running `command` when a turn ends.
 
     No matcher: the turn-end event carries no tool to match on, which is why this surface
@@ -178,3 +241,14 @@ def stop_hook_config(vendor: str, command: str) -> dict[str, Any]:
 def config_envelope(vendor: str) -> dict[str, Any]:
     """Wrapper keys the vendor's hook config carries beside its hooks table."""
     return {key: value for key, value in _adapters.get(vendor).hook_config((), "").items() if key != "hooks"}
+
+
+def session_start_documented(vendor: str) -> bool:
+    """Whether `vendor`'s client documents a session-start event a hook can run on."""
+    entry = VENDOR_CONFIG.get(vendor) or {}
+    return _contract.SESSION_START in (entry.get("events") or {}).values()
+
+
+def session_start_hook_config(vendor: str, command: str) -> Any:
+    """The vendor's complete hook-config document running `command` when a session starts."""
+    return _adapters.get(vendor).hook_config((_contract.SESSION_START,), command, None)

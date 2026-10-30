@@ -2,40 +2,77 @@
   "everyday": {
     "init": {
       "module": "chock.scaffold.init",
-      "help": "Scaffold a consumer repo (wiring only -- no policies)"
+      "help": "Scaffold a consumer repo (wiring only -- no policies)",
+      "person_only": true
     },
     "add": {
       "module": "chock.scaffold.add",
-      "help": "Install a policy or skill from a catalog and compile it"
+      "help": "Install a policy or skill from a catalog and compile it",
+      "person_only": true
+    },
+    "install": {
+      "module": "chock.install.cli",
+      "help": "Build a chock.sh selection into one plugin for one agent (install --selection <file> [--client C])"
     },
     "remove": {
       "module": "chock.scaffold.remove",
-      "help": "Remove an installed policy and resync"
+      "help": "Remove an installed policy and resync",
+      "person_only": true
     },
     "sync": {
       "module": "chock.lifecycle",
       "fn": "sync_main",
-      "help": "Recompile + rewire so the repo matches its policies (--ci/--skills for extras)"
+      "help": "Recompile + rewire so the repo matches its policies (--ci/--skills for extras)",
+      "person_only": true,
+      "agent_ok_flag": "--committed"
     },
     "check": {
-      "module": "chock.lifecycle",
+      "module": "chock.history.cli",
       "fn": "check_main",
-      "help": "Run every truth check: validate, verify, evals, matrix (--only to narrow)"
+      "help": "Run every truth check: validate, verify, evals, matrix (--only to narrow; --history scans past commits)"
     },
     "status": {
       "module": "chock.lifecycle",
       "fn": "status_main",
       "help": "Policy states and coverage (--only registry,log for more)"
     },
+    "stop": {
+      "module": "chock.stop",
+      "fn": "stop_main",
+      "help": "Refuse every agent tool call, commit and push here until resume (--agent C for one client)"
+    },
+    "resume": {
+      "module": "chock.stop",
+      "fn": "resume_main",
+      "help": "Lift a stop: agents are judged by the policies again"
+    },
+    "doctor": {
+      "module": "chock.doctor.cli",
+      "help": "Check each client's hooks on each route: present, current, and seen running (--client X)"
+    },
+    "incident": {
+      "module": "chock.incident",
+      "help": "An ordered, redacted timeline from the local decision log (incident --since T [--until T] [--share])"
+    },
+    "witness": {
+      "module": "chock.witness_export",
+      "help": "Export one client's redacted decision log for its agentseam evidence issue (witness export --client C)"
+    },
     "enable": {
       "module": "chock.toggles",
       "fn": "enable_main",
-      "help": "Enable a policy by id"
+      "help": "Enable a policy by id",
+      "person_only": true
     },
     "disable": {
       "module": "chock.toggles",
       "fn": "disable_main",
-      "help": "Disable a policy by id"
+      "help": "Disable a policy by id",
+      "person_only": true
+    },
+    "bundle": {
+      "module": "chock.guardrails.cli",
+      "help": "Switch a member of an installed plugin bundle on or off (bundle on|off <id>, bundle status)"
     }
   },
   "authoring": {
@@ -45,7 +82,8 @@
     },
     "compile": {
       "module": "chock.compile.compiler",
-      "help": "Low-level single-policy compile"
+      "help": "Low-level single-policy compile",
+      "person_only": true
     },
     "install-skills": {
       "module": "chock.scaffold.skills",
@@ -66,6 +104,10 @@
     "gateway": {
       "module": "chock.gateway.__main__",
       "help": "Run the MCP gateway proxy (gateway run --repo . -- <server command>)"
+    },
+    "mcp": {
+      "module": "chock.guidance.cli",
+      "help": "Serve the read-only chock_guidance MCP tool over stdio (mcp --repo .)"
     },
     "review": {
       "module": "chock.review.cli",
@@ -96,7 +138,8 @@
     "recompile": {
       "module": "chock.toggles",
       "fn": "recompile_main",
-      "help": "alias of: sync"
+      "help": "alias of: sync",
+      "person_only": true
     },
     "refresh": {
       "module": "chock.index.cli",
@@ -104,7 +147,8 @@
     },
     "install-hooks": {
       "module": "chock.hooks.install",
-      "help": "alias of: sync (hooks part)"
+      "help": "alias of: sync (hooks part)",
+      "person_only": true
     },
     "install-ci": {
       "module": "chock.scaffold.install_ci",

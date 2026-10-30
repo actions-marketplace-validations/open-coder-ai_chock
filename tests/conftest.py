@@ -6,9 +6,13 @@ import json
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+
+from chock.gate.assemble import runner_source
+from chock.gate.guard_runner import bash_candidates
 
 FRAMEWORK_ROOT = Path(__file__).resolve().parents[1]
 
@@ -17,8 +21,30 @@ REPO_POLICIES = FRAMEWORK_ROOT / ".agents" / "policies"
 
 @pytest.fixture(autouse=True)
 def no_gate_log(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep the suite out of this repo's own gate outcome log."""
+    """Keep the suite out of this repo's own gate outcome log; a test that logs names its own level."""
     monkeypatch.setenv("CHOCK_GATE_LOG", "0")
+    monkeypatch.delenv("CHOCK_LOG_LEVEL", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def human_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run as a person's shell: the suite may itself be run by an agent that sets these markers."""
+    for name in ("CHOCK_AGENT_COMMIT", "CLAUDECODE", "AI_AGENT", "CHOCK_ALLOW", "CHOCK_ROLLOUT", *PROJECT_ENV):
+        monkeypatch.delenv(name, raising=False)
+
+
+#: The variables a client names its session's project root in: a hook a test runs names none unless it says so.
+PROJECT_ENV = ("CLAUDE_PROJECT_DIR", "GEMINI_PROJECT_DIR", "OPENHANDS_PROJECT_DIR")
+
+
+@pytest.fixture
+def private_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """`tmp_path/home` as this process's home, so `chock stop` writes its machine registry entry there."""
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    return home
 
 
 def bash_executable() -> str:
@@ -30,15 +56,23 @@ def bash_executable() -> str:
     """
     if sys.platform != "win32":
         return shutil.which("bash") or "bash"
-    git = shutil.which("git")
-    if git:
-        for candidate in (
-            Path(git).parent.parent / "bin" / "bash.exe",
-            Path(git).parent.parent / "usr" / "bin" / "bash.exe",
-        ):
-            if candidate.is_file():
-                return str(candidate)
-    return shutil.which("bash") or "bash"
+    candidates = bash_candidates()
+    return candidates[0] if candidates else (shutil.which("bash") or "bash")
+
+
+def guarded_launch(launcher: str) -> str:
+    """A plugin hook's pinned launch prefix: git's sh refuses with exit 2 when `launcher` is missing."""
+    refuse = "{ echo chock: the plugin launcher is missing, so this call cannot be checked. Refusing. >&2; exit 2; }"
+    return f"git -c 'alias.chock-sh=!set -f; IFS=; test -f $1 || {refuse}; sh' chock-sh \"{launcher}\" "
+
+
+def run_hook_command(
+    command: str, cwd: Path, payload: str, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
+    """Run an installed agent-hook command the way an agent does: one shell string, from `cwd`."""
+    return subprocess.run(
+        [bash_executable(), "-c", command], cwd=cwd, env=env, input=payload, capture_output=True, text=True, check=False
+    )
 
 
 def baseline_policy(policy_id: str) -> Path:
@@ -123,3 +157,19 @@ def working_bash() -> str | None:
 WORKING_BASH = working_bash()
 
 needs_bash = pytest.mark.skipif(WORKING_BASH is None, reason="no working bash on this machine")
+
+
+@pytest.fixture
+def toy_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[], list[str]]:
+    """Point the toy findings script at a log; the returned callable lists its runs (`change`, `baseline`)."""
+    log = tmp_path.parent / f"{tmp_path.name}-toy.log"
+    monkeypatch.setenv("TOY_LOG", str(log))
+    return lambda: log.read_text(encoding="utf-8").split() if log.exists() else []
+
+
+@pytest.fixture(scope="session")
+def gate_py(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The single-file gate runner as `chock sync` vendors it, assembled from chock.gate.runner."""
+    path = tmp_path_factory.mktemp("vendored") / "gate.py"
+    path.write_text(runner_source(), encoding="utf-8", newline="\n")
+    return path

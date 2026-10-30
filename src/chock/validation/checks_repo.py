@@ -10,19 +10,12 @@ from pathlib import Path
 
 import yaml
 
-from chock import vendors
-from chock.hooks.in_agent_install import WIRED_VENDORS, agent_hooks_rel
+from chock import yamlio
 from chock.index.builder import max_tokens_for
 from chock.index.cli import is_stale
 from chock.scaffold.agents_md import POINTER_BLOCK, POINTER_END, POINTER_START
 from chock.validation.loading import discover_artifacts
 from chock.validation.report import Finding, Report
-
-#: `.chock/bin/<vendor>.py`, wherever it turns up inside a hook command: chock is the only
-#: writer of that directory, so naming a path under it identifies an entry as chock's own,
-#: independent of the vendor-specific shapes `in_agent_merged.py`/`in_agent_generic.py` merge
-#: it through.
-_BIN_TARGET_RE = re.compile(r"\.chock/bin/[\w.-]+\.py")
 
 _POINTER_RE = re.compile(
     re.escape(POINTER_START) + r"(.*?)" + re.escape(POINTER_END),
@@ -67,7 +60,7 @@ def check_ambient_rule_blocks(root: Path, report: Report) -> None:
                 str(agents_md),
                 "ambient_pointer",
                 "warning",
-                "AGENTS.md is missing the managed pointer block; run `chock sync`.",
+                "AGENTS.md is missing the managed pointer block; a person runs `chock sync`.",
             )
         )
         return
@@ -78,7 +71,7 @@ def check_ambient_rule_blocks(root: Path, report: Report) -> None:
                 str(agents_md),
                 "ambient_pointer",
                 "warning",
-                "AGENTS.md pointer block does not match the canonical text; run `chock sync`.",
+                "AGENTS.md pointer block does not match the canonical text; a person runs `chock sync`.",
             )
         )
 
@@ -89,7 +82,7 @@ def check_ambient_rule_blocks(root: Path, report: Report) -> None:
                 str(index_path),
                 "index_freshness",
                 "warning",
-                "INDEX.md is missing; run `chock sync`.",
+                "INDEX.md is missing; a person runs `chock sync`.",
             )
         )
         return
@@ -131,7 +124,7 @@ def _resolve_id(root: Path, policy_id: str) -> bool:
             if not manifest.exists():
                 continue
             try:
-                data = yaml.safe_load(_frontmatter(manifest)) or {}
+                data = yamlio.safe_load(_frontmatter(manifest)) or {}
             except yaml.YAMLError:
                 continue
             if isinstance(data, dict) and data.get("id") == policy_id:
@@ -224,47 +217,13 @@ def _tracked_under(root: Path, rel: str) -> list[str]:
     if git is None:
         return []
     result = subprocess.run(  # noqa: S603 -- asking git what it tracks is this check's whole job
-        [git, "-C", str(root), "ls-files", "--", rel],
+        [git, "-C", str(root), "ls-files", "-z", "--", rel],
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
-    return result.stdout.split() if result.returncode == 0 else []
-
-
-def check_dangling_hook_targets(root: Path, report: Report) -> None:
-    """A chock-written hook entry naming a `.chock/bin/` runtime `sync` already deleted.
-
-    `sync` wires in-agent hooks only for the vendors `supported_agents` names and prunes a
-    vendored runtime once its vendor falls out of that list (`recompile.py`); a hook config
-    still naming the deleted runtime is a client-side failure on every tool call, silent to
-    both `chock sync --check` and `chock check` unless something reads the config back.
-    """
-    paths = [root / vendors.config_path(vendor) for vendor in WIRED_VENDORS]
-    paths.append(root / agent_hooks_rel())
-
-    seen: set[tuple[str, str]] = set()
-    for path in paths:
-        if not path.exists():
-            continue
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        for target in _BIN_TARGET_RE.findall(text):
-            key = (str(path), target)
-            if key in seen or (root / target).exists():
-                continue
-            seen.add(key)
-            report.add(
-                Finding(
-                    str(path),
-                    "dangling_hook_target",
-                    "error",
-                    f"{path} runs {target}, which does not exist. Run `chock sync` to reinstall or "
-                    "uninstall this vendor's hooks.",
-                )
-            )
+    return [path for path in result.stdout.split("\0") if path] if result.returncode == 0 else []
 
 
 def check_ambient_token_budget(root: Path, report: Report) -> None:

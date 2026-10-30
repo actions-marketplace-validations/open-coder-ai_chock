@@ -84,7 +84,7 @@ def _mark_bridge(link: Path) -> None:
         if not marker.exists():
             marker.write_text(_BRIDGE_MARKER_BODY, encoding="utf-8")
     except OSError:
-        pass
+        pass  # best effort, per the docstring
 
 
 def _chock_owns(entry: Path, skills_root: Path) -> bool:

@@ -11,9 +11,11 @@ _GIT = shutil.which("git") or "git"
 
 _INSTRUCTION = (
     "Chock: this clone's git hooks are NOT installed -- git never clones hooks, "
-    "so commit-time gates will not run locally until someone runs:\n"
+    "so commit-time gates will not run locally until a person runs, from their own shell:\n"
     "    pip install chock && chock sync --repo .\n"
-    "Run that before the first commit. (The repo's CI gate, where wired, enforces regardless.)"
+    "Ask them to run it before the first commit; `chock sync` refuses an agent's shell except "
+    "`chock sync --committed`, which arms a clean clone from what is committed. "
+    "(The repo's CI gate, where wired, enforces regardless.)"
 )
 
 
@@ -30,6 +32,8 @@ def _hooks_pre_commit(repo_root: Path) -> Path | None:
             cwd=repo_root,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="surrogateescape",
             timeout=15,
             check=False,
         )

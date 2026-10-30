@@ -19,13 +19,13 @@ rule:
     never(erase): a name an element already had
 hook:
   script:
-    "on": [commit]        # commit | push, at least one
+    "on": [commit]        # commit | push | commit-msg, at least one
 ```
 
 ```
 .agents/policies/<id>/
 └── implementations/
-    └── <id>-pre-commit.py      # or -pre-push, or .sh
+    └── <id>-pre-commit.py      # or -pre-push, -commit-msg, or .sh
 ```
 
 `on` is **authoritative**. The compiler wires exactly the events it names — never what the
@@ -39,7 +39,10 @@ policy enforcing less than its directory suggests.
 - **No arguments.** At pre-commit the guard already has both revisions: `git show :path` is the
   staged blob and `git show HEAD:path` its predecessor. Nothing is passed in.
 - **The working directory is the repo root.**
-- **The exit code is the verdict** — 0 allows, anything else refuses. A shim whose script has
+- **The exit code is the verdict** — 0 allows, 4 warns (the script's own words on stderr, the
+  commit goes ahead), 3 asks (refused unless a person runs that command with
+  `CHOCK_ALLOW=<policy-id>` and it is not an agent's commit, see
+  [Enforcement Surfaces](enforcement-surfaces.md)), anything else refuses. A shim whose script has
   gone missing exits 2 rather than 0: a gate that cannot find its own guard must refuse.
 - **Stdlib only**, like the vendored runner. The script is copied into every adopting repo, so
   it may not import anything that repo does not already have.
@@ -66,9 +69,44 @@ Two different files, two different contracts, and confusing them is silent:
 | `implementations/<id>.sh` | in-agent PreToolUse hooks, the eval runner | a command's argv | exit code |
 | `implementations/<id>-pre-commit.py` | the installed git hook | nothing | exit code |
 
-The eval runner excludes the event-named scripts, because handing one an eval case's command
-would score a verdict it never gave. A policy backed only by an event script therefore stays
-tier 3 in `chock check --only evals` until the runner can stage a tree for it.
+The eval runner resolves the guard strictly as `implementations/<id>.sh|.py`, so an event script,
+a gate script or a helper module is never taken for it. To eval an event script, write an
+`execute` case with `event: pre-commit | pre-push | commit-msg`: the runner stages `files` over
+`head_files` in a throwaway repo and runs the script (`message` for commit-msg, `stdin` lines for
+pre-push). Exit 0 is `allow`, a refusal is `block`, and a crash is an error, never a block.
+
+```yaml
+execute: {event: pre-commit, head_files: {page.html: "<a id=x>"}, files: {page.html: "<a>"}, expect: block}
+```
+
+A hook may also carry both `gate` and `script`: keep the pre-commit script and add a gate at
+`tool_use`. They may not both run at the same git event.
+
+## A gate script that judges only what a change adds
+
+A `kind: script` gate that prints `{"findings": [...]}` on stdout is run a second time on the
+baseline text, and only findings whose key the baseline does not account for are judged (spec:
+[Gate DSL](../spec/gate-dsl.md), `kind: script`). An old violation in a touched file no longer
+blocks; a violation the change creates, including by deleting a line, does.
+
+```python
+import json, re, sys
+
+payload = json.load(sys.stdin)  # "baseline": true on the second run; apply the same rules in both
+findings = []
+for path, text in payload["writes"].items():
+    lines = text.splitlines()
+    sanitized = any("sanitize(" in line for line in lines)
+    for number, line in enumerate(lines, 1):
+        if "query(" in line and not sanitized and "chock: allow" not in line:
+            stmt = re.sub(r"\s+", " ", line.strip())
+            findings.append({"key": f"sqli|{path}|{stmt}", "path": path, "line": number, "message": f"unsanitized {stmt}"})
+print(json.dumps({"findings": findings}))
+sys.exit(1 if findings else 0)
+```
+
+The key holds no line number, so moving code does not make it new; deleting `sanitize(` does, as
+the finding then appears where the baseline had none.
 
 ## See also
 

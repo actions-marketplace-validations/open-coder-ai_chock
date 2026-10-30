@@ -31,6 +31,8 @@ ALIAS = {
     "kimi code": "kimi-code",
     "vs code": "vscode",
     "antigravity cli": "antigravity",
+    "factory droid": "factory-droid",
+    "mistral vibe": "mistral-vibe",
 }
 
 

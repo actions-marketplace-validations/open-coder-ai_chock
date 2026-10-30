@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -121,3 +122,18 @@ def test_missing_template_is_clear_error(
     assert "SKILL.md.tmpl" in captured.err
     assert "Unable to read template" in captured.err
     assert "Traceback" not in captured.err
+
+
+def test_next_step_printed_by_new_runs_clean(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """The `Next:` lines are commands a fresh repo can run in order as printed (no `&&`), each exiting 0."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    assert new.cmd_new(["policy", "demo", "--kind", "content_regex", "--root", str(tmp_path)]) == 0
+    out = capsys.readouterr().out.splitlines()
+    start = next(i for i, ln in enumerate(out) if ln.startswith("Next:"))
+    steps = [out[start].removeprefix("Next:"), out[start + 1]]
+    for step in steps:
+        argv = shlex.split(step)
+        assert argv[:3] == ["python", "-m", "chock"], step
+        assert "&&" not in argv, step
+        proc = _run([sys.executable, *argv[1:]], tmp_path)
+        assert proc.returncode == 0, f"{step.strip()} -> {proc.returncode}\n{proc.stdout}\n{proc.stderr}"

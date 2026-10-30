@@ -5,12 +5,19 @@ Usage: chock <command> [args]
 Everyday:
   init       Scaffold a consumer repo (wiring only -- no policies)
   add        Install a policy or skill from a catalog and compile it
+  install    Build a chock.sh selection into one plugin for one agent (install --selection <file> [--client C])
   remove     Remove an installed policy and resync
   sync       Recompile + rewire so the repo matches its policies (--ci/--skills for extras)
-  check      Run every truth check: validate, verify, evals, matrix (--only to narrow)
+  check      Run every truth check: validate, verify, evals, matrix (--only to narrow; --history scans past commits)
   status     Policy states and coverage (--only registry,log for more)
+  stop       Refuse every agent tool call, commit and push here until resume (--agent C for one client)
+  resume     Lift a stop: agents are judged by the policies again
+  doctor     Check each client's hooks on each route: present, current, and seen running (--client X)
+  incident   An ordered, redacted timeline from the local decision log (incident --since T [--until T] [--share])
+  witness    Export one client's redacted decision log for its agentseam evidence issue (witness export --client C)
   enable     Enable a policy by id
   disable    Disable a policy by id
+  bundle     Switch a member of an installed plugin bundle on or off (bundle on|off <id>, bundle status)
 
 Authoring:
   new        Create a deterministic artifact skeleton
@@ -20,5 +27,6 @@ Authoring:
   plugin     Package policies as installable plugins (plugin build [--format claude] [--check])
   marketplace Emit marketplace index files over a built plugin tree (marketplace build --dist <dir>)
   gateway    Run the MCP gateway proxy (gateway run --repo . -- <server command>)
+  mcp        Serve the read-only chock_guidance MCP tool over stdio (mcp --repo .)
   review     Produce or check reviewer evidence (review emit | review verify <file> | review require)
   compliance Generate a compliance coverage report (compliance report --framework owasp_asi)

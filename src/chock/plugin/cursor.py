@@ -8,22 +8,21 @@ from typing import Any
 
 from agentseam import packaging
 
-from chock.compile.emitters.in_agent import _guard_script, tool_use_gate_spec
 from chock.compile.emitters.in_agent_hooks import cursor_hooks_file
-from chock.plugin import gate_package, posture, store
+from chock.hooks import stop_check
+from chock.plugin import gate_package, guard_gate, posture, store
 from chock.plugin.build import (
-    _ADVISORY_NOTE_HOOK,
-    _ADVISORY_NOTE_RULE,
     LICENSE_REL,
     _author,
     _keywords,
     _one_line,
+    advisory_note,
     build_skill,
     license_text,
     plugin_name,
     skill_assets,
 )
-from chock.plugin.claude import POSTURE_ADVISORY, _adapter_source
+from chock.plugin.claude import POSTURE_ADVISORY, _interpreter, _runtime_files
 from chock.plugin.store import SCRIPTS_TEMPLATE as _SCRIPTS_TEMPLATE
 
 _LAYOUT = packaging.layout("cursor")
@@ -59,7 +58,7 @@ def _hook_command(script: str) -> str:
     """One interpreter invocation against the plugin's own bundled copies."""
     adapter = packaging.executable_ref("cursor", _SCRIPTS_TEMPLATE.format(name="cursor.py"))
     guard = packaging.executable_ref("cursor", _SCRIPTS_TEMPLATE.format(name=script))
-    return f'python3 "{adapter}" --guard "{guard}"'
+    return f'{_interpreter("cursor")} "{adapter}" --guard "{guard}"'
 
 
 POSTURE_GATE_CURSOR = gate_package.gate_posture(
@@ -67,23 +66,29 @@ POSTURE_GATE_CURSOR = gate_package.gate_posture(
     "In Cursor the turn's end is not held: a refusal there is handed back to the agent as a "
     "follow-up message, once, and a hook that fails to answer lets the turn end.",
 )
-_GATE_NOTE_CURSOR = gate_package.gate_skill_note("cursor")
 
 
 def _gate_command() -> str:
     """The same adapter, handed the packaged gate instead of a guard."""
     adapter = packaging.executable_ref("cursor", _SCRIPTS_TEMPLATE.format(name="cursor.py"))
     gate = packaging.executable_ref("cursor", _SCRIPTS_TEMPLATE.format(name="gate.json"))
-    return f'python3 "{adapter}" --gate "{gate}"'
+    return f'{_interpreter("cursor")} "{adapter}" --gate "{gate}"'
+
+
+def manifest_posture(*, enforced: bool, gate: bool = False, guard: bool = False) -> str:
+    """The posture sentence a package's description ends with; `guard` with `gate` states both halves."""
+    if not enforced:
+        return POSTURE_ADVISORY
+    return guard_gate.posture(POSTURE_ENFORCED_CURSOR, POSTURE_GATE_CURSOR, guard=guard or not gate, gate=gate)
 
 
 def build_cursor_manifest(
-    manifest: dict[str, Any], policy_dir: Path, *, enforced: bool, gate: bool = False
+    manifest: dict[str, Any], policy_dir: Path, *, enforced: bool, gate: bool = False, guard: bool = False
 ) -> dict[str, Any]:
     """Derive `.cursor-plugin/plugin.json` from a policy manifest."""
     policy_id = str(manifest.get("id") or Path(policy_dir).name)
     provenance = manifest.get("provenance") or {}
-    posture = (POSTURE_GATE_CURSOR if gate else POSTURE_ENFORCED_CURSOR) if enforced else POSTURE_ADVISORY
+    posture = manifest_posture(enforced=enforced, gate=gate, guard=guard)
 
     data: dict[str, Any] = {
         "name": plugin_name(policy_id),
@@ -112,23 +117,24 @@ def cursor_plugin_files(policy_dir: Path, manifest: dict[str, Any], repo_root: P
     policy_dir = Path(policy_dir)
     policy_id = str(manifest.get("id") or policy_dir.name)
     name = plugin_name(policy_id)
-    script = _guard_script(policy_dir, policy_id)
-    gate = (
-        None if script or not gate_package.gate_reaches("cursor") else tool_use_gate_spec(policy_dir, Path(repo_root))
-    )
-    enforced = script is not None or gate is not None
+    parts = guard_gate.halves("cursor", policy_dir, str(policy_id), Path(repo_root))
+    script, gate, enforced = parts.script, parts.gate, parts.enforced
 
     skill = build_skill(policy_dir, manifest, Path(repo_root), hooks=HOOKS_REL if enforced else None)
-    if script:
-        skill = skill.replace(_ADVISORY_NOTE_RULE, _ENFORCED_NOTE_CURSOR).replace(
-            _ADVISORY_NOTE_HOOK, _ENFORCED_NOTE_CURSOR
-        )
-    elif gate:
-        skill = skill.replace(_ADVISORY_NOTE_RULE, _GATE_NOTE_CURSOR).replace(_ADVISORY_NOTE_HOOK, _GATE_NOTE_CURSOR)
+    generic = advisory_note(policy_dir, manifest)
+    note = guard_gate.skill_note(
+        _ENFORCED_NOTE_CURSOR if script else None,
+        gate_package.gate_skill_note("cursor", gate.get("action")) if gate else None,
+    )
+    if note:
+        skill = skill.replace(generic, note)
 
     files: dict[Path, str] = {
         Path(_LAYOUT["manifest"]): json.dumps(
-            build_cursor_manifest(manifest, policy_dir, enforced=enforced, gate=gate is not None), indent=2
+            build_cursor_manifest(
+                manifest, policy_dir, enforced=enforced, gate=gate is not None, guard=script is not None
+            ),
+            indent=2,
         )
         + "\n",
         Path(packaging.supports("cursor", packaging.SKILL).format(name=name)): skill,
@@ -138,16 +144,18 @@ def cursor_plugin_files(policy_dir: Path, manifest: dict[str, Any], repo_root: P
     licence = license_text(manifest)
     if licence:
         files[LICENSE_REL] = licence
+    hooks = guard_gate.merge_hooks(
+        cursor_hooks_file(_hook_command(script)) if script else None,
+        gate_package.gate_hooks_file("cursor", _gate_command()) if gate else None,
+    )
+    if hooks is not None:
+        hooks = guard_gate.merge_hooks(hooks, stop_check.plugin_doc("cursor", hooks, generic=False))
+        files[Path(HOOKS_REL)] = json.dumps(hooks, indent=2) + "\n"
+        files.update(_runtime_files("cursor"))
     if script:
-        files[Path(HOOKS_REL)] = json.dumps(cursor_hooks_file(_hook_command(script)), indent=2) + "\n"
-        files[Path(_SCRIPTS_TEMPLATE.format(name="cursor.py"))] = _adapter_source("cursor")
-        files[Path(_SCRIPTS_TEMPLATE.format(name=script))] = (policy_dir / "implementations" / script).read_text(
-            encoding="utf-8"
-        )
-    elif gate:
-        files[Path(HOOKS_REL)] = json.dumps(gate_package.gate_hooks_file("cursor", _gate_command()), indent=2) + "\n"
-        files[Path(_SCRIPTS_TEMPLATE.format(name="cursor.py"))] = _adapter_source("cursor")
-        files.update(gate_package.packaged_gate_files(policy_dir, gate, _SCRIPTS_TEMPLATE))
+        guard_gate.place(files, store.guard_files(policy_dir, script))
+    if gate:
+        guard_gate.place(files, gate_package.packaged_gate_files(policy_dir, gate, _SCRIPTS_TEMPLATE))
     return files
 
 

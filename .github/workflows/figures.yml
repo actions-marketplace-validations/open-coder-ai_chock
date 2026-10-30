@@ -27,15 +27,26 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.12"
       - name: Install dependencies
         run: |
           python -m pip install --require-hashes --upgrade -r requirements/pip.txt
-          python -m pip install --require-hashes -r requirements/brand-assets.txt
-          pip install -e . --no-deps
+          python -m pip install --require-hashes -r requirements/brand-assets.txt -r requirements/build.txt
+          pip install -e . --no-deps --no-build-isolation
       - name: Regenerate figures and fail on drift
         run: |
           cd docs/figures && for g in make_*.py; do python "$g"; done
           cd ../.. && git diff --exit-code -- docs/figures
+      # A PNG rasterizes differently off this runner (fonts), so it cannot be regenerated locally
+      # byte for byte. On drift, print each differing PNG so the exact runner bytes can be committed.
+      - name: Print drifted PNGs as base64
+        if: failure()
+        run: |
+          git diff --name-only -- 'docs/figures/*.png' | while read -r png; do
+            echo "::group::$png"
+            base64 -w0 "$png"
+            echo
+            echo "::endgroup::"
+          done

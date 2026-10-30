@@ -13,10 +13,10 @@ that connects them.
 **An adopter repo using Chock knows exactly which policies are enforced, by which
 mechanism, on which agent — and cannot silently lose that enforcement.**
 
-Deliberately, the claim is about *truthful, tamper-evident* enforcement, not total
-prevention. Chock is a governance layer, not a sandbox: a determined human with a
-terminal can bypass git hooks, and an agent outside every wired surface sees only
-advisory text. The design goal is that every such gap is *stated* — in the coverage
+Deliberately, the claim is about *truthful* enforcement that an agent cannot switch
+off, not total prevention. Chock is a governance layer, not a sandbox: a determined
+human with a terminal can bypass git hooks and rewrite what is installed, and an agent
+outside every wired surface sees only advisory text. The design goal is that every such gap is *stated* — in the coverage
 report, in SECURITY.md, in this page — never papered over. Overclaiming is treated as
 the highest-severity failure the project can ship, because one discovered overclaim
 discredits every honest number.
@@ -49,20 +49,21 @@ Threat classes defended against:
 | Requirement | Mechanism | Evidence |
 |---|---|---|
 | Untrusted input is validated by allowlist (T1, T2) | Policy ids: anchored `fullmatch` against a fixed pattern, id must equal folder name; manifests: JSON Schema; agent selections: fixed allowlist; URLs: https-only; catalog paths: confinement to the catalog root | `tests/test_manifest_id_safety.py`, property-based suite (`tests/test_properties.py`), weekly atheris fuzzing of the same parsers |
-| Installed content is tamper-evident (T2, T3) | `chock.lock` pins sha256 of every pack and compiled artifact; `--verify-sha` refuses mismatched content before it touches disk; `chock check --only verify` re-derives hashes | lockfile test suite; verify exercised in CI on every PR |
-| Gates fail closed, not open (T4) | CI range mode exits non-zero on an unresolvable base; hook installer bakes an absolute interpreter path (a missing `python` once meant exit 127 = allow); diff filters include renames and merge commits; `core.quotePath` handled for non-ASCII paths | `tests/test_gate_bypasses.py`, `tests/test_pretooluse*.py` — each closed bypass carries its regression test |
-| Enforcement claims are computed, never asserted (T5) | `coverage_level()` credits a surface only when its install is witnessed (hook present, workflow written, settings baked); packaging formats cannot raise coverage (no plugin Surface exists); empty shims report nothing | `tests/test_coverage_honesty*.py`, `tests/test_agent_plugin.py::test_packaging_raises_no_coverage_claim` |
+| Installed content is pinned, and only a person changes it (T1, T2, T3) | `chock.lock` pins sha256 of every pack file and compiled artifact (bytecode caches are outside the hash); `--verify-sha` refuses mismatched content before it touches disk; `chock check --only verify` re-derives hashes, and CI's baseline check refuses a pull request whose policy set is weaker than its base; the commands that rewrite the config, the lock or the compiled tree (`sync`, `add`, `remove`, `enable`, `disable`, `init`, `compile`, `install-hooks`, `recompile`) refuse under an agent marker, as `chock stop` and `resume` do, and `CHOCK_AGENT_COMMIT=0` clears no vendor marker; an uncommitted `policies.disabled` entry changes nothing for an agent | lockfile test suite; verify and the baseline check exercised in CI on every PR; `tests/test_person_only_commands.py`, `tests/test_agent_commit_detection.py` |
+| Gates fail closed, not open (T4) | CI range mode exits non-zero on an unresolvable base; agent hooks run through a committed launcher that refuses (exit 2) when no Python runs, never exit 127 = allow; Cursor gate entries set `failClosed`; diff filters include renames and merge commits; `core.quotePath` handled for non-ASCII paths | `tests/test_gate_bypasses.py`, `tests/test_pretooluse*.py`, `tests/test_hook_launcher.py` — each closed bypass carries its regression test |
+| Enforcement claims are computed, never asserted (T5) | `coverage_level()` credits a surface only when its install is witnessed (hook present, workflow written, settings installed); packaging formats cannot raise coverage (no plugin Surface exists); empty shims report nothing | `tests/test_coverage_honesty*.py`, `tests/test_agent_plugin.py::test_packaging_raises_no_coverage_claim` |
 | Compiled output is deterministic (T3, T5) | All generated artifacts written LF-normalized via one writer; PATCH releases are byte-identical by contract | golden-file suite (`tests/test_emitter_stability.py`) run in CI; `tests/test_windows_line_endings.py` |
 | An agent cannot widen its own permissions (T1) | `protect-agent-config` pre-tool-use guard blocks shell writes to agent config, hooks, and compiled trees without human approval | guard evals; exercised daily in this repo's own sessions |
-| Chock's own supply chain is pinned (T6) | Every GitHub Action pinned to a commit SHA; workflow tokens least-privilege; pip installs hash-pinned (`--require-hashes`); publishing via OIDC Trusted Publishing (no stored secrets); releases carry Sigstore build-provenance attestations | Scorecard (public), CodeQL on every PR, the release workflow itself |
+| Chock's own supply chain is pinned (T6) | Every GitHub Action pinned to a commit SHA; workflow tokens least-privilege; pip installs hash-pinned (`--require-hashes`); the build backend is `setuptools==84.0.0` with hashes in `requirements/build.txt` (and the other locks a job installs), used via `--no-build-isolation` / `python -m build --no-isolation`, while `pyproject.toml` keeps the `setuptools>=77` range for downstream builds; publishing via OIDC Trusted Publishing (no stored secrets); releases carry Sigstore build-provenance attestations | Scorecard (public), CodeQL on every PR, the release workflow itself, `tests/test_build_isolation.py` |
 
 ## Secure design principles, as applied
 
 - **Least privilege**: workflow tokens are read-only by default, write scopes granted
   per job; the tool itself requests no credentials and holds no keys.
 - **Fail-safe defaults**: gates fail closed — an unresolvable CI base ref exits
-  non-zero rather than passing; the hook installer bakes an absolute interpreter path,
-  because a missing interpreter meant exit 127, which a host reads as *allow*; an
+  non-zero rather than passing; agent hooks run through a committed launcher that exits 2
+  when no Python runs, because a missing interpreter meant exit 127, which a host reads
+  as *allow*; an
   uninstalled surface claims nothing rather than assuming success.
 - **Complete mediation**: the CI gate re-runs the same compiled gates server-side,
   where a local `--no-verify` cannot reach; `check --only verify` re-derives hashes
@@ -106,6 +107,16 @@ request as a standing check against this class of defect, with findings triaged 
 - **Fail-open hosts.** Some agent hosts ignore unexpected hook exits; where Chock
   emits for such a host, the emitted description states the fail posture rather
   than implying parity.
+- **The agent markers are environment variables.** `CLAUDECODE`, `AI_AGENT` and the
+  configured `agent_commit_env` names are what the vendor's process exports, not an
+  authenticated identity: a shell that unsets them is a person's as far as a hook can
+  tell. The person-only commands and the agent-commit rule hold for an agent whose
+  vendor marks its shell; the guards on an agent's own commands are the backstop for
+  one that strips its environment.
+- **The pack hash covers source files, not bytecode**, and the vendored runtime's pin
+  is compared after the shared runtime is loaded: a planted `.pyc` or an edit to the
+  shared runtime is caught by `chock check --only verify` and by CI, not before the
+  file runs.
 
 Each of these is a documented limit with a stated mitigation path — the assurance the
 project offers is that the map matches the territory, including the holes.

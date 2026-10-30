@@ -12,6 +12,7 @@ from typing import Any, NoReturn
 
 import yaml
 
+from chock.compile.actions import credited_surfaces
 from chock.compile.emitters import (
     ambient,
     ci,
@@ -129,7 +130,11 @@ def compile_policy(
         if not emitted and surface_dir.exists():
             shutil.rmtree(surface_dir, ignore_errors=True)
 
-    selected_set = {Surface(t) for t, paths in artifacts.items() if paths}
+    has_guard = in_agent._guard_script(policy_dir, policy_id) is not None
+    produced = {Surface(t) for t, paths in artifacts.items() if paths}
+    if not git_hook.runs_at_commit(artifacts.get(Surface.GIT_HOOK.value, [])):
+        produced.discard(Surface.GIT_HOOK)  # a push-only hook is not enforced at commit; never claim it
+    selected_set = credited_surfaces(produced, manifest, has_guard=has_guard)
     agent_list = agents or sorted(SURFACE_AGENTS)
     root = Path(repo_root) if repo_root else output_root.parent.parent
     vendor_installed = {vendor: installed_policy_ids(root, vendor) for vendor in WIRED_VENDORS}
@@ -216,5 +221,5 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {surface}: {', '.join(str(p) for p in paths)}")
     print("Coverage:")
     for agent, cell in sorted(result.coverage.get(result.policy_id, {}).items()):
-        print(f"  {agent}: {render_grade(Grade(**cell))}")
+        print(f"  {agent}: {render_grade(Grade.read(cell))}")
     return 0

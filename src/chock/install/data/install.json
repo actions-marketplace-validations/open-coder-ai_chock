@@ -1,0 +1,188 @@
+{
+  "marketplace": "chock-local",
+  "description": "Policies chosen in one chock selection, packaged as one plugin. Friction, not a security boundary.",
+  "disclaimer": "These policies add friction to an agent's mistakes; they are not a security boundary.",
+  "origin": {
+    "custom": "custom, not reviewed"
+  },
+  "tier_prefix": "__GRADE__, and __FAIL__ (agentseam __BASIS__): ",
+  "tier_fail_mode": {
+    "open": "a hook error lets the action through",
+    "closed": "a hook error blocks the action",
+    "configurable": "what a hook error does is configurable"
+  },
+  "labels": {
+    "block": "blocks",
+    "ask": "asks",
+    "warn": "warns",
+    "advise": "advisory"
+  },
+  "trusted_sources": [
+    "https://github.com/open-coder-ai/chock-catalog"
+  ],
+  "published_branch": "main",
+  "clients": {
+    "claude-code": {
+      "name": "Claude Code",
+      "format": "claude",
+      "layout": "marketplace",
+      "dest": "~/.chock/marketplace/claude-code",
+      "binary": "claude",
+      "index": [{"path": ".claude-plugin/marketplace.json", "style": "claude"}],
+      "label_prefix": "",
+      "gate_turn_end_only": false,
+      "steps": [
+        {"command": ["claude", "plugin", "marketplace", "add", "__DEST__"]},
+        {"command": ["claude", "plugin", "install", "__PLUGIN__@__MARKETPLACE__"]},
+        {"note": "Both commands are safe to repeat. The plugin loads in place from the directory: restart the Claude Code session, or run /reload-plugins in it, to pick up a rebuild."}
+      ]
+    },
+    "copilot": {
+      "name": "GitHub Copilot",
+      "format": "claude",
+      "layout": "marketplace",
+      "dest": "~/.chock/marketplace/copilot",
+      "binary": "copilot",
+      "index": [{"path": ".claude-plugin/marketplace.json", "style": "claude"}],
+      "label_prefix": "",
+      "gate_turn_end_only": false,
+      "steps": [
+        {"command": ["copilot", "plugin", "marketplace", "add", "__DEST__"]},
+        {"command": ["copilot", "plugin", "install", "__PLUGIN__@__MARKETPLACE__"]},
+        {"note": "VS Code finds plugins the Copilot CLI installed. Without the CLI, add the plugin folder to your VS Code user settings yourself:"},
+        {"settings": {"chat.pluginLocations": {"__PLUGIN_DIR__": true}}}
+      ]
+    },
+    "codex": {
+      "name": "Codex",
+      "format": "codex",
+      "layout": "marketplace",
+      "dest": "~/.chock/marketplace/codex",
+      "binary": "codex",
+      "index": [
+        {
+          "path": ".agents/plugins/marketplace.json",
+          "style": "codex",
+          "entry": {"policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"}, "category": "Productivity"}
+        }
+      ],
+      "label_prefix": "once its hooks are trusted in /hooks: ",
+      "gate_turn_end_only": false,
+      "steps": [
+        {"command": ["codex", "plugin", "marketplace", "add", "__DEST__"]},
+        {"note": "Then install __PLUGIN__ from the __MARKETPLACE__ marketplace in /plugins, and review and trust its hooks in /hooks: until you do, they do not run."}
+      ]
+    },
+    "cursor": {
+      "name": "Cursor",
+      "format": "cursor",
+      "layout": "plugin-dir",
+      "dest": "~/.cursor/plugins/local",
+      "binary": null,
+      "index": [],
+      "label_prefix": "",
+      "gate_turn_end_only": false,
+      "steps": [
+        {"note": "Cursor loads __PLUGIN_DIR__ as a local plugin: run \"Developer: Reload Window\" (or restart Cursor), then check it under Customize. There is no command to run."}
+      ]
+    },
+    "devin": {
+      "name": "Devin",
+      "format": "devin",
+      "layout": "plugin-dir",
+      "dest": "~/.chock/marketplace/devin",
+      "binary": "devin",
+      "index": [],
+      "label_prefix": "best-effort, and a hook error lets the action through: ",
+      "gate_turn_end_only": true,
+      "steps": [
+        {"note": "On Windows, `devin plugins install --local` creates a symbolic link, so it needs Developer Mode (Settings > System > For developers) or an elevated shell; otherwise it fails with \"os error 1314: A required privilege is not held by the client\"."},
+        {"command": ["devin", "plugins", "install", "--local", "__PLUGIN_DIR__"]},
+        {"note": "The plugin is linked in place: a rebuild applies from the next Devin session."}
+      ]
+    },
+    "goose": {
+      "name": "goose",
+      "format": "goose",
+      "layout": "plugin-dir",
+      "dest": "~/.agents/plugins",
+      "binary": null,
+      "index": [],
+      "tier_label": true,
+      "gate_turn_end_only": false,
+      "steps": [
+        {"note": "goose discovers __PLUGIN_DIR__ as a user plugin, in every project: start a new goose session. There is no command to run (`goose plugin install` takes a git URL only). To turn it off, add __PLUGIN__ to disabledPlugins in ~/.config/goose/settings.json."}
+      ]
+    },
+    "grok": {
+      "name": "Grok",
+      "format": "grok",
+      "layout": "plugin-dir",
+      "dest": "~/.chock/marketplace/grok",
+      "binary": "grok",
+      "index": [],
+      "tier_label": true,
+      "gate_turn_end_only": false,
+      "steps": [
+        {"command": ["grok", "plugin", "install", "__PLUGIN_DIR__", "--trust"]},
+        {"note": "Plugins are off in grok until enabled, and chock does not edit grok's config: run `grok plugin list` for the name grok gave this plugin (chock expects __PLUGIN__, its folder name; the docs do not say how a plugin with no plugin.json is named), then `grok plugin enable <name>`, or add it to `enabled` under [plugins] in ~/.grok/config.toml, or press Space on it in the Plugins tab. Re-run the install command after a rebuild."}
+      ]
+    },
+    "antigravity": {
+      "name": "Antigravity",
+      "format": "antigravity",
+      "layout": "plugin-dir",
+      "dest": "~/.chock/marketplace/antigravity",
+      "binary": "agy",
+      "index": [],
+      "tier_label": true,
+      "gate_turn_end_only": true,
+      "steps": [
+        {"command": ["agy", "plugin", "install", "__PLUGIN_DIR__"]},
+        {"note": "Antigravity 2.0 and the IDE read plugin folders from ~/.gemini/config/plugins/ instead: copy __PLUGIN_DIR__ there. Its hooks name __PLUGIN_DIR__ by absolute path (Antigravity documents no plugin-root variable), so keep that folder where it is; re-run the install command after a rebuild."}
+      ]
+    },
+    "openhands": {
+      "name": "OpenHands",
+      "format": "openhands",
+      "layout": "plugin-dir",
+      "dest": "~/.chock/marketplace/openhands",
+      "binary": null,
+      "index": [],
+      "tier_label": true,
+      "gate_turn_end_only": false,
+      "steps": [
+        {"note": "OpenHands loads a local plugin when it starts: run `openhands --plugin __PLUGIN_DIR__`, or add \"__PLUGIN_DIR__\" to sources under [plugins] in ~/.openhands/config.toml (chock does not edit it). Its hooks name __PLUGIN_DIR__ by absolute path (OpenHands documents no plugin-root variable), so keep that folder where it is; a rebuild applies from the next start."}
+      ]
+    },
+    "kimi-code": {
+      "name": "Kimi Code",
+      "format": "kimi",
+      "layout": "plugin-dir",
+      "dest": "~/.chock/marketplace/kimi-code",
+      "binary": null,
+      "index": [],
+      "tier_label": true,
+      "gate_turn_end_only": false,
+      "steps": [
+        {"note": "Kimi Code installs plugins from its TUI only, and chock does not drive it: in Kimi Code run `/plugins install __PLUGIN_DIR__`, then `/reload` (or `/new`). Kimi copies the plugin to $KIMI_CODE_HOME/plugins/managed/__PLUGIN__/ and runs that copy, so after a rebuild install it again. The plugin applies to every project you open (Kimi has no project-level plugin scope); `/plugins disable __PLUGIN__` turns it off."}
+      ]
+    },
+    "factory-droid": {
+      "name": "Factory Droid",
+      "format": "droid",
+      "layout": "marketplace",
+      "dest": "~/.chock/marketplace/factory-droid/chock-local",
+      "binary": "droid",
+      "index": [{"path": ".factory-plugin/marketplace.json", "style": "claude", "entry_keys": ["name", "source", "description"]}],
+      "tier_label": true,
+      "gate_turn_end_only": false,
+      "steps": [
+        {"note": "Run these from the root of the project the plugin is for: `--scope project` records it in that project's Droid settings. The marketplace is local to this machine; chock publishes nothing."},
+        {"command": ["droid", "plugin", "marketplace", "add", "__DEST__"]},
+        {"command": ["droid", "plugin", "install", "__PLUGIN__@__MARKETPLACE__", "--scope", "project"]},
+        {"note": "Droid names a local marketplace from its source; if `droid plugin marketplace list` shows a name other than __MARKETPLACE__ (a --dest folder named otherwise), install __PLUGIN__@<that name>. Droid copies the plugin into its cache: after a rebuild run `droid plugin marketplace update` and `droid plugin update __PLUGIN__@__MARKETPLACE__ --scope project`, then start a new session."}
+      ]
+    }
+  }
+}

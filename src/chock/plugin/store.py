@@ -9,6 +9,7 @@ from typing import Any, Callable
 from agentseam import packaging
 
 from chock.emit import write_generated
+from chock.plugin.gate_package import IMPLEMENTATIONS
 
 _DATA = Path(__file__).resolve().parent / "data" / "stores"
 
@@ -23,10 +24,49 @@ SCRIPTS_TEMPLATE = packaging.supports("claude_code", packaging.EXECUTABLE)
 assert packaging.supports("copilot", packaging.EXECUTABLE) == SCRIPTS_TEMPLATE  # noqa: S101 -- import-time cross-check of two upstream constants
 
 
+def guard_files(policy_dir: Path, script: str) -> dict[Path, str]:
+    """The guard script and all of `implementations/` it may import or read, by scripts path."""
+    root = Path(policy_dir) / IMPLEMENTATIONS
+    sources = {
+        path.relative_to(root): path
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc"
+    }
+    sources.setdefault(Path(script), root / script)
+    return {
+        Path(SCRIPTS_TEMPLATE.format(name=rel.as_posix())): path.read_text(encoding="utf-8")
+        for rel, path in sources.items()
+    }
+
+
 def owned_subtrees(store: str) -> tuple[str, ...]:
     """The top-level directories `store`'s package owns, from its store-data file."""
     data = json.loads((_DATA / f"{store}.json").read_text(encoding="utf-8"))
     return tuple(data["owned_subtrees"])
+
+
+def layout(store: str) -> dict[str, Any] | None:
+    """chock's own record of `store`'s plugin layout, where agentseam records none yet; else None."""
+    path = _DATA / f"{store}.json"
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8")).get("layout")
+
+
+def hook_timeout_field(store: str) -> str | None:
+    """The seconds-valued timeout key `store`'s hook entries take, where chock's store data records one; else None."""
+    path = _DATA / f"{store}.json"
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8")).get("hook_timeout_field")
+
+
+def windows_hook_command(store: str) -> str | None:
+    """The command form `store`'s Windows hook runner needs (`quote_free`), where chock's store data records one; else None."""
+    path = _DATA / f"{store}.json"
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8")).get("windows_hook_command")
 
 
 def _owned_candidates(out_dir: Path, sub: str) -> list[Path]:

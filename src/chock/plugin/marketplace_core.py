@@ -12,7 +12,8 @@ from typing import Any
 
 from agentseam import packaging
 
-from chock.lock import compute_pack_hash
+from chock.lock import compute_pack_hash, pack_hash_matches
+from chock.plugin import store
 from chock.vendors import CHOCK_AGENT
 
 OWNER = {"name": "open-coder-ai", "url": "https://github.com/open-coder-ai"}
@@ -42,8 +43,9 @@ INDEX_PATHS = TREES["claude"]["index_paths"]
 
 
 def _manifest_rel(tree: str) -> str:
-    """This tree's plugin manifest path, from agentseam's packaging layout."""
-    return packaging.layout(CHOCK_AGENT[tree])["manifest"]
+    """This tree's plugin manifest path: chock's store data where it records one (droid), else agentseam's packaging."""
+    own = store.layout(tree)
+    return own["manifest"] if own is not None else packaging.layout(CHOCK_AGENT[tree])["manifest"]
 
 
 def collect_entries(dist_root: Path, tree: str = CLAUDE_TREE) -> list[dict[str, Any]]:
@@ -65,14 +67,14 @@ def collect_entries(dist_root: Path, tree: str = CLAUDE_TREE) -> list[dict[str, 
 
 
 DESCRIPTION = (
-    "Chock policies packaged as installable plugins. Generated from the chock-catalog; "
+    "Blocks your coding agent's wrong moves before they land. Generated from the chock-catalog; "
     "each plugin states whether it enforces in this client or is advisory."
 )
 
 
 def build_index(dist_root: Path, name: str, tree: str = CLAUDE_TREE) -> dict[str, Any]:
     entries = collect_entries(dist_root, tree)
-    if TREES[tree]["style"] == "cursor":
+    if TREES.get(tree, {}).get("style") == "cursor":
         return {
             "name": name,
             "owner": {"name": OWNER["name"]},
@@ -88,6 +90,8 @@ def build_index(dist_root: Path, name: str, tree: str = CLAUDE_TREE) -> dict[str
 
 
 LOCKFILE_NAME = "chock-market.lock"
+LOCKFILE_VERSION = 2
+_V1 = 1
 
 NEWLINE = chr(10)
 
@@ -101,7 +105,20 @@ def build_lock(dist_root: Path) -> dict[str, Any]:
             continue
         rel = manifest.relative_to(dist_root).as_posix()
         plugins[rel] = compute_pack_hash(manifest)
-    return {"lockfile_version": 1, "plugins": plugins}
+    return {"lockfile_version": LOCKFILE_VERSION, "plugins": plugins}
+
+
+def _old_lock_matches(dist_root: Path, text: str) -> bool:
+    """A version 1 lockfile still holds while every listed plugin directory matches under `pack_hash_matches`."""
+    try:
+        old = json.loads(text)
+    except json.JSONDecodeError:
+        return False
+    plugins = old.get("plugins") if isinstance(old, dict) else None
+    if not isinstance(plugins, dict) or old.get("lockfile_version") != _V1:
+        return False
+    want = build_lock(dist_root)["plugins"]
+    return set(plugins) == set(want) and all(pack_hash_matches(Path(dist_root) / rel, h) for rel, h in plugins.items())
 
 
 def lock_differences(dist_root: Path) -> list[str]:
@@ -110,7 +127,8 @@ def lock_differences(dist_root: Path) -> list[str]:
     dest = Path(dist_root) / LOCKFILE_NAME
     if not dest.exists():
         return [f"missing: {LOCKFILE_NAME}"]
-    return [] if dest.read_text(encoding="utf-8") == content else [f"differs: {LOCKFILE_NAME}"]
+    found = dest.read_text(encoding="utf-8")
+    return [] if found == content or _old_lock_matches(dist_root, found) else [f"differs: {LOCKFILE_NAME}"]
 
 
 def index_differences(dist_root: Path, name: str, tree: str = CLAUDE_TREE) -> list[str]:

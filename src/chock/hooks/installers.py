@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from chock.emit import write_generated
+from chock.gate.build import vendor_runner
 from chock.hooks.autocompile import auto_compile
 from chock.hooks.ownership import (
     GENERATED_MARKER,
@@ -21,6 +22,8 @@ from chock.resources import package_data_dir
 
 _DATA_DIR = package_data_dir("chock.hooks", "data")
 DISPATCHER_TEMPLATE = _DATA_DIR.joinpath("dispatcher.sh").read_text(encoding="utf-8")
+#: The dispatcher every sync wrote before it checked `chock stop`: replacing it unedited is no edit to keep.
+_PREVIOUS_DISPATCHER = _DATA_DIR.joinpath("dispatcher_before_stop.sh").read_text(encoding="utf-8")
 _VALIDATE_WRAPPER_WINDOWS_TEMPLATE = _DATA_DIR.joinpath("validate_wrapper_windows.sh").read_text(encoding="utf-8")
 _POLICY_WRAPPER_TEMPLATE = _DATA_DIR.joinpath("policy_wrapper.sh").read_text(encoding="utf-8")
 _GIT = shutil.which("git") or "git"
@@ -62,12 +65,12 @@ def get_hooks_dir(repo_root: Path) -> Path:
     return path if path.is_absolute() else repo_root / path
 
 
-def _backup_edited_dispatcher(dispatcher: Path, content: str) -> None:
-    """Copy an ours-but-edited dispatcher aside before the overwrite below destroys it."""
+def _backup_edited_dispatcher(dispatcher: Path, content: str, previous: str = "") -> None:
+    """Copy an ours-but-edited dispatcher aside before the overwrite below destroys it; `previous` is no edit."""
     try:
         if not (dispatcher.exists() and not dispatcher.is_symlink() and is_ours(dispatcher)):
             return
-        if dispatcher.read_text(encoding="utf-8") == content:
+        if dispatcher.read_text(encoding="utf-8") in (content, previous):
             return
         backup = dispatcher.with_name(f"{dispatcher.name}.chock-backup")
         n = 2
@@ -92,8 +95,11 @@ def install_dispatcher(hooks_dir: Path, event: str) -> Path:
     impl_dir.mkdir(parents=True, exist_ok=True)
     relocate_existing_hook(dispatcher, impl_dir)
     remove_self_relocated_hook(impl_dir)
-    content = DISPATCHER_TEMPLATE.replace("__EVENT__", event).replace("__MARKER__", GENERATED_MARKER)
-    _backup_edited_dispatcher(dispatcher, content)
+    content, previous = (
+        template.replace("__EVENT__", event).replace("__MARKER__", GENERATED_MARKER)
+        for template in (DISPATCHER_TEMPLATE, _PREVIOUS_DISPATCHER)
+    )
+    _backup_edited_dispatcher(dispatcher, content, previous)
     write_generated(dispatcher, content)
     dispatcher.chmod(0o755)
     print(f"Installed {event} dispatcher to {dispatcher}")
@@ -149,17 +155,21 @@ def _discover_policy_hooks(repo_root: Path, script_name: str) -> list[Path]:
 
 
 def install_policy_hooks(repo_root: Path, hooks_dir: Path) -> None:
-    """Discover compiler-generated git-pre-commit.sh and git-pre-push.sh and register them."""
+    """Discover compiler-generated git-<event>.sh shims and register them under each event dispatcher."""
     if not is_git_repo(repo_root):
         warn(NOT_A_GIT_REPO.format(root=repo_root))
         return
 
     auto_compile(repo_root)
+    # The dispatcher asks the runner whether a stop's committer is an agent: a repo with no policy has none otherwise.
+    if not (repo_root / ".chock" / "bin" / "gate.py").exists():
+        vendor_runner(repo_root / ".chock")
 
     events = {
         "pre-commit": "git-pre-commit.sh",
         "pre-merge-commit": "git-pre-commit.sh",
         "pre-push": "git-pre-push.sh",
+        "commit-msg": "git-commit-msg.sh",
     }
 
     for event, script_name in events.items():

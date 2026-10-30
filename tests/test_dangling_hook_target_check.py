@@ -11,7 +11,7 @@ from pathlib import Path
 from conftest import baseline_policy, init_repo
 
 from chock.scaffold.recompile import recompile
-from chock.validation.checks_repo import check_dangling_hook_targets
+from chock.validation.checks_hook_targets import check_dangling_hook_targets
 from chock.validation.report import Report
 from chock.vendors import CHOCK_AGENT
 
@@ -37,6 +37,19 @@ def test_a_hand_planted_dangling_entry_fails(tmp_path: Path) -> None:
     assert [f.check for f in report.errors] == ["dangling_hook_target"]
     assert ".chock/bin/cursor.py" in report.errors[0].message
     assert "chock sync" in report.errors[0].message
+
+
+def test_a_missing_launcher_fails(tmp_path: Path) -> None:
+    """Every hook command runs `.chock/bin/launch.sh` first: without it no gate starts."""
+    repo = _repo(tmp_path)
+    recompile(repo, ["cursor"], skip_hooks=False)
+
+    (repo / ".chock" / "bin" / "launch.sh").unlink()
+
+    report = Report()
+    check_dangling_hook_targets(repo, report)
+    assert [f.check for f in report.errors] == ["dangling_hook_target"]
+    assert ".chock/bin/launch.sh" in report.errors[0].message
 
 
 def test_a_clean_tree_is_silent(tmp_path: Path) -> None:

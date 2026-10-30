@@ -8,21 +8,20 @@ from typing import Any
 
 from agentseam import packaging
 
-from chock.compile.emitters.in_agent import _guard_script, tool_use_gate_spec
 from chock.compile.emitters.in_agent_hooks import hooks_map_file
-from chock.plugin import gate_package, store
+from chock.hooks import launch, stop_check
+from chock.plugin import gate_package, guard_gate, store
 from chock.plugin.build import (
-    _ADVISORY_NOTE_HOOK,
-    _ADVISORY_NOTE_RULE,
     LICENSE_REL,
     NAMESPACE,
+    advisory_note,
     build_manifest,
     build_skill,
     license_text,
     plugin_name,
     skill_assets,
 )
-from chock.plugin.claude import POSTURE_ADVISORY, _adapter_source
+from chock.plugin.claude import POSTURE_ADVISORY, _runtime_files
 from chock.plugin.store import SCRIPTS_TEMPLATE as _SCRIPTS_TEMPLATE
 
 _LAYOUT = packaging.layout("copilot")
@@ -33,55 +32,79 @@ POSTURE_ENFORCED_COPILOT = (
     "Session-enforced by the PreToolUse hook under com.github.copilot/ in clients that "
     "read that namespace (documented for VS Code agent mode); a client that ignores it, "
     "as the Agent Plugins spec tells generic clients to, gets the advisory skill only. "
-    "The hook needs python3 and a usable bash. Without them, fail-open clients allow "
-    "silently; fail-closed clients refuse matched commands. On Windows, disable the "
-    "python3 Store alias or install Python. If the guard itself crashes or times out, the "
+    "The hook needs git, a usable bash and a Python 3.11+ (python3, python or py, whichever "
+    "actually runs). With no working Python it exits 2; without git or bash, fail-open clients "
+    "allow silently and fail-closed clients refuse matched commands. If the guard itself "
+    "crashes or times out, the "
     "hook asks for confirmation rather than allowing silently -- VS Code agent mode honours "
     "that ask and it overrides the client's own auto-approve."
 )
 
 _COPILOT_ENFORCED_NOTE = (
     "This package ships a PreToolUse hook under com.github.copilot/. It enforces only in a "
-    "client that both reads that namespace AND tells the hook where the package lives; a "
-    "client that exports no plugin-root variable runs the hook, which then allows -- so "
-    "treat this package as advisory unless a deny has been witnessed in your own client. "
+    "client that both reads that namespace AND tells the hook where the package lives. A "
+    "client that exports no plugin-root variable (VS Code's agent-plugin format exports none) "
+    "runs the hook, which then exits 0 and checks nothing; a root that is set but lacks the "
+    "bundled hook exits 2 and refuses the call. "
     "A client that ignores the namespace gets this text only. Repo-wide enforcement across "
     "every commit and in CI still needs `chock sync`. "
     "See https://github.com/open-coder-ai/chock"
 )
 
 
-def _hook_command(script: str) -> str:
-    """One interpreter invocation, guarded so an unresolved plugin root ALLOWS."""
+_NO_ADAPTER_REFUSAL = (
+    "chock: the plugin root is set but the bundled hook is missing, so this call cannot be "
+    "checked. Refusing rather than allowing it unchecked."
+)
+
+
+def _root_guarded(target: str, flag: str) -> str:
+    """One interpreter invocation: no plugin root allows (exit 0), a root without the adapter refuses (exit 2)."""
     assert PLUGIN_ROOT.startswith("${") and PLUGIN_ROOT.endswith("}"), PLUGIN_ROOT  # noqa: S101 -- build-time constant, not request input
     root = f"{PLUGIN_ROOT[:-1]}:-}}"
     adapter = f'"$r/{_SCRIPTS_TEMPLATE.format(name="vscode_copilot.py")}"'
-    guard = f'"$r/{_SCRIPTS_TEMPLATE.format(name=script)}"'
-    return f'r="{root}"; [ -n "$r" ] && [ -f {adapter} ] || exit 0; exec python3 {adapter} --guard {guard}'
+    launcher = launch.plugin_interpreter(f"$r/{_SCRIPTS_TEMPLATE.format(name=launch.PLUGIN_LAUNCHER)}")
+    named = f'"$r/{_SCRIPTS_TEMPLATE.format(name=target)}"'
+    refuse = f"{{ echo '{_NO_ADAPTER_REFUSAL}' >&2; exit 2; }}"
+    return f'r="{root}"; [ -n "$r" ] || exit 0; [ -f {adapter} ] || {refuse}; exec {launcher} {adapter} {flag} {named}'
 
 
-POSTURE_GATE_COPILOT = gate_package.gate_posture(
-    "vscode_copilot",
-    "Enforces only in a client that reads the com.github.copilot namespace and tells the hook where the package lives; a client that exports no plugin-root variable runs the hook, which then allows, so treat this package as advisory unless a deny has been witnessed in your own client.",
+def _hook_command(script: str) -> str:
+    """The guard's invocation."""
+    return _root_guarded(script, "--guard")
+
+
+#: Both hooks run through the same root check, so this holds for the guard as much as the gate.
+_ROOT_CAVEAT = (
+    "Enforces only in a client that reads the com.github.copilot namespace and tells the hook where the package "
+    "lives; a client that exports no plugin-root variable (VS Code's agent-plugin format exports none) runs the "
+    "hook, which then exits 0 and checks nothing; a root that is set but lacks the bundled hook exits 2 and "
+    "refuses the call."
 )
-_GATE_NOTE_COPILOT = gate_package.gate_skill_note("vscode_copilot")
+POSTURE_GATE_COPILOT = gate_package.gate_posture("vscode_copilot", _ROOT_CAVEAT)
 
 
 def _gate_command() -> str:
     """The same adapter, handed the packaged gate instead of a guard."""
-    assert PLUGIN_ROOT.startswith("${") and PLUGIN_ROOT.endswith("}"), PLUGIN_ROOT  # noqa: S101 -- build-time constant, not request input
-    root = f"{PLUGIN_ROOT[:-1]}:-}}"
-    adapter = f'"$r/{_SCRIPTS_TEMPLATE.format(name="vscode_copilot.py")}"'
-    gate = f'"$r/{_SCRIPTS_TEMPLATE.format(name="gate.json")}"'
-    return f'r="{root}"; [ -n "$r" ] && [ -f {adapter} ] || exit 0; exec python3 {adapter} --gate {gate}'
+    return _root_guarded("gate.json", "--gate")
+
+
+def manifest_posture(*, enforced: bool, gate: bool = False, guard: bool = False) -> str:
+    """The posture sentence a package's description ends with; `guard` with `gate` states both halves."""
+    if not enforced:
+        return POSTURE_ADVISORY
+    if guard and gate:
+        bare = gate_package.gate_posture("vscode_copilot")
+        return guard_gate.posture(POSTURE_ENFORCED_COPILOT, bare, guard=True, gate=True, shared=_ROOT_CAVEAT)
+    return guard_gate.posture(POSTURE_ENFORCED_COPILOT, POSTURE_GATE_COPILOT, guard=not gate, gate=gate)
 
 
 def build_copilot_manifest(
-    manifest: dict[str, Any], policy_dir: Path, *, enforced: bool, gate: bool = False
+    manifest: dict[str, Any], policy_dir: Path, *, enforced: bool, gate: bool = False, guard: bool = False
 ) -> dict[str, Any]:
     """Derive the root `plugin.json` from a policy manifest."""
     data = build_manifest(manifest, policy_dir)
-    posture = (POSTURE_GATE_COPILOT if gate else POSTURE_ENFORCED_COPILOT) if enforced else POSTURE_ADVISORY
+    posture = manifest_posture(enforced=enforced, gate=gate, guard=guard)
     data["description"] = f"{data['description']} [{posture}]".strip()
     extension = data["extensions"][NAMESPACE]
     del extension["manifest"]
@@ -96,25 +119,24 @@ def copilot_plugin_files(policy_dir: Path, manifest: dict[str, Any], repo_root: 
     policy_dir = Path(policy_dir)
     policy_id = manifest.get("id") or policy_dir.name
     name = plugin_name(str(policy_id))
-    script = _guard_script(policy_dir, str(policy_id))
-    gate = (
-        None
-        if script or not gate_package.gate_reaches("vscode_copilot")
-        else tool_use_gate_spec(policy_dir, Path(repo_root))
-    )
-    enforced = script is not None or gate is not None
+    parts = guard_gate.halves("vscode_copilot", policy_dir, str(policy_id), Path(repo_root))
+    script, gate, enforced = parts.script, parts.gate, parts.enforced
 
     skill = build_skill(policy_dir, manifest, Path(repo_root), hooks=HOOKS_REL if enforced else None)
-    if script:
-        skill = skill.replace(_ADVISORY_NOTE_RULE, _COPILOT_ENFORCED_NOTE).replace(
-            _ADVISORY_NOTE_HOOK, _COPILOT_ENFORCED_NOTE
-        )
-    elif gate:
-        skill = skill.replace(_ADVISORY_NOTE_RULE, _GATE_NOTE_COPILOT).replace(_ADVISORY_NOTE_HOOK, _GATE_NOTE_COPILOT)
+    generic = advisory_note(policy_dir, manifest)
+    note = guard_gate.skill_note(
+        _COPILOT_ENFORCED_NOTE if script else None,
+        gate_package.gate_skill_note("vscode_copilot", gate.get("action")) if gate else None,
+    )
+    if note:
+        skill = skill.replace(generic, note)
 
     files: dict[Path, str] = {
         Path(_LAYOUT["manifest"]): json.dumps(
-            build_copilot_manifest(manifest, policy_dir, enforced=enforced, gate=gate is not None), indent=2
+            build_copilot_manifest(
+                manifest, policy_dir, enforced=enforced, gate=gate is not None, guard=script is not None
+            ),
+            indent=2,
         )
         + "\n",
         Path(packaging.supports("copilot", packaging.SKILL).format(name=name)): skill,
@@ -124,18 +146,18 @@ def copilot_plugin_files(policy_dir: Path, manifest: dict[str, Any], repo_root: 
     licence = license_text(manifest)
     if licence:
         files[LICENSE_REL] = licence
+    hooks = guard_gate.merge_hooks(
+        hooks_map_file("vscode_copilot", _hook_command(script)) if script else None,
+        gate_package.gate_hooks_file("vscode_copilot", _gate_command()) if gate else None,
+    )
+    if hooks is not None:
+        hooks = guard_gate.merge_hooks(hooks, stop_check.plugin_doc("vscode_copilot", hooks, generic=False))
+        files[Path(HOOKS_REL)] = json.dumps(hooks, indent=2) + "\n"
+        files.update(_runtime_files("vscode_copilot"))
     if script:
-        files[Path(HOOKS_REL)] = json.dumps(hooks_map_file("vscode_copilot", _hook_command(script)), indent=2) + "\n"
-        files[Path(_SCRIPTS_TEMPLATE.format(name="vscode_copilot.py"))] = _adapter_source("vscode_copilot")
-        files[Path(_SCRIPTS_TEMPLATE.format(name=script))] = (policy_dir / "implementations" / script).read_text(
-            encoding="utf-8"
-        )
-    elif gate:
-        files[Path(HOOKS_REL)] = (
-            json.dumps(gate_package.gate_hooks_file("vscode_copilot", _gate_command()), indent=2) + "\n"
-        )
-        files[Path(_SCRIPTS_TEMPLATE.format(name="vscode_copilot.py"))] = _adapter_source("vscode_copilot")
-        files.update(gate_package.packaged_gate_files(policy_dir, gate, _SCRIPTS_TEMPLATE))
+        guard_gate.place(files, store.guard_files(policy_dir, script))
+    if gate:
+        guard_gate.place(files, gate_package.packaged_gate_files(policy_dir, gate, _SCRIPTS_TEMPLATE))
     return files
 
 

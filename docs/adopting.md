@@ -66,14 +66,16 @@ gap with three mechanisms, each consented where consent is required:
 
 1. **The ambient arm rule (every agent, zero setup).** The managed pointer block in
    `AGENTS.md` — read by all fourteen adapters — tells the agent:
-   `fresh_clone: git never clones hooks -> run(chock sync --repo .) before first commit`.
-   A contributor's coding agent arms the hooks before it can trip them.
+   `fresh_clone: first session arms hooks from what is committed; a person runs(chock sync) to change enforcement`.
+   A contributor's coding agent arms the hooks from what is committed before it can trip them;
+   only a person changes what is enforced.
 2. **The SessionStart arm hook (Claude Code, automatic).** `chock sync` wires a
    `SessionStart` entry into the committed `.claude/settings.json` that runs the vendored
    `.chock/bin/claude_code.py` when a session opens — consented through Claude Code's
    workspace-trust prompt, the same gate PreToolUse passes through. If the hooks are
-   already armed it stays silent; if `chock` is installed it runs `chock sync` itself; if
-   not, it prints the exact command into the session context so the agent runs it.
+   already armed it stays silent; if `chock` is installed it runs `chock sync --committed`
+   itself, which compiles what is committed and refuses when the config, lock or a policy
+   differs from HEAD; if not, it prints the command into the session context for a person to run.
 3. **Bootstrap piggyback (humans, and every other entry path).** Put `chock sync --repo .`
    wherever contributors already run setup:
 
@@ -130,7 +132,11 @@ reinstalled:
 3. `ls .chock/compiled/scan-secrets/git-hook/gate.json` should exist.
 4. Commit a file containing a credential. `scan-secrets` should block it and print the policy message.
 
-If your consumer `.gitignore` contains a broad `.chock/` rule, add un-ignore lines so the committed artifacts stay tracked:
+`chock init` and `chock sync` write these un-ignore lines to your `.gitignore`, so a global ignore
+rule cannot keep the gate out of your commits. The `bin/` in the Visual Studio, .NET and Java
+templates is the usual culprit: it matches `.chock/bin/`, and every agent hook then names a file a
+clone does not have. `chock check` reports a hook target that is missing or git-ignored. If your
+own `.gitignore` has a broad `.chock/` rule, keep the lines below after it:
 
 ```gitignore
 !.chock/bin/

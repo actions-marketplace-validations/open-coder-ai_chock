@@ -10,9 +10,11 @@ from pathlib import Path
 
 import pytest
 from agentseam import contract as _contract
+from runtime_payloads import DENY_ON_THE_WIRE, PAYLOADS
+from runtime_support import write_runtime
 
 from chock import evidence
-from chock.gate import guard_runner, runtime_bundle
+from chock.gate import budget, guard_runner, runtime_bundle
 
 
 @pytest.fixture(scope="module")
@@ -22,7 +24,7 @@ def runtimes(tmp_path_factory) -> dict[str, Path]:
     paths = {}
     for agent in runtime_bundle.RUNTIME_AGENTS:
         path = out / f"{agent}.py"
-        path.write_text(runtime_bundle.render(agent), encoding="utf-8")
+        write_runtime(path, agent)
         paths[agent] = path
     return paths
 
@@ -32,92 +34,6 @@ def make_guard(tmp_path: Path, name: str, body: str) -> Path:
     guard.write_text(f"#!/usr/bin/env bash\n{body}\n", encoding="utf-8", newline="\n")
     guard.chmod(guard.stat().st_mode | stat.S_IEXEC)
     return guard
-
-
-PAYLOADS = {
-    "claude_code": lambda c: {
-        "hook_event_name": "PreToolUse",
-        "tool_name": "Bash",
-        "tool_input": {"command": c},
-        "session_id": "s",
-        "transcript_path": "/t",
-        "permission_mode": "default",
-    },
-    "vscode_copilot": lambda c: {
-        "hook_event_name": "PreToolUse",
-        "timestamp": "2026-08-31T00:00:00Z",
-        "tool_name": "Bash",
-        "tool_input": {"command": c},
-        "tool_use_id": "1",
-    },
-    "cursor": lambda c: {
-        "hook_event_name": "beforeShellExecution",
-        "conversation_id": "a",
-        "generation_id": "b",
-        "cursor_version": "3.17.8",
-        "workspace_roots": ["/x"],
-        "command": c,
-        "cwd": "/x",
-        "sandbox": False,
-    },
-    "codex_cli": lambda c: {
-        "hook_event_name": "PreToolUse",
-        "turn_id": "t1",
-        "tool_name": "Bash",
-        "tool_input": {"command": c},
-    },
-    "antigravity": lambda c: {
-        "toolCall": {"name": "run_command", "args": {"CommandLine": c, "Cwd": "/x"}},
-        "conversationId": "c1",
-        "stepIdx": 1,
-        "workspacePaths": ["/x"],
-    },
-    "devin": lambda c: {
-        "hook_event_name": "PreToolUse",
-        "prompt_id": "p1",
-        "tool_name": "Bash",
-        "tool_input": {"command": c},
-        "session_id": "s",
-    },
-    "gemini_cli": lambda c: {
-        "hook_event_name": "BeforeTool",
-        "tool_name": "run_shell_command",
-        "tool_input": {"command": c},
-        "session_id": "s",
-    },
-    "grok": lambda c: {
-        "hookEventName": "PreToolUse",
-        "toolName": "Bash",
-        "toolInput": {"command": c},
-        "sessionId": "s",
-    },
-    "tabnine": lambda c: {
-        "hook_event_name": "BeforeTool",
-        "timestamp": "2026-08-31T00:00:00Z",
-        "tool_name": "shell",
-        "tool_input": {"command": c},
-    },
-    "windsurf": lambda c: {
-        "trajectory_id": "t1",
-        "tool_info": {"command_line": c},
-        "cwd": "/x",
-    },
-}
-
-#: The deny each vendor's wire actually carries, witnessed by the deny-guard fixture below:
-#: `block` is the devin-family spelling, `exit-2` windsurf's wordless exit-code grammar (G5).
-DENY_ON_THE_WIRE = {
-    "claude_code": "deny",
-    "codex_cli": "deny",
-    "cursor": "deny",
-    "vscode_copilot": "deny",
-    "antigravity": "deny",
-    "devin": "block",
-    "gemini_cli": "deny",
-    "grok": "deny",
-    "tabnine": "deny",
-    "windsurf": "exit-2",
-}
 
 
 def run(runtimes: dict[str, Path], agent: str, guard: Path, command: str) -> subprocess.CompletedProcess:
@@ -191,28 +107,30 @@ def test_the_ask_does_not_fire_on_a_clean_or_a_violating_guard(agent: str, tmp_p
 
 
 @pytest.mark.parametrize("agent", sorted(ASK_ON_THE_WIRE))
-def test_an_unparseable_command_still_allows(agent: str, tmp_path: Path, runtimes) -> None:
-    """The path deliberately NOT changed, pinned so nobody quietly widens the prompt."""
-    guard = make_guard(tmp_path, "crash.sh", "exit 4")
+def test_an_unparseable_command_still_reaches_the_guard(agent: str, tmp_path: Path, runtimes) -> None:
+    """`rm -rf / #'` is valid bash but not valid shlex: the guard reads the raw command and refuses it."""
+    guard = make_guard(tmp_path, "raw.sh", 'case "$CHOCK_RAW_COMMAND" in *"rm -rf /"*) echo NOPE >&2; exit 1;; esac')
 
-    verdict = decision(run(runtimes, agent, guard, "echo 'unbalanced"))
+    verdict = decision(run(runtimes, agent, guard, "rm -rf / #'"))
 
-    assert verdict.get("decision") in ALLOWED_WORDS[agent], "an unparseable command must not prompt"
+    assert verdict.get("decision") == DENY_ON_THE_WIRE[agent], "an unparsed command must still be checked"
 
 
-def test_a_missing_bash_still_allows(tmp_path: Path, monkeypatch) -> None:
-    """The other path deliberately not changed, and the strongest case for leaving it."""
+def test_a_missing_bash_asks_and_names_what_to_install(tmp_path: Path, monkeypatch) -> None:
+    """No bash means no guard ran; the old silent allow hid the reason on a stderr nobody reads."""
     guard = make_guard(tmp_path, "clean.sh", "exit 0")
-    monkeypatch.setattr(guard_runner, "find_bash", lambda _: None)
+    monkeypatch.setattr(guard_runner, "find_bash", lambda *_: None)
 
-    assert guard_runner.run_guard(guard, "ls -la") == guard_runner.GUARD_UNCHECKED
-    assert guard_runner.evaluate(["--guard", str(guard)], "ls -la", "Bash") is None
+    assert guard_runner.run_guard(guard, "ls -la") == guard_runner.GUARD_ERRORED
+    outcome, reason = guard_runner.evaluate(["--guard", str(guard)], "ls -la", "Bash")
+    assert outcome == guard_runner.VERDICT_ESCALATE
+    assert "bash" in reason and "Git for Windows" in reason
 
 
 def test_a_timed_out_guard_asks(tmp_path: Path, monkeypatch) -> None:
     """The timeout really elapses; the runner's real `TimeoutExpired` handler really runs."""
     guard = make_guard(tmp_path, "hang.sh", "sleep 30")
-    monkeypatch.setattr(guard_runner, "_GUARD_TIMEOUT_SECONDS", 1)
+    monkeypatch.setattr(budget, "ENGINE_BUDGET_SECONDS", 1)
 
     assert guard_runner.run_guard(guard, "ls -la") == guard_runner.GUARD_ERRORED
     outcome, reason = guard_runner.evaluate(["--guard", str(guard)], "ls -la", "Bash")
@@ -291,3 +209,29 @@ def test_every_gated_runtime_is_covered_here() -> None:
     assert set(ASK_ON_THE_WIRE) == set(runtime_bundle.RUNTIME_AGENTS)
     assert set(DENY_ON_THE_WIRE) == set(runtime_bundle.RUNTIME_AGENTS)
     assert set(PAYLOADS) == set(runtime_bundle.RUNTIME_AGENTS)
+
+
+def test_a_refusal_echoing_agent_text_is_never_taken_for_a_crash(tmp_path: Path) -> None:
+    """The refusal names the command's own words: "syntax error" in them must not turn a block into an ask."""
+    guard = make_guard(tmp_path, "rm.sh", "echo \"BLOCKED: rm targeting '$CHOCK_RAW_COMMAND'\" >&2; exit 1")
+
+    for command in (
+        'rm -rf "/tmp/syntax error" ~',
+        "rm -rf ~ # SyntaxError unexpected EOF Traceback (most recent call last)",
+    ):
+        assert guard_runner.run_guard(guard, command) == guard_runner.GUARD_BLOCKED, command
+
+
+def test_a_shell_guard_that_cannot_parse_still_asks(tmp_path: Path) -> None:
+    shell = make_guard(tmp_path, "broken.sh", "if then fi\n")
+
+    assert guard_runner.run_guard(shell, "ls") == guard_runner.GUARD_ERRORED
+
+
+def test_is_guard_crash_reads_only_the_start_of_the_output() -> None:
+    assert guard_runner.is_guard_crash("")
+    assert guard_runner.is_guard_crash("Traceback (most recent call last):\n  File x")
+    assert guard_runner.is_guard_crash('  File "/g/guard.py", line 3\n    if x\nSyntaxError: invalid syntax')
+    assert guard_runner.is_guard_crash("/g/guard.sh: line 3: syntax error near unexpected token `fi'")
+    assert not guard_runner.is_guard_crash("BLOCKED: rm targeting '/tmp/syntax error'")
+    assert not guard_runner.is_guard_crash("BLOCKED: x\nTraceback (most recent call last)")

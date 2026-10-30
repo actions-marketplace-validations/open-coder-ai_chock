@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -13,9 +12,19 @@ from pathlib import Path
 
 import yaml
 
+from chock import yamlio
 from chock.config import agents_from_config as _agents_from_config
-from chock.lock import compute_pack_hash, read_lock, write_lock
+from chock.lock import (
+    LOCAL_SOURCE,
+    compute_pack_hash,
+    is_local_source,
+    pack_bytecode,
+    pack_hash_matches,
+    read_lock,
+    write_lock,
+)
 from chock.output import error
+from chock.scaffold.pin import PinError, fetch_catalog, redact_source
 from chock.scaffold.recompile import BookkeepingError, recompile
 
 
@@ -32,56 +41,6 @@ _AREAS = {
 }
 
 
-def _run(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(  # noqa: S603 -- running git to fetch the requested catalog is this command's job
-        args,
-        cwd=str(cwd) if cwd else None,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
-
-
-def _fetch_commit(remote: str, ref: str, into: Path) -> str | None:
-    """`git clone --branch` takes a branch or tag only; a commit id is fetched by name instead."""
-    into.mkdir(parents=True, exist_ok=True)
-    for args in (
-        ["git", "init", "--quiet", str(into)],
-        ["git", "-C", str(into), "fetch", "--quiet", "--depth", "1", remote, ref],
-        ["git", "-C", str(into), "checkout", "--quiet", "FETCH_HEAD"],
-    ):
-        result = _run(args)
-        if result.returncode != 0:
-            return result.stderr.strip() or f"{' '.join(args[:2])} failed"
-    return None
-
-
-def fetch_catalog(source: str, ref: str | None, into: Path) -> tuple[Path, str | None]:
-    """Make the catalog available locally. Returns (root, resolved commit or None)."""
-    local = Path(source).expanduser()
-    if local.exists() and not ref:
-        return local.resolve(), None
-    remote = str(local.resolve()) if local.exists() else source
-
-    args = ["git", "clone", "--quiet", "--depth", "1"]
-    if ref:
-        args += ["--branch", ref]
-    args += [remote, str(into)]
-    result = _run(args)
-    failure = result.stderr.strip() if result.returncode != 0 else None
-    if failure is not None and ref:
-        shutil.rmtree(into, ignore_errors=True)
-        failure = _fetch_commit(remote, ref, into)
-    if failure is not None:
-        msg = f"could not fetch catalog {source}" + (f" at {ref}" if ref else "") + f":\n{failure}"
-        raise RuntimeError(msg)
-
-    resolved = _run(["git", "rev-parse", "HEAD"], cwd=into)
-    return into, (resolved.stdout.strip() or None) if resolved.returncode == 0 else None
-
-
 def _reject_unsafe_id(artifact_id: str) -> None:
     """Refuse an artifact id that is anything but a single path component."""
     if artifact_id in ("", ".", "..") or "/" in artifact_id or "\\" in artifact_id or Path(artifact_id).is_absolute():
@@ -91,7 +50,7 @@ def _reject_unsafe_id(artifact_id: str) -> None:
 
 def _reject_symlinks(pack_dir: Path, artifact_id: str) -> None:
     """Refuse a pack carrying a symlink: copying it would read a file the catalog never held."""
-    links = []
+    links = [artifact_id] if pack_dir.is_symlink() else []
     for parent, dirs, files in os.walk(pack_dir):
         links += [
             Path(parent, n).relative_to(pack_dir).as_posix() for n in dirs + files if Path(parent, n).is_symlink()
@@ -101,13 +60,21 @@ def _reject_symlinks(pack_dir: Path, artifact_id: str) -> None:
         raise IntegrityError(msg)
 
 
+def _reject_bytecode(pack_dir: Path, artifact_id: str) -> None:
+    """Refuse a pack shipping `__pycache__` or `.pyc`/`.pyo`: build artifacts, never catalog content."""
+    shipped = pack_bytecode(pack_dir)
+    if shipped:
+        msg = f"{artifact_id}: the catalog pack ships build artifact(s): {', '.join(shipped)}; nothing was installed."
+        raise IntegrityError(msg)
+
+
 def _reject_foreign_id(pack_dir: Path, artifact_id: str) -> None:
     """Refuse a pack whose manifest names another id: the folder name is the id everywhere else."""
     manifest = pack_dir / "manifest.yaml"
     if not manifest.is_file():
         return
     try:
-        declared = (yaml.safe_load(manifest.read_text(encoding="utf-8")) or {}).get("id")
+        declared = (yamlio.safe_load(manifest.read_text(encoding="utf-8")) or {}).get("id")
     except (yaml.YAMLError, AttributeError) as exc:
         msg = f"{artifact_id}: the catalog pack's manifest.yaml does not parse ({exc}). Nothing was installed."
         raise IntegrityError(msg) from exc
@@ -123,7 +90,7 @@ def locate(catalog_root: Path, artifact_id: str) -> tuple[Path, Path]:
 
     registry = catalog_root / "registry.yaml"
     if registry.exists():
-        data = yaml.safe_load(registry.read_text(encoding="utf-8")) or {}
+        data = yamlio.safe_load(registry.read_text(encoding="utf-8")) or {}
         for entry in data.get("policies", []) or []:
             if entry.get("id") == artifact_id and entry.get("path"):
                 candidate = catalog_root / entry["path"]
@@ -135,12 +102,27 @@ def locate(catalog_root: Path, artifact_id: str) -> tuple[Path, Path]:
 
     for area, dest in _AREAS.items():
         candidate = catalog_root / area / artifact_id
+        if not candidate.resolve().is_relative_to(catalog_resolved):
+            continue
         if (candidate / "manifest.yaml").exists() or (candidate / "SKILL.md").exists():
             return candidate, dest
 
     searched = ", ".join(f"{a}/" for a in _AREAS)
     msg = f"{artifact_id!r} is not in this catalog (checked registry.yaml and {searched})"
     raise FileNotFoundError(msg)
+
+
+def verified_pack(catalog: Path, artifact_id: str, verify_sha: str | None) -> tuple[Path, Path, str]:
+    """Locate one artifact in a fetched catalog, refuse an unsafe pack, check its hash: (source, area, sha256)."""
+    src, area = locate(catalog, artifact_id)
+    _reject_symlinks(src, artifact_id)
+    _reject_bytecode(src, artifact_id)
+    _reject_foreign_id(src, artifact_id)
+    digest = compute_pack_hash(src)
+    if verify_sha and not pack_hash_matches(src, verify_sha):
+        msg = f"{artifact_id}: expected sha256 {verify_sha}, got {digest}. Nothing was installed."
+        raise IntegrityError(msg)
+    return src, area, digest
 
 
 @dataclass
@@ -164,14 +146,7 @@ def add(
     """Copy one artifact into the repo. Returns where it landed and what it hashed to."""
     with tempfile.TemporaryDirectory(prefix="chock-add-") as tmp:
         catalog, commit = fetch_catalog(source, ref, Path(tmp) / "catalog")
-        src, area = locate(catalog, artifact_id)
-        _reject_symlinks(src, artifact_id)
-        _reject_foreign_id(src, artifact_id)
-
-        digest = compute_pack_hash(src)
-        if verify_sha and digest != verify_sha:
-            msg = f"{artifact_id}: expected sha256 {verify_sha}, got {digest}. Nothing was installed."
-            raise IntegrityError(msg)
+        src, area, digest = verified_pack(catalog, artifact_id, verify_sha)
 
         dest = repo_root / area / artifact_id
         if dest.exists() and not force:
@@ -180,7 +155,7 @@ def add(
         if dest.exists():
             shutil.rmtree(dest)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(src, dest)
+        shutil.copytree(src, dest, symlinks=True)
         return Added(path=dest, sha256=digest, commit=commit)
 
 
@@ -190,10 +165,15 @@ def record_provenance(repo_root: Path, artifact_id: str, source: str, ref: str |
     for entry in lock.get("packs", []):
         if entry.get("id") != artifact_id:
             continue
-        entry["source"] = source
-        entry["source_commit"] = added.commit
-        if ref:
-            entry["source_ref"] = ref
+        if is_local_source(source, repo_root):
+            entry["source"] = LOCAL_SOURCE
+            entry.pop("source_commit", None)
+            entry.pop("source_ref", None)
+        else:
+            entry["source"] = redact_source(source)
+            entry["source_commit"] = added.commit
+            if ref:
+                entry["source_ref"] = ref
         write_lock(lock, repo_root)
         return
 
@@ -205,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("artifact_id", help="Policy or skill id, e.g. protect-main-branch")
     parser.add_argument("--repo", default=".", help="Target repo root")
     parser.add_argument("--from", dest="source", default=DEFAULT_CATALOG, help="Catalog URL or local path")
-    parser.add_argument("--ref", default=None, help="Catalog branch or tag")
+    parser.add_argument("--ref", default=None, help="Full 40-hex commit SHA (recommended), or a branch/tag (mutable)")
     parser.add_argument("--force", action="store_true", help="Replace an artifact that is already installed")
     parser.add_argument("--skip-compile", action="store_true", help="Copy only; do not compile or install hooks")
     parser.add_argument(
@@ -219,6 +199,9 @@ def main(argv: list[str] | None = None) -> int:
     repo_root = Path(args.repo).resolve()
     try:
         added = add(repo_root, args.artifact_id, args.source, args.ref, force=args.force, verify_sha=args.verify_sha)
+    except PinError as exc:
+        print(exc, file=sys.stderr)
+        return 2
     except (RuntimeError, ValueError, FileNotFoundError, FileExistsError) as exc:
         print(f"chock add: {exc}", file=sys.stderr)
         return 1
@@ -227,10 +210,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Added {args.artifact_id} to {rel}")
 
     if added.commit:
-        print(f"  from {args.source} at {added.commit}")
+        print(f"  from {redact_source(args.source)} at {added.commit}")
     print(f"  sha256 {added.sha256}")
     if not args.ref and added.commit:
-        print(f"  (unpinned: this was the default branch. Pin with --ref, or --verify-sha {added.sha256})")
+        pin = f"Pin with --ref {added.commit}, or --verify-sha {added.sha256}"
+        print(f"  (unpinned: a later run may fetch another commit. {pin})")
 
     if args.skip_compile:
         print("Run `chock sync --repo .` to compile it.")

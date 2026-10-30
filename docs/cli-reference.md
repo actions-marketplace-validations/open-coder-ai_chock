@@ -127,8 +127,8 @@ chock status [--repo .] [--only policies,registry,log]
 
 Read-only. Default prints the policy table: every installed policy, its resolved state
 (`enabled`, `overridden`, `disabled`), coverage level, and whether it is `mandatory`.
-`--only registry` lists the artifact registry; `--only log` reports recorded gate
-outcomes — including which policies have never fired.
+`--only registry` lists the artifact registry; `--only log` reports recorded gate outcomes on
+both routes, including policies that never fired ([Decision log](decision-log.md): levels, filters); `--summary` adds rates, latency vs timeout, faults and heartbeats; `--verify-log` walks each log's hash chain and exits 1 at its first break ([Decision log](decision-log.md#hash-chain)); `chock witness export` writes one client's redacted log for its agentseam issue ([Decision log](decision-log.md#summary)). `chock incident --since <time> [--until <time>] [--format text|md|json] [--share]` prints an ordered, redacted timeline of the log, chain breaks inline ([Decision log](decision-log.md#incident-timeline)). `chock doctor [--client X]` checks each client's hooks are in place, current and running ([Doctor](doctor.md)). A stop in force (`chock stop [--agent X] [--reason R]`, `chock resume`) leads the output; so does the machine-wide one, `chock stop --everywhere`, which every Chock hook on the machine reads, in every repository and session, until a person at a terminal runs `chock resume --everywhere` and types `everywhere` (it lifts no per-repository stop) ([Stop](stop.md#everywhere-one-stop-for-the-machine)).
 
 ### `enable` / `disable` — policy toggles
 
@@ -154,7 +154,7 @@ chock new {policy|skill|subagent} <id> [--root .]
 
 Creates a valid, empty artifact folder to fill in by hand or with the `policy-init` skill. `new policy` writes
 `manifest.yaml` (the gate is its `hook.gate` block) and `evals/suite.yaml`; `new skill` writes a `SKILL.md`, whose
-frontmatter *is* its manifest; `new subagent` writes `subagent.yaml`.
+frontmatter *is* its manifest; `new subagent` writes `subagent.yaml`. `new policy <id> --kind <kind>` starts from a tested template instead ([Custom Policies](custom-policies.md)).
 
 ### `compile` — low-level single-policy compile
 
@@ -208,7 +208,7 @@ the envelope differs. `claude` (`.claude-plugin/`, `PreToolUse` + `Stop`) is rea
 CLI, VS Code and Grok Build; `copilot` is the Agent Plugins 1.0 layout under `com.github.copilot/hooks/` (`Stop`);
 `cursor` (`.cursor-plugin/`) takes `beforeShellExecution` per guard and, per gate, `preToolUse` on the write plus
 `stop`; `codex` (`.codex-plugin/`, `PreToolUse` per guard, `Stop` per gate) reaches a hook engine no other package
-can, both failing **open** without `python3`; `devin` (`.devin-plugin/plugin.json` + `hooks.json`, same two events)
+can, both failing **open** without `git`; `devin` (`.devin-plugin/plugin.json` + `hooks.json`, same two events)
 is best-effort by the vendor's own design, fail-open, not enforced. They require `--out-dir` (or `--out`); in-place output is
 refused so a policy folder is never mistaken for a published plugin. `--policies-dir` packages
 a published directory; `--check` judges without writing. `--policy ID` (repeatable; manifest

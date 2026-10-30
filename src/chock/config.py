@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from chock import yamlio
 from chock.compile.surface_kinds import Surface
 from chock.vendors import CHOCK_AGENT
 
@@ -19,7 +22,23 @@ def load_config(repo_root: Path | str) -> dict[str, Any]:
     path = Path(repo_root) / CONFIG_DIR / CONFIG_NAME
     if not path.exists():
         return {}
-    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return yamlio.safe_load(path.read_text(encoding="utf-8")) or {}
+
+
+def committed_config_text(repo_root: Path | str) -> str | None:
+    """`.chock/config.yaml` as committed at HEAD; None when git cannot show it (no repository, no commit, no file)."""
+    try:
+        shown = subprocess.run(  # noqa: S603 -- reading one committed file
+            ["git", "-C", str(repo_root), "show", f"HEAD:{CONFIG_DIR}/{CONFIG_NAME}"],  # noqa: S607
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
+        return None
+    return shown.stdout if shown.returncode == 0 else None
 
 
 def agents_from_config(repo_root: Path) -> list[str]:
@@ -42,6 +61,26 @@ def agents_from_config(repo_root: Path) -> list[str]:
     return deduped
 
 
+_GUIDANCE_MCP_RE = re.compile(r"^guidance_mcp:[ \t]*(?P<rest>[^#\n]*)")
+
+
+def guidance_mcp_from_text(text: str) -> bool:
+    """Opt-in to registering `chock mcp` with clients: exactly one top-level `guidance_mcp: true` line.
+
+    Read line by line like `rollout:`, never by a YAML parser; absent, repeated or anything else is off."""
+    found = [m.group("rest") for m in map(_GUIDANCE_MCP_RE.match, text.splitlines()) if m]
+    return len(found) == 1 and found[0].strip().strip("'\"") == "true"
+
+
+def guidance_mcp_enabled(repo_root: Path | str) -> bool:
+    """`guidance_mcp:` in the working tree's `.chock/config.yaml`; a missing, symlinked or unreadable file is off."""
+    path = Path(repo_root) / CONFIG_DIR / CONFIG_NAME
+    try:
+        return not path.is_symlink() and guidance_mcp_from_text(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
 def _policies(config: dict[str, Any]) -> dict[str, Any]:
     """The `policies:` block, or empty when it is absent, null, or not a mapping."""
     policies = config.get("policies") if isinstance(config, dict) else None
@@ -57,17 +96,25 @@ def _disabled_list(config: dict[str, Any]) -> set[str]:
     disabled = _policies(config).get("disabled")
     if isinstance(disabled, str):
         return {disabled}
-    return {str(p) for p in disabled} if isinstance(disabled, list) else set()
+    return {p for p in disabled if isinstance(p, str)} if isinstance(disabled, list) else set()
 
 
 def policy_status(
     config: dict[str, Any],
     policy_id: str,
     manifest: dict[str, Any] | None = None,
+    committed: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Resolve effective state for a policy from config + manifest."""
+    """Resolve effective state for a policy from config + manifest.
+
+    `committed` is the config as HEAD has it, given at an agent's event: a policy is then disabled only when
+    both say so, the way the committed rollout caps the working tree's, so an uncommitted disable changes
+    nothing for an agent. Absent (a person's command, or a check), the working tree's config decides.
+    """
     manifest = manifest or {}
     disabled = _disabled_list(config)
+    if committed is not None:
+        disabled &= _disabled_list(committed)
     override = _policy_overrides(config).get(policy_id, {})
     mandatory = bool(manifest.get("mandatory", False))
 

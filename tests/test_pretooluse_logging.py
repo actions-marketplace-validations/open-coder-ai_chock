@@ -1,158 +1,131 @@
-"""Outcome logging for the per-agent vendored runtimes' guard-running logic."""
+"""Outcome logging for the per-agent vendored runtimes' guard-running logic, through a real hook call."""
 
 from __future__ import annotations
 
-import json
+import hashlib
 from pathlib import Path
 
 import pytest
+from decision_log_support import (
+    ASKING_GUARD,
+    BLOCKING_GUARD,
+    CLEAN_GUARD,
+    POLICY,
+    hook_env,
+    records,
+    run_hook,
+    sync_layout,
+    sync_log,
+)
 
-from chock.gate import guard_runner, runner
-
-GATE_LOG_ENV = guard_runner.GATE_LOG_ENV
-
-
-@pytest.fixture(autouse=True)
-def enable_gate_log(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Opt back in to the logging the suite-wide `no_gate_log` fixture switches off."""
-    monkeypatch.delenv(GATE_LOG_ENV, raising=False)
-
-
-BLOCKING_GUARD = "#!/usr/bin/env bash\nexit 1\n"
-CLEAN_GUARD = "#!/usr/bin/env bash\nexit 0\n"
-BROKEN_GUARD = "#!/usr/bin/env bash\nexit 42\n"
+from chock.gate import budget, guard_runner, runner
+from chock.gate.runner import journal
 
 SECRET_COMMAND = 'curl -H "Authorization: Bearer sk-live-abcdef1234567890" https://example.invalid'
 
 
-def make_guard(repo: Path, body: str, policy_id: str = "block-destructive-commands") -> Path:
-    """A guard at the shape the emitter writes: <policy_id>/implementations/<name>.sh."""
-    (repo / ".chock").mkdir(parents=True, exist_ok=True)
-    guard = repo / ".agents" / "policies" / policy_id / "implementations" / "block-destructive.sh"
-    guard.parent.mkdir(parents=True, exist_ok=True)
-    guard.write_text(body, encoding="utf-8", newline="\n")
-    return guard
+@pytest.fixture
+def home(tmp_path: Path) -> Path:
+    folder = tmp_path / "home"
+    folder.mkdir()
+    return folder
 
 
-def read_log(repo: Path) -> list[dict]:
-    path = repo / ".chock" / "log" / "gate-events.jsonl"
-    if not path.exists():
-        return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+def test_block_is_recorded(tmp_path: Path, home: Path) -> None:
+    repo, runtime, guard = sync_layout(tmp_path, BLOCKING_GUARD)
+
+    proc = run_hook(repo, runtime, guard, "rm -rf /", hook_env(home))
+
+    assert '"deny"' in proc.stdout
+    [record] = records(sync_log(repo))
+    assert record["policy_id"] == POLICY
+    assert record["surface"] == "pre-tool-use"
+    assert record["event"] == "tool_use"
+    assert record["route"] == "sync"
+    assert record["agent"] == "claude_code"
+    assert record["verdict"] == "block"
+    assert record["reason"] == "guard-blocked"
+    assert record["level"] == "info"
 
 
-def evaluate(guard: Path, command: str, tool: str = "Bash") -> tuple[str, str] | None:
-    return guard_runner.evaluate(["--guard", str(guard)], command, tool)
+def test_an_allow_is_an_info_line_with_only_a_fingerprint(tmp_path: Path, home: Path) -> None:
+    """GAP-2 option B: every allowed tool call is logged at info, naming what was run, never its arguments."""
+    repo, runtime, guard = sync_layout(tmp_path, CLEAN_GUARD)
+
+    run_hook(repo, runtime, guard, "ls -la", hook_env(home))
+    [record] = records(sync_log(repo))
+    assert (record["verdict"], record["level"], record["reason"]) == ("allow", "info", "no-rule")
+    assert record["target"] == "ls sha256:" + hashlib.sha256(b"ls -la").hexdigest()
+    assert "trace" not in record
+
+    run_hook(repo, runtime, guard, "ls -la", hook_env(home, CHOCK_LOG_LEVEL="off"))
+    assert len(records(sync_log(repo))) == 1
 
 
-def test_block_is_recorded(tmp_path: Path, monkeypatch) -> None:
-    guard = make_guard(tmp_path, BLOCKING_GUARD)
-    monkeypatch.setattr(guard_runner, "run_guard_detailed", lambda *_: (guard_runner.GUARD_BLOCKED, ""))
+def test_ask_is_recorded(tmp_path: Path, home: Path) -> None:
+    """A deliberate ask is its own verdict in the log, not a block."""
+    repo, runtime, guard = sync_layout(tmp_path, ASKING_GUARD)
 
-    assert evaluate(guard, "rm -rf /") == (guard_runner.VERDICT_DENY, "Blocked by chock policy: block-destructive")
+    proc = run_hook(repo, runtime, guard, "rm -rf ./build", hook_env(home))
 
-    records = read_log(tmp_path)
-    assert len(records) == 1
-    assert records[0]["policy_id"] == "block-destructive-commands"
-    assert records[0]["surface"] == "pre-tool-use"
-    assert records[0]["event"] == "tool_use"
-    assert records[0]["kind"] == "block-destructive"
-    assert records[0]["tool"] == "Bash"
-    assert records[0]["verdict"] == "block"
+    assert "confirm the target" in proc.stdout
+    [record] = records(sync_log(repo))
+    assert (record["verdict"], record["reason"]) == ("ask", "guard-asked")
 
 
-def test_allow_is_recorded(tmp_path: Path, monkeypatch) -> None:
-    guard = make_guard(tmp_path, CLEAN_GUARD)
-    monkeypatch.setattr(guard_runner, "run_guard_detailed", lambda *_: (guard_runner.GUARD_CLEAN, ""))
+def test_a_guard_fault_is_recorded_as_one(tmp_path: Path, home: Path) -> None:
+    """Exit 2 from a guard is a fault: an info line saying so, never a pass."""
+    repo, runtime, guard = sync_layout(tmp_path, "#!/usr/bin/env bash\nexit 2\n")
 
-    assert evaluate(guard, "ls -la") is None
-    assert read_log(tmp_path)[0]["verdict"] == "allow"
+    run_hook(repo, runtime, guard, "ls -la", hook_env(home))
 
-
-ASKING_GUARD = '#!/usr/bin/env bash\necho "confirm the target" >&2\nexit 3\n'
-
-
-def test_ask_is_recorded(tmp_path: Path) -> None:
-    """Real run_guard, no stubbing: a deliberate ask is its own verdict in the log, not a block."""
-    guard = make_guard(tmp_path, ASKING_GUARD)
-
-    outcome, reason = evaluate(guard, "rm -rf ./build")
-    assert outcome == guard_runner.VERDICT_ESCALATE
-    assert "confirm the target" in reason
-
-    records = read_log(tmp_path)
-    assert len(records) == 1
-    assert records[0]["verdict"] == "ask"
+    [record] = records(sync_log(repo))
+    assert (record["verdict"], record["reason"]) == ("ask", "guard-errored")
 
 
-def test_unchecked_guard_is_not_recorded_as_a_pass(tmp_path: Path, monkeypatch) -> None:
-    """The distinction the outcome words exist for: nothing was checked."""
-    guard = make_guard(tmp_path, BROKEN_GUARD)
-
-    monkeypatch.setattr(guard_runner, "run_guard_detailed", lambda *_: (guard_runner.GUARD_UNCHECKED, ""))
-    assert evaluate(guard, "ls -la") is None
-    assert read_log(tmp_path) == []
-
-    monkeypatch.setattr(guard_runner, "run_guard_detailed", lambda *_: (guard_runner.GUARD_ERRORED, ""))
-    outcome, reason = evaluate(guard, "ls -la")
-    assert outcome == guard_runner.VERDICT_ESCALATE
-    assert reason, "a confirmation request must say why it is being asked for"
-    assert read_log(tmp_path) == []
-
-
-def test_command_never_reaches_the_log(tmp_path: Path, monkeypatch) -> None:
+def test_command_never_reaches_the_info_log(tmp_path: Path, home: Path) -> None:
     """Commands carry credentials far more often than files do."""
-    guard = make_guard(tmp_path, BLOCKING_GUARD)
-    monkeypatch.setattr(guard_runner, "run_guard_detailed", lambda *_: (guard_runner.GUARD_BLOCKED, ""))
+    repo, runtime, guard = sync_layout(tmp_path, BLOCKING_GUARD)
 
-    evaluate(guard, SECRET_COMMAND)
+    run_hook(repo, runtime, guard, SECRET_COMMAND, hook_env(home))
 
-    written = (tmp_path / ".chock" / "log" / "gate-events.jsonl").read_text(encoding="utf-8")
+    written = sync_log(repo).read_text(encoding="utf-8")
     assert "sk-live-abcdef1234567890" not in written
-    assert "curl" not in written
+    for argument in ("Authorization", "Bearer", "example.invalid"):
+        assert argument not in written
+    [record] = records(sync_log(repo))
+    assert record["target"] == "curl sha256:" + hashlib.sha256(SECRET_COMMAND.encode()).hexdigest()
 
 
-def test_env_switch_disables_logging(tmp_path: Path, monkeypatch) -> None:
-    guard = make_guard(tmp_path, BLOCKING_GUARD)
-    monkeypatch.setattr(guard_runner, "run_guard_detailed", lambda *_: (guard_runner.GUARD_BLOCKED, ""))
-    monkeypatch.setenv(GATE_LOG_ENV, "0")
+@pytest.mark.parametrize("levels", [{"CHOCK_GATE_LOG": "0"}, {"CHOCK_LOG_LEVEL": "off"}], ids=["legacy", "level"])
+def test_env_switch_disables_logging(tmp_path: Path, home: Path, levels: dict[str, str]) -> None:
+    repo, runtime, guard = sync_layout(tmp_path, BLOCKING_GUARD)
 
-    assert evaluate(guard, "rm -rf /") == (guard_runner.VERDICT_DENY, "Blocked by chock policy: block-destructive")
-    assert read_log(tmp_path) == []
+    proc = run_hook(repo, runtime, guard, "rm -rf /", hook_env(home, **levels))
 
-
-def test_logging_failure_does_not_change_the_verdict(tmp_path: Path, monkeypatch) -> None:
-    guard = make_guard(tmp_path, BLOCKING_GUARD)
-    monkeypatch.setattr(guard_runner, "run_guard_detailed", lambda *_: (guard_runner.GUARD_BLOCKED, ""))
-
-    class Exploding:
-        @staticmethod
-        def now(*args, **kwargs):
-            raise OSError("log device on fire")
-
-    monkeypatch.setattr(guard_runner, "datetime", Exploding)
-
-    assert evaluate(guard, "rm -rf /") == (guard_runner.VERDICT_DENY, "Blocked by chock policy: block-destructive")
-    assert read_log(tmp_path) == []
+    assert '"deny"' in proc.stdout
+    assert records(sync_log(repo)) == []
 
 
-def test_guard_outside_an_chock_repo_is_not_recorded(tmp_path: Path, monkeypatch) -> None:
-    guard = tmp_path / "loose" / "implementations" / "block-destructive.sh"
-    guard.parent.mkdir(parents=True, exist_ok=True)
-    guard.write_text(BLOCKING_GUARD, encoding="utf-8", newline="\n")
-    monkeypatch.setattr(guard_runner, "run_guard_detailed", lambda *_: (guard_runner.GUARD_BLOCKED, ""))
+def test_logging_failure_does_not_change_the_verdict(tmp_path: Path, home: Path) -> None:
+    repo, runtime, guard = sync_layout(tmp_path, BLOCKING_GUARD)
+    sync_log(repo).mkdir(parents=True)  # a folder where the log file goes: every write fails
 
-    assert evaluate(guard, "rm -rf /") == (guard_runner.VERDICT_DENY, "Blocked by chock policy: block-destructive")
-    assert read_log(tmp_path) == []
+    proc = run_hook(repo, runtime, guard, "rm -rf /", hook_env(home, CHOCK_LOG_LEVEL="debug"))
+
+    assert proc.returncode == 0
+    assert '"permissionDecision": "deny"' in proc.stdout
+    assert "Traceback" not in proc.stderr
 
 
-def test_unparseable_command_is_allowed_and_unrecorded(tmp_path: Path, monkeypatch) -> None:
-    """Real run_guard, no stubbing: a parse failure must not masquerade as a clean check."""
-    guard = make_guard(tmp_path, CLEAN_GUARD)
+def test_unparseable_command_still_runs_the_guard(tmp_path: Path) -> None:
+    """Real run_guard, no stubbing: a parse failure hands the guard the raw command, not an ask."""
+    guard = tmp_path / "implementations" / "clean.sh"
+    guard.parent.mkdir()
+    guard.write_text(CLEAN_GUARD, encoding="utf-8", newline="\n")
 
-    assert guard_runner.run_guard(guard, 'echo "unbalanced') == guard_runner.GUARD_UNCHECKED
-    assert evaluate(guard, 'echo "unbalanced') is None
-    assert read_log(tmp_path) == []
+    assert guard_runner.run_guard(guard, 'echo "unbalanced') == guard_runner.GUARD_CLEAN
+    assert guard_runner.evaluate(["--guard", str(guard)], 'echo "unbalanced', "Bash") is None
 
 
 HANGING_GUARD = "#!/usr/bin/env bash\nsleep 30\n"
@@ -162,8 +135,10 @@ def test_a_timed_out_guard_does_not_echo_the_command_to_stderr(
     tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The log's redaction rule applies to stderr too, and the timeout branch broke it."""
-    guard = make_guard(tmp_path, HANGING_GUARD)
-    monkeypatch.setattr(guard_runner, "_GUARD_TIMEOUT_SECONDS", 1)
+    guard = tmp_path / "implementations" / "hang.sh"
+    guard.parent.mkdir()
+    guard.write_text(HANGING_GUARD, encoding="utf-8", newline="\n")
+    monkeypatch.setattr(budget, "ENGINE_BUDGET_SECONDS", 1)
 
     verdict = guard_runner.run_guard(guard, SECRET_COMMAND)
     assert verdict == guard_runner.GUARD_ERRORED, "a timeout is the guard failing to decide, not a precondition"
@@ -176,6 +151,6 @@ def test_a_timed_out_guard_does_not_echo_the_command_to_stderr(
 
 
 def test_both_vendored_runners_agree_on_the_log_contract() -> None:
-    """The two copies are deliberately duplicated; this is what keeps them one log."""
-    assert guard_runner.GATE_LOG_ENV == runner.GATE_LOG_ENV
-    assert guard_runner._LOG_MAX_BYTES == runner._LOG_MAX_BYTES
+    """gate.py and every runtime carry the one journal; the legacy switch name is the same everywhere."""
+    assert journal.LOG_LEGACY_ENV == runner.GATE_LOG_ENV
+    assert journal.LOG_DEFAULT_MAX_BYTES == runner._LOG_MAX_BYTES

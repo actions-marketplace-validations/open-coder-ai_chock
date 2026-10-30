@@ -7,15 +7,23 @@ from types import SimpleNamespace
 from typing import Any
 
 from chock import vendors
-from chock.compile.emitters import DATA_DIR, GUARD_SUFFIXES, policy_rel_path
+from chock.compile.emitters import GUARD_SUFFIXES, policy_rel_path
+from chock.compile.emitters import in_agent_tool_call as tool_call
 from chock.compile.emitters.advisory import repo_root_from_output
-from chock.compile.emitters.in_agent_hooks import TIMEOUT_SECONDS, cursor_entry, generic_hooks_file, hook_entry
+from chock.compile.emitters.in_agent_hooks import adapter_rel as _adapter_rel
+from chock.compile.emitters.in_agent_hooks import (
+    copilot_entry,
+    cursor_entry,
+    generic_hooks_file,
+    generic_pre_tool_config,
+    generic_stop_config,
+    hook_entry,
+)
 from chock.emit import write_generated_json
-from chock.gate.build import build_gate_json
+from chock.gate.build import build_gate_json, vendor_runner
 from chock.gate.runner import WRITE_PATH_KINDS
-
-_BASH_TEMPLATE = DATA_DIR.joinpath("agent_hook_bash.sh").read_text(encoding="utf-8").rstrip("\n")
-_POWERSHELL_TEMPLATE = DATA_DIR.joinpath("agent_hook_powershell.ps1").read_text(encoding="utf-8").rstrip("\n")
+from chock.hooks.launch import hook_command
+from chock.yamlio import safe_load
 
 GUARD_SCRIPTS = {
     "block-destructive-commands": "block-destructive.sh",
@@ -23,12 +31,24 @@ GUARD_SCRIPTS = {
 }
 
 
+def _gate_script(policy_dir: Path) -> str | None:
+    """The file name of the script gate's program, which reads JSON on stdin and is never a command guard."""
+    try:
+        doc = safe_load((policy_dir / "manifest.yaml").read_text(encoding="utf-8"))
+        gate = doc["hook"]["gate"]
+        return Path(str(gate["params"]["script"])).name if gate["kind"] == "script" else None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def _guard_script(policy_dir: Path, policy_id: str) -> str | None:
     """The policy's guard script name, by convention first, legacy map second."""
     impl = policy_dir / "implementations"
+    gate_script = _gate_script(policy_dir)
     for suffix in GUARD_SUFFIXES:
-        if (impl / f"{policy_id}{suffix}").exists():
-            return f"{policy_id}{suffix}"
+        name = f"{policy_id}{suffix}"
+        if name != gate_script and (impl / name).exists():
+            return name
     legacy = GUARD_SCRIPTS.get(policy_id)
     if legacy and (impl / legacy).exists():
         return legacy
@@ -39,28 +59,23 @@ def _guard_script(policy_dir: Path, policy_id: str) -> str | None:
 MATCHER = vendors.shell_matcher("claude_code")
 assert MATCHER is not None  # noqa: S101 -- import-time upstream-data invariant, not request handling
 
-#: Wire token Claude Code substitutes for the repo root, read from agentseam's vendor
-#: config (`repo_root_token`) instead of chock's own hardcoded copy.
-PROJECT_DIR_TOKEN = vendors.repo_root_token("claude_code")
-assert PROJECT_DIR_TOKEN is not None  # noqa: S101 -- import-time upstream-data invariant, not request handling
-
 # Witnessed overrides: chock's agent-hooks file speaks `preToolUse` with bash/powershell/
 # timeoutSec entry keys (live deny, data/witnesses.json: vscode_copilot x agent-hooks);
-# agentseam 0.2.0 records `PreToolUse` with {type, command, windows} instead. The facts
+# agentseam records `PreToolUse`, and since 0.3.5 bash/powershell but no timeoutSec. The facts
 # stay here until upstream ingests the witnessed shape; tests/test_vendor_wire_facts.py
 # pins the disagreement so its resolution surfaces loudly.
 AGENT_HOOKS_EVENT = "preToolUse"
 AGENT_HOOKS_ENVELOPE = {"version": 1}
 SHELL_MATCHER = "bash|powershell|pwsh|sh|shell"
+#: The file-writing tool names witnessed in VS Code Copilot Chat agent mode (2026-09-28): an edit
+#: of an existing file is `Edit`, creating one is `Write`. agentseam records no write vocabulary.
+COPILOT_WRITE_MATCHER = "Edit|Write"
+#: A content gate's write-gate entries, by Copilot event, beside its gate.
+GATE_HOOKS_FILE = "gate-hooks.json"
 
 #: The content fragment claude_code's installer merges, named apart from the shell one so a
-#: policy could one day carry both without either overwriting the other.
+#: policy carrying both never has one overwrite the other.
 WRITE_FRAGMENT = "pretooluse-write.json"
-
-
-def _adapter_rel(vendor: str) -> str:
-    """Where the vendored runtime lives in a consumer repo: chock's convention + agent id."""
-    return f".chock/bin/{vendor}.py"
 
 
 def _compiled_rel(policy_id: str) -> str:
@@ -102,24 +117,34 @@ def _tool_use_gate(policy_dir: Path, output_dir: Path) -> dict[str, Any] | None:
 
 def _guard_fragments(policy_dir: Path, script: str, output_dir: Path) -> list[Path]:
     """The shell-command fragments, one per wired vendor. Behaviour unchanged."""
-    rel = policy_rel_path(policy_dir)
-    guard = f"{PROJECT_DIR_TOKEN}/{rel}/implementations/{script}"
+    guard = f"{policy_rel_path(policy_dir)}/implementations/{script}"
     written: list[Path] = []
     for vendor, name, build in (
         ("claude_code", "pretooluse.json", lambda cmd: hook_entry(cmd, matcher=MATCHER)),
-        ("cursor", "cursor-hooks.json", lambda cmd: {vendors.shell_gate_event("cursor"): [cursor_entry(cmd)]}),
+        (
+            "cursor",
+            "cursor-hooks.json",
+            lambda cmd: {vendors.shell_gate_event("cursor"): [cursor_entry(cmd, fail_closed=True)]},
+        ),
     ):
-        adapter = f"{PROJECT_DIR_TOKEN}/{_adapter_rel(vendor)}"
-        command = f'@CHOCK_PYTHON@ "{adapter}" --guard "{guard}"'
+        command = hook_command(_adapter_rel(vendor), "--guard", guard)
         dest = output_dir / name
         write_generated_json(dest, build(command))
         written.append(dest)
     for vendor in GENERIC_VENDORS:
-        command = f'@CHOCK_PYTHON@ "{_adapter_rel(vendor)}" --guard "{rel}/implementations/{script}"'
+        command = hook_command(_adapter_rel(vendor), "--guard", guard)
         dest = output_dir / f"{vendor}-hooks.json"
         write_generated_json(dest, generic_hooks_file(vendor, command))
         written.append(dest)
     return written
+
+
+def _write_gate(spec: dict[str, Any], output_dir: Path) -> Path:
+    """Write the gate file and vendor the runner it needs: a tool_use-only gate has no git hook to do it."""
+    gate = output_dir / GATE_FILE
+    write_generated_json(gate, spec)
+    vendor_runner(output_dir.parents[2])
+    return gate
 
 
 def _gate_fragments(policy_id: str, spec: dict[str, Any], output_dir: Path) -> list[Path]:
@@ -129,23 +154,24 @@ def _gate_fragments(policy_id: str, spec: dict[str, Any], output_dir: Path) -> l
     would gate a tool name nobody verified the vendor uses, so those vendors get no fragment
     and the coverage they are credited with stays exactly what it was.
     """
-    gate = output_dir / GATE_FILE
-    write_generated_json(gate, spec)
-    written: list[Path] = [gate]
+    written: list[Path] = [_write_gate(spec, output_dir)]
 
-    reference = f"{PROJECT_DIR_TOKEN}/{_compiled_rel(policy_id)}/{GATE_FILE}"
+    reference = f"{_compiled_rel(policy_id)}/{GATE_FILE}"
     for vendor in sorted(vendors.in_agent_vendors()):
         matcher = vendors.write_matcher(vendor)
         if matcher is None:
             continue
-        adapter = f"{PROJECT_DIR_TOKEN}/{_adapter_rel(vendor)}"
-        command = f'@CHOCK_PYTHON@ "{adapter}" --gate "{reference}"'
+        command = hook_command(_adapter_rel(vendor), "--gate", reference)
         name = WRITE_FRAGMENT if vendor == "claude_code" else f"{vendor}-write-hooks.json"
         dest = output_dir / name
         if vendors.hook_entry_flat(vendor):
             # A flat entry carries no matcher: the runtime answers every tool under the event
             # and judges only a write it recognises; an unmatched tool is allowed unremarked.
-            doc: dict[str, Any] = {vendors.pre_tool_event(vendor): [cursor_entry(command)]}
+            doc: dict[str, Any] = {vendors.pre_tool_event(vendor): [cursor_entry(command, fail_closed=True)]}
+        elif vendor in GENERIC_VENDORS:
+            # The generic installer merges whole config documents; a bare entry was never merged,
+            # so a vendor with a recorded write vocabulary (gemini_cli) got no write gate at all.
+            doc = generic_pre_tool_config(vendor, command, matcher)
         else:
             doc = hook_entry(command, matcher=matcher)
         write_generated_json(dest, doc)
@@ -156,6 +182,11 @@ def _gate_fragments(policy_id: str, spec: dict[str, Any], output_dir: Path) -> l
 #: The claude fragment the stop installer merges, named apart from the two pre-tool ones
 #: because it lands under a different event key in the same settings file.
 STOP_FRAGMENT = "stop.json"
+
+
+def _agent_hooks_rel(policy_id: str) -> str:
+    """Where this policy's agent-hooks artifacts land, from chock's own compiled layout."""
+    return f".chock/compiled/{policy_id}/agent-hooks"
 
 
 def _stop_rel(policy_id: str) -> str:
@@ -170,23 +201,20 @@ def _stop_fragments(policy_id: str, spec: dict[str, Any], output_dir: Path) -> l
     on, so nothing here depends on a write vocabulary -- the reason this surface reaches
     seven vendors where the write path reaches three.
     """
-    gate = output_dir / GATE_FILE
-    write_generated_json(gate, spec)
-    written: list[Path] = [gate]
+    written: list[Path] = [_write_gate(spec, output_dir)]
 
     for vendor in vendors.stop_vendors():
-        token = vendors.repo_root_token(vendor)
-        root = f"{token}/" if token else ""
-        command = f'@CHOCK_PYTHON@ "{root}{_adapter_rel(vendor)}" --gate "{root}{_stop_rel(policy_id)}/{GATE_FILE}"'
+        command = hook_command(_adapter_rel(vendor), "--gate", f"{_stop_rel(policy_id)}/{GATE_FILE}")
         if vendor == "claude_code":
             dest, doc = output_dir / STOP_FRAGMENT, hook_entry(command)
         elif vendors.hook_entry_flat(vendor):
-            # Cursor's fragment is the event's entry list, the shape its merged installer reads,
-            # rooted the way its shell and write entries are so the installer recognises it.
-            command = f'@CHOCK_PYTHON@ "{PROJECT_DIR_TOKEN}/{_adapter_rel(vendor)}" --gate "{PROJECT_DIR_TOKEN}/{_stop_rel(policy_id)}/{GATE_FILE}"'
+            # Cursor's fragment is the event's entry list, the shape its merged installer reads.
             dest, doc = output_dir / f"{vendor}-hooks.json", {vendors.stop_event(vendor): [cursor_entry(command)]}
+        elif vendor in vendors.AGENT_HOOKS_VENDORS:
+            # chock's own hooks file: the same witnessed entry keys its guard entries carry.
+            dest, doc = output_dir / f"{vendor}-hooks.json", {vendors.stop_event(vendor): [copilot_entry(command)]}
         else:
-            dest, doc = output_dir / f"{vendor}-hooks.json", vendors.stop_hook_config(vendor, command)
+            dest, doc = output_dir / f"{vendor}-hooks.json", generic_stop_config(vendor, command)
         write_generated_json(dest, doc)
         written.append(dest)
     return written
@@ -208,25 +236,21 @@ def emit_stop(policy_dir: Path, output_dir: Path, manifest: dict[str, Any]) -> l
 
 
 def emit_pre_tool_use(policy_dir: Path, output_dir: Path, manifest: dict[str, Any]) -> list[Path]:
-    """Write the pre-tool-use fragments: a shell guard's, a content gate's, or neither."""
+    """Write the pre-tool-use fragments: a shell guard's, a content gate's, or both."""
     policy_id = manifest.get("id", policy_dir.name)
     script = _guard_script(policy_dir, policy_id)
-    spec = None if script else _tool_use_gate(policy_dir, output_dir)
-    if not script and spec is None:
+    spec = _tool_use_gate(policy_dir, output_dir)
+    call = tool_call.spec_for(policy_dir, output_dir)
+    if not script and spec is None and call is None:
         return []
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    if script:
-        return _guard_fragments(policy_dir, script, output_dir)
-    return _gate_fragments(str(policy_id), spec or {}, output_dir)
-
-
-def _bash_command(adapter: str, guard: str) -> str:
-    return _BASH_TEMPLATE.replace("__ADAPTER__", adapter).replace("__GUARD__", guard)
-
-
-def _powershell_command(adapter: str, guard: str) -> str:
-    return _POWERSHELL_TEMPLATE.replace("__ADAPTER__", adapter).replace("__GUARD__", guard)
+    written = _guard_fragments(policy_dir, script, output_dir) if script else []
+    if spec is not None:
+        written += _gate_fragments(str(policy_id), spec, output_dir)
+    if call is not None:
+        written += tool_call.emit_pre_tool_use(str(policy_id), call, output_dir)
+    return written
 
 
 def build_entry(policy_dir: Path, manifest: dict[str, Any]) -> dict[str, Any] | None:
@@ -235,32 +259,39 @@ def build_entry(policy_dir: Path, manifest: dict[str, Any]) -> dict[str, Any] | 
     script = _guard_script(policy_dir, policy_id)
     if not script:
         return None
-    rel = policy_rel_path(policy_dir)
-    adapter = _adapter_rel("vscode_copilot")
-    guard = f"{rel}/implementations/{script}"
-    bash = _bash_command(adapter, guard)
-    powershell = _powershell_command(adapter, guard)
-    return {
-        "type": "command",
-        "matcher": SHELL_MATCHER,
-        "timeout": TIMEOUT_SECONDS,
-        "timeoutSec": TIMEOUT_SECONDS,
-        "bash": bash,
-        "command": bash,
-        "powershell": powershell,
-        "windows": powershell,
-    }
+    bash = hook_command(
+        _adapter_rel("vscode_copilot"), "--guard", f"{policy_rel_path(policy_dir)}/implementations/{script}"
+    )
+    return copilot_entry(bash, matcher=SHELL_MATCHER)
+
+
+def build_gate_entries(policy_id: str) -> dict[str, list[dict[str, Any]]]:
+    """A content gate's write-gate entries by Copilot event; its end-of-turn entry is the stop surface's."""
+    reference = f"{_agent_hooks_rel(policy_id)}/{GATE_FILE}"
+    command = hook_command(_adapter_rel("vscode_copilot"), "--gate", reference)
+    return {vendors.pre_tool_event("vscode_copilot"): [copilot_entry(command, matcher=COPILOT_WRITE_MATCHER)]}
 
 
 def emit_agent_hooks(policy_dir: Path, output_dir: Path, manifest: dict[str, Any]) -> list[Path]:
-    """Write the per-policy entry; the installer aggregates them into .github/hooks/chock.json."""
+    """Write the per-policy entries; the installer aggregates them into .github/hooks/chock.json."""
     entry = build_entry(policy_dir, manifest)
-    if entry is None:
+    spec = _tool_use_gate(policy_dir, output_dir)
+    call = tool_call.spec_for(policy_dir, output_dir)
+    if entry is None and spec is None and call is None:
         return []
     output_dir.mkdir(parents=True, exist_ok=True)
-    dest = output_dir / "agent-hooks.json"
-    write_generated_json(dest, entry)
-    return [dest]
+    written: list[Path] = []
+    if entry is not None:
+        written.append(output_dir / "agent-hooks.json")
+        write_generated_json(written[-1], entry)
+    if spec is not None:
+        gate, dest = output_dir / GATE_FILE, output_dir / GATE_HOOKS_FILE
+        write_generated_json(gate, spec)
+        write_generated_json(dest, build_gate_entries(str(manifest.get("id", policy_dir.name))))
+        written += [gate, dest]
+    if call is not None:
+        written += tool_call.emit_agent_hooks(str(manifest.get("id", policy_dir.name)), call, output_dir)
+    return written
 
 
 pre_tool_use = SimpleNamespace(emit=emit_pre_tool_use)
