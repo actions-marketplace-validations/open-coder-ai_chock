@@ -3,7 +3,7 @@ name = "chock"
 # Version contract (docs/compatibility.md): PATCH releases are emitter-byte-identical;
 # MINOR releases may change compiled output. 0.1.0 is the first public release; the
 # 0.0.1a0 pre-release exists only because PyPI names are claimed by uploading.
-version = "0.15.2"
+version = "1.1.0"
 description = "Blocks your coding agent's wrong moves before they land."
 readme = "README.md"
 # PEP 639 SPDX expression; needs setuptools >= 77 (range in build-system below; CI and release use the hash-pinned
@@ -33,10 +33,9 @@ keywords = [
 ]
 # No License classifier: deprecated alongside a PEP 639 license expression.
 classifiers = [
-    # Stays Alpha until the 1.0 line docs/compatibility.md promises: "chock is pre-1.0 --
-    # the compatibility promise starts at 1.0". A stability claim here that the docs
-    # contradict is the kind of thing this project does not ship.
-    "Development Status :: 3 - Alpha",
+    # Beta, not Production/Stable: hooks in the agent are best-effort and fail open (README
+    # "Guardrails, not guarantees"). A stability claim the docs contradict is not shipped.
+    "Development Status :: 4 - Beta",
     # `chock` is a console script (see [project.scripts]); there is no GUI or web surface.
     "Environment :: Console",
     "Intended Audience :: Developers",
@@ -59,10 +58,8 @@ dependencies = [
     # Build-time only: chock's plugin packaging consumes agentseam's per-agent layout
     # data (packaging.plan/supports/plugin_root/executable_ref) to render plugin bundles.
     # It never ships to an adopter repo -- the vendored PreToolUse/SessionStart runners
-    # stay self-contained stdlib-only files, unaffected by this dependency. Pre-1.0 it is
-    # pinned to an agentseam main commit (its newest adapters are unreleased); release week
-    # swaps this for the released version, since PyPI refuses a direct reference.
-    "agentseam @ git+https://github.com/open-coder-ai/agentseam@683f95b5f2784dc3446acb1c91636ebc5ee7bee6",
+    # stay self-contained stdlib-only files, unaffected by this dependency.
+    "agentseam==0.4.1",
 ]
 
 [project.optional-dependencies]
@@ -72,20 +69,20 @@ dev = [
     "pytest-bdd>=8.0",
     # Property-based tests (tests/test_properties.py) generate inputs for the parsers
     # whose outputs become shell tokens and paths.
-    "hypothesis>=6.0",
+    "hypothesis>=6.170.9",
     # Pin the minor: ruff's formatter changes behavior across minors (0.16 began
     # formatting Python inside Markdown), which silently breaks CI on unrelated PRs.
-    "ruff>=0.16,<0.17",
+    "ruff>=0.16,<0.18",
     # Runs the DCO sign-off hook in .pre-commit-config.yaml.
     "pre-commit>=3.0",
 ]
 build = [
-    "build>=1.0",
+    "build>=1.6.1",
     "pyinstaller>=6.0",
 ]
 
 [project.urls]
-Homepage = "https://github.com/open-coder-ai/chock"
+Homepage = "https://chock.sh"
 Repository = "https://github.com/open-coder-ai/chock"
 Issues = "https://github.com/open-coder-ai/chock/issues"
 Documentation = "https://github.com/open-coder-ai/chock/blob/main/docs/README.md"

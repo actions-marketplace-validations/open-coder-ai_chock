@@ -14,6 +14,7 @@ from decision_log_support import records
 from chock import cli
 from chock.config import policy_status
 from chock.gate.runner.actor import agent_signal
+from chock.gate.runner.headread import _head_forget
 from chock.stop_common import PERSON_ONLY_POLICY
 
 FRAMEWORK_ROOT = Path(__file__).resolve().parents[1]
@@ -101,6 +102,26 @@ def test_reading_commands_stay_open_to_an_agent(
     assert REFUSED not in capsys.readouterr().err
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["disable", "--", "--check"],
+        ["remove", "--", "--check"],
+        ["init", "--", "--check"],
+        ["install-hooks", "--check"],
+        ["sync", "--", "--check"],
+        ["enable", "--check", POLICY],
+    ],
+)
+def test_a_check_token_that_is_not_the_flag_does_not_open_the_command(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], argv: list[str]
+) -> None:
+    """`--check` after `--`, or on a command that has no such flag, is a positional value."""
+    monkeypatch.setenv("CLAUDECODE", "1")
+    assert cli.main([*argv, "--repo", str(repo)]) == 1
+    assert REFUSED in capsys.readouterr().err
+
+
 def test_a_persons_shell_still_runs_them(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """No vendor marker, with or without `CHOCK_AGENT_COMMIT=0`: the person's own shell."""
     monkeypatch.setenv("CHOCK_AGENT_COMMIT", "0")
@@ -144,10 +165,10 @@ def test_the_committed_config_is_what_head_holds(repo: Path) -> None:
 
 
 def _commit_all(root: Path) -> None:
-    """Commit the scaffold as the person left it, so HEAD holds the config, lock and policies."""
     git = ["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
-    subprocess.run([*git, "add", "-A", "-f"], check=True, capture_output=True)
-    subprocess.run([*git, "commit", "-qm", "scaffold", "--no-verify"], check=True, capture_output=True)
+    for step in (["add", "-A", "-f"], ["commit", "-qm", "scaffold", "--no-verify"]):
+        subprocess.run([*git, *step], check=True, capture_output=True)
+    _head_forget()  # commits the scaffold as the person left it; the runner reads HEAD once per process, and this moved it
 
 
 @pytest.fixture

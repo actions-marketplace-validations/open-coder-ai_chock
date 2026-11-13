@@ -1,6 +1,7 @@
 """The guardrails toggle file and its lookup. Stdlib only: shipped verbatim in every merged plugin as its hook wrapper.
 
 `.chock/guardrails.json` (repo; else `~/.chock/guardrails.json`) is all on when absent, invalid or unlike its record.
+In a repository a member is off only where HEAD's copy says so too: the record is as rewritable as the file.
 `--bundle <b> --member <id> <adapter> [args...]`: off runs the adapter with no args. `--verify <adapter>`: a Stop is
 refused while a toggle file in its `cwd` or any workspace root loosened or changed during the session.
 `--session-start <adapter>`: binds the session to the files it sees and lists every member that is off.
@@ -23,10 +24,10 @@ from pathlib import Path
 
 try:  # beside this wrapper in a merged plugin; inside the chock package everywhere else
     import chock_bundle_state as ts
-    from chock_bundle_log import log_off
+    from chock_bundle_log import head_text, log_off, vouched
 except ImportError:
     from chock.guardrails import toggle_state as ts
-    from chock.guardrails.chock_bundle_log import log_off
+    from chock.guardrails.chock_bundle_log import head_text, log_off, vouched
 
 DELETED, DRIFTED, PROTECT_ID, ToggleError = ts.DELETED, ts.DRIFTED, ts.PROTECT_ID, ts.ToggleError
 NAME_RE, OFF, ON, STATES, VERSION = ts.NAME_RE, ts.OFF, ts.ON, ts.STATES, ts.VERSION
@@ -37,11 +38,13 @@ FILENAME = ".chock/guardrails.json"
 REPO, USER = "repo", "user"
 _ARGC = 5
 VERIFY = "--verify"
+MEMBERS_FLAG = "--members"
 SESSION_START = "--session-start"
 SOURCE_COMPACT = "compact"
 MOVED = (
     "changed during this session, so an `off` in it applies from the next session; every guardrail stays on until then"
 )
+UNCOMMITTED = "is off in the working file but not in HEAD's, so it stays on until that change is committed"
 _VERDICT_DENY = "deny"
 _BLOCKING_EXIT = 2  # the launcher's refusal too: the wrapper speaks no client's dialect
 _NOTICE = (
@@ -49,6 +52,7 @@ _NOTICE = (
     "them):\n{listed}\nA toggle is not a security boundary against an agent running as the person; a change made "
     "during a session applies from the next one."
 )
+_HELD = "chock: these guardrails stay on:\n{held}\nEach {uncommitted}."
 
 
 def user_path() -> Path:
@@ -71,6 +75,14 @@ def source(start: Path) -> tuple[Path | None, str | None]:
     return (user, USER) if os.path.lexists(user) else (None, None)
 
 
+def committed(root: Path) -> dict[str, dict[str, str]]:
+    """The toggles HEAD holds for the repository at `root`; none when HEAD has no valid copy or git fails."""
+    try:
+        return parse(head_text(root, FILENAME) or "")
+    except ToggleError:
+        return {}
+
+
 def load(start: Path) -> tuple[Path | None, str | None, dict[str, dict[str, str]], str | None]:
     """(governing file, scope, toggles, warning). An invalid file yields no toggles: all on, plus the warning."""
     path, scope = source(start)
@@ -79,9 +91,11 @@ def load(start: Path) -> tuple[Path | None, str | None, dict[str, dict[str, str]
     if drift(path):
         return path, scope, {}, f"{path}: {DRIFTED}"
     try:
-        return path, scope, read(path), None
+        toggles = read(path)
     except ToggleError as exc:
         return path, scope, {}, f"{path} is ignored, every guardrail stays on: {exc}"
+    toggles, dropped = vouched(toggles, committed(path.parent.parent)) if scope == REPO else (toggles, [])
+    return path, scope, toggles, f"{path}: {', '.join(dropped)} {UNCOMMITTED}" if dropped else None
 
 
 def state(toggles: dict[str, dict[str, str]], bundle: str, member: str) -> str:
@@ -123,9 +137,18 @@ def moved(starts: list[Path], bound: dict | None) -> list[Path]:
     return ts.moved(_states(starts), bound)
 
 
-def switched_off(starts: list[Path]) -> list[str]:
-    """One line per toggle file in scope that switches a member off: its scope, path and members."""
-    return listed_off(list(dict.fromkeys(p for s in starts for p in scopes(s))), source(starts[0])[0], user_path())
+def switched_off(starts: list[Path]) -> tuple[list[str], list[str]]:
+    """(one line per toggle file in scope that switches a member off, one per repo file whose offs HEAD does not hold).
+
+    A repo file's offs go through `vouched`, as the guard reads them: its scope, path and members.
+    """
+    repo_files = {r / FILENAME for r in map(repo_root, starts) if r}
+
+    def vouch(path: Path, toggles: dict[str, dict[str, str]]) -> tuple[dict, list[str]]:
+        return vouched(toggles, committed(path.parent.parent)) if path in repo_files else (toggles, [])
+
+    paths = list(dict.fromkeys(p for s in starts for p in scopes(s)))
+    return listed_off(paths, source(starts[0])[0], user_path(), vouch)
 
 
 def handed_to_user() -> str | None:
@@ -211,8 +234,10 @@ def start(argv: list[str], payload: bytes) -> None:
         if decision is not None or getattr(event, "event", "") != "session_start":
             return decision
         bind(wheres, session, fresh=resumed)
-        listed = switched_off(wheres)
-        return adapter.Decision.allow(context=_NOTICE.format(listed="\n".join(listed))) if listed else None
+        listed, held = switched_off(wheres)
+        notice = [_NOTICE.format(listed="\n".join(listed))] if listed else []
+        notice += [_HELD.format(held="\n".join(held), uncommitted=UNCOMMITTED)] if held else []
+        return adapter.Decision.allow(context="\n".join(notice)) if notice else None
 
     adapter.handle = handle
     sys.argv = list(argv)
@@ -221,10 +246,11 @@ def start(argv: list[str], payload: bytes) -> None:
 
 def wrapped(argv: list[str], payload: bytes) -> list[str]:
     """The adapter argv this member runs with: its own when on, none when off. Any doubt is on."""
-    if len(argv) < _ARGC or argv[0] != "--bundle" or argv[2] != "--member":
-        msg = "usage: chock_bundle.py --bundle <name> --member <id> <adapter> [args...]"
+    many = argv[2:3] == [MEMBERS_FLAG]
+    if len(argv) < _ARGC - many or argv[0] != "--bundle" or argv[2] not in ("--member", MEMBERS_FLAG):
+        msg = "usage: chock_bundle.py --bundle <name> (--member <id> | --members) <adapter> [args...]"
         raise SystemExit(msg)
-    bundle, member, adapter, rest = argv[1], argv[3], argv[4], argv[5:]
+    bundle, member, adapter, rest = argv[1], None if many else argv[3], argv[4 - many], argv[5 - many :]
     try:
         starts = _wheres(payload)
         governing, _scope, toggles, warning = load(starts[0])
@@ -235,6 +261,11 @@ def wrapped(argv: list[str], payload: bytes) -> list[str]:
         governing, toggles, warning = None, {}, f"the guardrails toggle lookup failed, every guardrail stays on: {exc}"
     if warning:
         sys.stderr.write(f"chock: {warning}\n")
+    if many:
+        off = ts.off_in_index(toggles, bundle, rest) if governing is not None else []
+        for name in off:
+            log_off(governing, bundle, name)
+        return [adapter, *rest, "--off", ",".join(off)] if off else [adapter, *rest]
     if governing is not None and state(toggles, bundle, member) == OFF:
         log_off(governing, bundle, member)
         return [adapter]

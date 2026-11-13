@@ -10,8 +10,11 @@ import contextlib
 import json
 import sys
 
+import contextvars as _chock_contextvars
+import signal as _chock_signal
 import hashlib as _chock_hashlib
 import fnmatch as _chock_fnmatch
+import io as _chock_io
 import re as _chock_re
 import os as _chock_os
 import queue as _chock_queue
@@ -39,9 +42,74 @@ PATTERN_JUDGE_READY = 'ready'
 
 PATTERN_JUDGE_SOURCE = "import json, re, sys\nprint('ready', flush=True)\nfor line in sys.stdin:\n    out = []\n    for pattern, texts in json.loads(line):\n        search = re.compile(pattern).search\n        out.append([index for index, text in enumerate(texts) if search(text)])\n    print(json.dumps(out), flush=True)\n"
 
+MEMBER_DEADLINE = _chock_contextvars.ContextVar('chock_member_deadline', default=None)
+
 def engine_deadline():
-    """The monotonic instant this invocation's budget runs out."""
-    return _chock_time.monotonic() + ENGINE_BUDGET_SECONDS
+    """The monotonic instant this invocation's budget runs out: the member's own deadline when one is set."""
+    member = MEMBER_DEADLINE.get()
+    return member if member is not None else _chock_time.monotonic() + ENGINE_BUDGET_SECONDS
+
+def last_state(var):
+    """This thread's mutable record in the ContextVar `var`: a thread starts with none, so none is shared."""
+    state = var.get(None)
+    if state is None:
+        state = {}
+        var.set(state)
+    return state
+
+LIVE_TREES = {}
+
+def track_tree(proc):
+    """Record `proc` (started with `tree_spawn_options`) as a tree to end if the hook leaves while it runs."""
+    LIVE_TREES[proc.pid] = proc
+
+def untrack_tree(proc):
+    """Forget `proc`: it ended, or its tree was killed."""
+    LIVE_TREES.pop(proc.pid, None)
+
+def kill_live_trees():
+    """Kill every tree still recorded, whichever thread started it."""
+    for proc in tuple(LIVE_TREES.copy().values()):
+        kill_tree(proc)
+        untrack_tree(proc)
+
+def tree_spawn_options():
+    """Popen options that put a child in its own process group (POSIX session; Windows new process group)."""
+    if _chock_os.name == 'nt':
+        return {'creationflags': _chock_subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {'start_new_session': True}
+
+def kill_tree(proc):
+    """Kill `proc` and everything it started: killpg on POSIX, `taskkill /T /F` on Windows."""
+    with contextlib.suppress(OSError):
+        if _chock_os.name == 'nt':
+            _chock_subprocess.run(['taskkill', '/T', '/F', '/PID', str(proc.pid)], capture_output=True, check=False)
+        else:
+            _chock_os.killpg(proc.pid, _chock_signal.SIGKILL)
+    with contextlib.suppress(OSError):
+        proc.kill()
+
+def run_tree(argv, *, timeout=None, **options):
+    """`subprocess.run` that, on a timeout, kills the child's whole process tree before raising."""
+    options.pop('check', None)
+    stdin_text = options.pop('input', None)
+    if options.pop('capture_output', False):
+        options.update(stdout=_chock_subprocess.PIPE, stderr=_chock_subprocess.PIPE)
+    if stdin_text is not None:
+        options['stdin'] = _chock_subprocess.PIPE
+    if 'text' in options or 'encoding' in options:
+        options['text'] = True
+    with _chock_subprocess.Popen(argv, **options, **tree_spawn_options()) as proc:
+        track_tree(proc)
+        try:
+            out, err = proc.communicate(stdin_text, timeout=timeout)
+        except BaseException:
+            kill_tree(proc)
+            proc.communicate()
+            raise
+        finally:
+            untrack_tree(proc)
+    return _chock_subprocess.CompletedProcess(argv, proc.returncode, out, err)
 
 def engine_remaining(deadline):
     """Seconds left before `deadline`, never negative."""
@@ -68,10 +136,11 @@ def _pump_lines(proc, lines):
     lines.put(None)
 
 def _start_judge(judge):
-    proc = _chock_subprocess.Popen(judge['argv'], stdin=_chock_subprocess.PIPE, stdout=_chock_subprocess.PIPE, stderr=_chock_subprocess.PIPE, text=True, encoding='utf-8')
+    proc = _chock_subprocess.Popen(judge['argv'], stdin=_chock_subprocess.PIPE, stdout=_chock_subprocess.PIPE, stderr=_chock_subprocess.PIPE, text=True, encoding='utf-8', **tree_spawn_options())
     lines = _chock_queue.Queue()
     _chock_threading.Thread(target=_pump_lines, args=(proc, lines), daemon=True).start()
     judge['proc'], judge['lines'] = (proc, lines)
+    track_tree(proc)
     try:
         ready = lines.get(timeout=PATTERN_START_SECONDS)
     except _chock_queue.Empty:
@@ -88,8 +157,9 @@ def close_judge(judge):
     if proc is None:
         return ''
     if proc.poll() is None:
-        proc.kill()
+        kill_tree(proc)
     proc.wait()
+    untrack_tree(proc)
     try:
         spoken = proc.stderr.read()
     except (OSError, ValueError):
@@ -286,7 +356,8 @@ def log_settings_read(path):
         problems.append(f'{path}: max_bytes must be {_LOG_BYTES_RANGE}, not {size!r}; using the next scope or 1048576')
     unknown = sorted(set(doc) - set(LOG_SETTINGS_KEYS))
     if unknown:
-        problems.append(''.join([format(path), ': unknown key(s) ', format(', '.join(map(str, unknown))), '; only level and max_bytes are read']))
+        names = ', '.join(map(str, unknown))
+        problems.append(f'{path}: unknown key(s) {names}; only level and max_bytes are read')
     return (found, problems)
 
 def log_settings_paths(repo_root):
@@ -686,7 +757,7 @@ _WINDOWS = 'nt'
 
 _FOUND_BASH = {}
 
-GUARD_LAST = {}
+GUARD_LAST = _chock_contextvars.ContextVar('chock_guard_last')
 
 GUARD_MISSING = 'missing'
 
@@ -817,14 +888,14 @@ def run_guard_detailed(guard: _chock_Path, command: str, tool: str='', *, can_as
         if fallback:
             env[ARGV_FALLBACK_ENV] = '1'
         env.update({} if can_ask is None else {CAN_ASK_ENV: '1' if can_ask else '0'})
-        proc = _chock_subprocess.run([interpreter, str(guard), *args], capture_output=True, text=True, encoding='utf-8', errors='replace', env=env, timeout=time_left(deadline, [interpreter, str(guard)]), check=False)
+        proc = run_tree([interpreter, str(guard), *args], capture_output=True, text=True, encoding='utf-8', errors='replace', env=env, timeout=time_left(deadline, [interpreter, str(guard)]), check=False)
     except _chock_subprocess.TimeoutExpired:
         print(f'chock: guard timed out after {ENGINE_BUDGET_SECONDS}s, not checked', file=sys.stderr)
         return (GUARD_ERRORED, '')
     except (OSError, UnicodeError) as exc:
         print(f'chock: guard could not run, not checked: {exc}', file=sys.stderr)
         return (GUARD_ERRORED, '')
-    GUARD_LAST['code'] = proc.returncode
+    last_state(GUARD_LAST)['code'] = proc.returncode
     output = ((proc.stderr or '') + (proc.stdout or '')).strip()
     first_line = output.splitlines()[0].strip() if output else ''
     if proc.returncode == GUARD_VIOLATION:
@@ -853,12 +924,12 @@ def evaluate(argv: list[str], command: str, tool: str='', *, can_ask: bool | Non
     if guard is None:
         return None
     if not guard.exists():
-        GUARD_LAST['outcome'] = GUARD_MISSING
+        last_state(GUARD_LAST)['outcome'] = GUARD_MISSING
         return (VERDICT_DENY, f"chock guard {guard} is missing, so this command cannot be checked. Run `chock sync --repo .` to reinstall the policy's guards.")
     verdict, message = run_guard_detailed(guard, command, tool, can_ask=can_ask)
-    GUARD_LAST['outcome'] = verdict
+    last_state(GUARD_LAST)['outcome'] = verdict
     if verdict == GUARD_BLOCKED:
-        return (VERDICT_DENY, f'Blocked by chock policy: {guard.stem}')
+        return (VERDICT_DENY, f'Blocked by chock policy: {guard.stem}: {message}')
     if verdict == GUARD_ASKED:
         return (VERDICT_ESCALATE, f'chock policy {guard.stem} asks before this runs: {message}' if message else f'chock policy {guard.stem} asks for confirmation before this runs (guard gave no reason).')
     if verdict == GUARD_ERRORED:
@@ -949,7 +1020,8 @@ def dlog_target(event, repo):
     tool = str(getattr(event, 'tool', None) or '')
     mcp = _DLOG_MCP_TOOL.match(tool)
     if mcp:
-        return log_redact(''.join([format(mcp['server']), '/', format(mcp['tool'])]))[:_DLOG_MCP_CAP]
+        server, name = (mcp['server'], mcp['tool'])
+        return log_redact(f'{server}/{name}')[:_DLOG_MCP_CAP]
     command, path = (getattr(event, 'command', None), getattr(event, 'path', None))
     if command:
         return dlog_command_print(command)
@@ -999,7 +1071,7 @@ _DLOG_DIST_INFO = _chock_re.compile('^chock-([^-]+)\\.dist-info$')
 
 _DLOG_GATE_LOGGED_CODES = (0, 1, 3, 4)
 
-GATE_LAST = {}
+GATE_LAST = _chock_contextvars.ContextVar('chock_gate_last')
 
 def _dlog_flag_value(argv, flag):
     if flag in argv:
@@ -1064,8 +1136,8 @@ def _dlog_trace(event, wire, rule, stages):
         trace['command'] = log_trace_text(event.command)
     if event.path:
         trace['path'] = log_trace_text(event.path)
-    if 'code' in GUARD_LAST:
-        trace['exit_code'] = GUARD_LAST['code']
+    if 'code' in last_state(GUARD_LAST):
+        trace['exit_code'] = last_state(GUARD_LAST)['code']
     return trace
 
 def _dlog_reason(source, outcome):
@@ -1074,9 +1146,13 @@ def _dlog_reason(source, outcome):
         return 'no-rule'
     if source == HALT_REASON:
         return HALT_REASON
-    if source == 'guard' and 'outcome' in GUARD_LAST:
-        return ''.join(['guard-', format(GUARD_LAST['outcome'])])
-    return source if source == 'fault' else ''.join([format(source), '-', format(_DLOG_SPOKEN.get(outcome, 'allow'))])
+    if source == 'guard' and 'outcome' in last_state(GUARD_LAST):
+        guarded = last_state(GUARD_LAST)['outcome']
+        return f'guard-{guarded}'
+    if source == 'fault':
+        return source
+    spoken = _DLOG_SPOKEN.get(outcome, 'allow')
+    return f'{source}-{spoken}'
 
 def _dlog_paths(route, runtime, agent, event):
     """(log file, repository whose settings apply) for this call."""
@@ -1095,7 +1171,7 @@ def log_decision(argv, event, decision, judged, context):
         runtime = globals().get('__file__') or sys.argv[0]
         route = runtime_route(runtime)
         source, rule, started, stages = judged
-        gate_wrote = event.event != 'pre_tool' or GATE_LAST.get('code') in _DLOG_GATE_LOGGED_CODES
+        gate_wrote = event.event != 'pre_tool' or last_state(GATE_LAST).get('code') in _DLOG_GATE_LOGGED_CODES
         if route == DLOG_ROUTE_SYNC and _DLOG_GATE_FLAG in argv and (source in (None, 'gate')) and gate_wrote:
             return
         agent = str(getattr(event, 'agent', None) or 'unknown')
@@ -1148,6 +1224,8 @@ _EDIT_LIST = 'edits'
 _CRLF = '\r\n'
 
 _CREATE_TEXT = 'file_text'
+
+_CREATE_KEYS = ('content', _CREATE_TEXT)
 
 def _edit_call_input(event):
     raw = getattr(event, 'raw', None)
@@ -1210,12 +1288,16 @@ def edited_text(event, root=None):
     return text
 
 def created_text(event):
-    """The whole file a write call carries: the adapter's content, else `tool_input.file_text`; None otherwise."""
+    """The whole file a write call carries: the adapter's content, else the call's own `content` or `file_text`.
+
+    An adapter reads an empty `content` as absent, so the call's own input is read too: a write of
+    nothing is still a write to its path.
+    """
     content = getattr(event, 'content', None)
     if isinstance(content, str):
         return content
-    text = _edit_call_input(event).get(_CREATE_TEXT)
-    return text if isinstance(text, str) else None
+    tool_input = _edit_call_input(event)
+    return next((text for text in map(tool_input.get, _CREATE_KEYS) if isinstance(text, str)), None)
 
 def added_from_event(event):
     """What an edit call introduces -- what `added_lines` means for it -- or {} for any other call."""
@@ -1386,7 +1468,8 @@ def _patch_not_empty(state, text):
     if last is None or last['op'] != 'update':
         return
     if not last['body'] and state['mode'] == 'update':
-        _patch_refuse(state['number'], text, ''.join(['update of ', format(repr(last['path'])), ' has no hunk']))
+        target = last['path']
+        _patch_refuse(state['number'], text, f'update of {target!r} has no hunk')
     if last['body'] and (not (last['body'][-1]['old'] or last['body'][-1]['new'])):
         _patch_refuse(state['number'], text, 'a hunk has no lines')
 
@@ -1516,7 +1599,11 @@ def _read(root, path):
         return None
 
 def patched_files(event, root=None):
-    """{path: text} for every file an apply_patch call adds or updates and can be rebuilt."""
+    """{path: text} for every file an apply_patch call adds or updates and can be rebuilt.
+
+    A file it deletes, or moves away from, is named with empty text: it has no content left to judge,
+    but its path is still a write that path-based gates must see.
+    """
     patch = patch_text(event)
     if patch is None:
         return {}
@@ -1528,7 +1615,7 @@ def patched_files(event, root=None):
             disk[key] = files[key] = ''.join((line + '\n' for line in body))
         elif op == 'delete':
             disk[key] = None
-            files.pop(key, None)
+            files[key] = ''
         else:
             before = disk[key] if key in disk else _read(root, key)
             after = apply_hunks(before, body) if before is not None else None
@@ -1536,7 +1623,7 @@ def patched_files(event, root=None):
                 target = _patch_key(event, moved_to) if moved_to else key
                 if target != key:
                     disk[key] = None
-                    files.pop(key, None)
+                    files[key] = ''
                 disk[target] = files[target] = after
     return files
 
@@ -2168,6 +2255,85 @@ def workspace_root(event):
     path = getattr(event, 'path', None)
     return next((root for root in roots if path and _holds(root, path)), roots[0] if roots else None)
 
+_CASE_BLIND = sys.platform in ('darwin', 'win32')
+
+def repo_relative(path, root):
+    """`path` relative to `root` in POSIX form, as scope globs are written; as given when outside `root`."""
+    text = str(path)
+    if root is None:
+        return text
+    windows = _chock_os.name == 'nt' or str(root)[1:2] == _DRIVE_COLON
+    flavour = _chock_PureWindowsPath if windows else _chock_PurePosixPath
+    try:
+        return _folded(flavour(str(root)) / text).relative_to(flavour(str(root))).as_posix()
+    except ValueError:
+        pass
+    if windows != (_chock_os.name == 'nt'):
+        return text
+    try:
+        return _chock_Path(root, text).resolve().relative_to(_chock_Path(root).resolve()).as_posix()
+    except (OSError, ValueError, RuntimeError):
+        return text
+
+def on_disk_case(name, root):
+    """`name` (repo-relative, POSIX) with each existing component spelled as the filesystem stores it."""
+    here, spelled = (_chock_Path(root), [])
+    for part in _chock_PurePosixPath(name).parts:
+        try:
+            stored = _chock_os.listdir(here)
+        except OSError:
+            stored = []
+        found = part if part in stored else next((s for s in stored if s.casefold() == part.casefold()), part)
+        spelled.append(found)
+        here = here / found
+    return _chock_PurePosixPath(*spelled).as_posix()
+
+def repo_paths(path, root, *, case_blind=_CASE_BLIND):
+    """Every repo-relative name a write is judged under: as written, and through symlinks and case."""
+    lexical = repo_relative(path, root)
+    if root is None or (str(root)[1:2] == _DRIVE_COLON) != (_chock_os.name == 'nt'):
+        return (lexical,)
+    try:
+        resolved = _chock_Path(root, str(path)).resolve().relative_to(_chock_Path(root).resolve()).as_posix()
+    except (OSError, ValueError, RuntimeError):
+        return (lexical,)
+    names = [lexical, resolved]
+    if case_blind:
+        names += [on_disk_case(name, root) for name in (lexical, resolved) if not is_outside(name)]
+    return tuple(dict.fromkeys(names))
+
+_MODE_LINK = 40960
+
+def _open_text(target, kind):
+    """(text, why) of a link's target or a regular file, opened without following a link or waiting on a pipe."""
+    try:
+        if kind == _MODE_LINK:
+            return (_chock_os.readlink(target), None)
+        if kind != STOP_MODE_FILE:
+            return (None, f'{target} is neither a file nor a link')
+        fd = _chock_os.open(target, _chock_os.O_RDONLY | getattr(_chock_os, 'O_NOFOLLOW', 0) | getattr(_chock_os, 'O_NONBLOCK', 0))
+        with _chock_os.fdopen(fd, 'rb') as handle:
+            return (handle.read().decode('utf-8'), None)
+    except UnicodeDecodeError:
+        return (None, None)
+    except OSError as exc:
+        return (None, f'{target} could not be read ({exc})')
+
+def worktree_text(target):
+    """(text, why): `target` as the worktree holds it, never opening a FIFO, device or the file a link names.
+
+    A file that is gone reads as "" (its path is still judged), a directory or undecodable file as no
+    text, a link as the target git stores for it. Anything else is refused with a reason: opening a
+    FIFO or device can block the hook until its client's timeout, which a client may read as an allow.
+    """
+    try:
+        kind = _chock_os.lstat(target).st_mode & STOP_MODE_MASK
+    except FileNotFoundError:
+        return ('', None)
+    except OSError as exc:
+        return (None, f'{target} could not be examined ({exc})')
+    return (None, None) if kind == STOP_MODE_DIR else _open_text(target, kind)
+
 _REPO_STOP_PROJECT_ENV = ('CLAUDE_PROJECT_DIR', 'GEMINI_PROJECT_DIR', 'OPENHANDS_PROJECT_DIR')
 
 _REPO_STOP_PROJECT_KEYS = ('workspacePaths',)
@@ -2294,18 +2460,29 @@ _SEVERITY = (VERDICT_DENY, VERDICT_ESCALATE, VERDICT_WARN)
 
 _GIT_DIR = '.git'
 
-def _repository(folder):
+def repository_of(folder):
     """The repository `folder` is in: the nearest folder holding `.git`, or None outside one."""
     here = _chock_Path(folder).absolute()
+    if not here.is_dir():
+        return None
     return next((f for f in (here, *here.parents) if (f / _GIT_DIR).exists()), None)
 
+def judged_root(named):
+    """The top level of `named`'s repository; `named` as given when relative (a drive-lettered root on POSIX)."""
+    path = _chock_Path(named)
+    return repository_of(path) or path if path.is_absolute() else path
+
 def stop_roots(event, fallback):
-    """The event's `cwd` and every workspace root inside a repository, the first per repository; else [fallback]."""
+    """The top level of each repository the event's `cwd` and workspace roots are in; else [fallback].
+
+    The top level, not the named folder: `git status` lists paths relative to it, so a subdirectory
+    would resolve every listed path against the wrong folder and judge nothing.
+    """
     by_repository = {}
     for named in filter(None, (getattr(event, 'cwd', None), *workspace_roots(event))):
-        repository = _repository(named)
+        repository = repository_of(named)
         if repository is not None:
-            by_repository.setdefault(repository, _chock_Path(named))
+            by_repository.setdefault(repository, judged_root(named))
     return list(by_repository.values()) or [fallback]
 
 def per_root(said):
@@ -2383,37 +2560,8 @@ def writes_from_event(event, root=None):
         return {}
     return {str(path): content}
 
-def repo_relative(path, root):
-    """`path` relative to `root` in POSIX form, as scope globs are written; as given when outside `root`."""
-    text = str(path)
-    if root is None:
-        return text
-    windows = _chock_os.name == 'nt' or str(root)[1:2] == _DRIVE_COLON
-    flavour = _chock_PureWindowsPath if windows else _chock_PurePosixPath
-    try:
-        return _folded(flavour(str(root)) / text).relative_to(flavour(str(root))).as_posix()
-    except ValueError:
-        pass
-    if windows != (_chock_os.name == 'nt'):
-        return text
-    try:
-        return _chock_Path(root, text).resolve().relative_to(_chock_Path(root).resolve()).as_posix()
-    except (OSError, ValueError, RuntimeError):
-        return text
-
-def repo_paths(path, root):
-    """Every repo-relative name a write is judged under: as written, and through symlinks and case."""
-    lexical = repo_relative(path, root)
-    if root is None or (str(root)[1:2] == _DRIVE_COLON) != (_chock_os.name == 'nt'):
-        return (lexical,)
-    try:
-        resolved = _chock_Path(root, str(path)).resolve().relative_to(_chock_Path(root).resolve()).as_posix()
-    except (OSError, ValueError, RuntimeError):
-        return (lexical,)
-    return tuple(dict.fromkeys((lexical, resolved)))
-
 def changed_paths(repo_root, deadline=None, why=None):
-    """Every uncommitted path; None (reason appended to `why`) when git gave no answer, [] only outside a repository."""
+    """Every uncommitted path, a deleted file and a rename's old name included; None (reason in `why`) when git gave no answer."""
     deadline, why = (engine_deadline() if deadline is None else deadline, [] if why is None else why)
     argv = [_GIT, '-C', str(repo_root), 'status', '--porcelain=v1', '--untracked-files=all', '-z']
     try:
@@ -2437,8 +2585,8 @@ def changed_paths(repo_root, deadline=None, why=None):
     for field in fields:
         status, path = (field[:2], field[3:])
         if status.startswith(_RENAMED):
-            next(fields, None)
-        if _DELETED not in status and path:
+            paths.append(next(fields, ''))
+        if path:
             paths.append(path)
     return paths
 
@@ -2454,10 +2602,14 @@ def writes_from_worktree(repo_root, deadline=None, why=None):
         return None
     writes = {}
     for path in paths:
-        try:
-            writes[path] = _chock_Path(repo_root, path).read_text(encoding='utf-8')
-        except (OSError, UnicodeDecodeError):
-            continue
+        text, unsafe = worktree_text(_chock_Path(repo_root, path))
+        if unsafe:
+            if why is not None:
+                why.append(unsafe)
+            sys.stderr.write(f'chock: {unsafe}, worktree not checked\n')
+            return None
+        if text is not None:
+            writes[path] = text
     return writes
 
 def run_gate(gate, writes, event, run_in, deadline):
@@ -2474,12 +2626,12 @@ def run_gate(gate, writes, event, run_in, deadline):
         return (GATE_ERRORED, 'the vendored gate runner is not installed beside this gate')
     argv = [sys.executable, str(runner), 'run', '--gate', str(gate), '--event', event]
     try:
-        proc = _chock_subprocess.run(argv, input=json.dumps({'writes': writes, **(extra or {})}), capture_output=True, text=True, encoding=_UTF8, errors='replace', timeout=time_left(deadline, argv), check=False, cwd=str(root) if root is not None else None)
+        proc = run_tree(argv, input=json.dumps({'writes': writes, **(extra or {})}), capture_output=True, text=True, encoding=_UTF8, errors='replace', timeout=time_left(deadline, argv), check=False, cwd=str(root) if root is not None else None)
     except _chock_subprocess.TimeoutExpired as exc:
         return (GATE_ERRORED, f'the gate runner gave no verdict within {allowed_seconds(exc)}')
     except (OSError, _chock_subprocess.SubprocessError) as exc:
         return (GATE_ERRORED, str(exc))
-    GATE_LAST['code'] = proc.returncode
+    last_state(GATE_LAST)['code'] = proc.returncode
     return runner_outcome(proc.returncode, proc.stderr)
 
 _EVENT_ARG = {'pre_tool': 'pre-tool-use', 'stop': 'stop'}
@@ -2496,7 +2648,7 @@ def root_for(gate):
     return parents[_GATE_DEPTH_TO_CHOCK].parent
 
 def repo_root_for(event, gate):
-    """The repository under judgement: the compiled layout's root, else the event's cwd, else its workspace root.
+    """The repository under judgement: the compiled layout's root, else the top level of the event's cwd or workspace root.
 
     Of several workspace roots, the one holding the written path; this process's cwd only when there are none.
     """
@@ -2504,7 +2656,7 @@ def repo_root_for(event, gate):
     if root is not None:
         return root
     cwd = getattr(event, 'cwd', None) or workspace_root(event)
-    return _chock_Path(cwd) if cwd else _chock_Path.cwd()
+    return judged_root(cwd) if cwd else _chock_Path.cwd()
 
 def writes_for(event, gate, deadline=None, why=None, root=None):
     """What this event puts under judgement: the call's own text, or what the turn left behind (None: unlisted)."""
@@ -2538,7 +2690,7 @@ def _gate_says(gate, event, deadline, root, case_blind):
 
 def evaluate_gate(argv, event, *, case_blind=None):
     """The decision this event earns from a compiled gate, or None when it has nothing to say."""
-    GATE_LAST.clear()
+    last_state(GATE_LAST).clear()
     gate = gate_path_from_argv(argv)
     if gate is None or getattr(event, 'event', '') not in _EVENT_ARG:
         return None
@@ -2617,7 +2769,7 @@ def _tool_call_script(spec, root, payload, deadline=None):
     deadline = engine_deadline() if deadline is None else deadline
     argv = [sys.executable, str(script)]
     try:
-        proc = _chock_subprocess.run(argv, input=json.dumps(payload), capture_output=True, text=True, encoding='utf-8', errors='replace', cwd=str(root), env={**_chock_os.environ, **BYTECODE_OFF}, timeout=time_left(deadline, argv), check=False)
+        proc = run_tree(argv, input=json.dumps(payload), capture_output=True, text=True, encoding='utf-8', errors='replace', cwd=str(root), env={**_chock_os.environ, **BYTECODE_OFF}, timeout=time_left(deadline, argv), check=False)
     except _chock_subprocess.TimeoutExpired as exc:
         budget = f'gave no verdict within {allowed_seconds(exc)}'
         return ('deny', f'script gate: {script.name} {budget}{_TOOL_CALL_UNDECIDED}')
@@ -2684,3 +2836,157 @@ def evaluate_tool_call(argv, event):
     if spec.get('kind') in _TOOL_CALL_NEEDS_SESSION:
         session_record(root, event, 'pre', _TOOL_CALL_BLOCKED if verdict and verdict[0] == 'deny' else None)
     return verdict
+
+MULTI_FLAG = '--multi'
+
+INDEX_SHA_FLAG = '--index-sha256'
+
+ROOT_FLAG = '--root'
+
+OFF_FLAG = '--off'
+
+MEMBER_DEFAULT_SECONDS = 30
+
+_MEMBER_SEPARATOR = '\n'
+
+def multi_from_argv(argv):
+    """(index path, pinned sha256) when the hook command names an index, else None."""
+    if MULTI_FLAG not in argv:
+        return None
+    path = argv[argv.index(MULTI_FLAG) + 1] if argv.index(MULTI_FLAG) + 1 < len(argv) else ''
+    pin = argv[argv.index(INDEX_SHA_FLAG) + 1] if INDEX_SHA_FLAG in argv and argv.index(INDEX_SHA_FLAG) + 1 < len(argv) else ''
+    return (path, pin)
+
+def root_from_argv(argv):
+    """The plugin root a hook command names with `--root`, "" when the flag has no value, None when it is absent."""
+    if ROOT_FLAG not in argv:
+        return None
+    at = argv.index(ROOT_FLAG) + 1
+    return argv[at] if at < len(argv) else ''
+
+def off_from_argv(argv):
+    """The bundle members a toggle wrapper switched off for this call (`--off a,b`), as a set of ids."""
+    at = argv.index(OFF_FLAG) + 1 if OFF_FLAG in argv else len(argv)
+    return {name for name in (argv[at] if at < len(argv) else '').split(',') if name}
+
+def sha256_of(path):
+    """The sha256 of a file's bytes with CRLF read as LF, so a checkout that converted line endings still matches."""
+    return _chock_hashlib.sha256(_chock_Path(path).read_bytes().replace(b'\r\n', b'\n')).hexdigest()
+
+def _escapes(path):
+    """True for a path that is absolute, drive- or root-qualified, or climbs out of the root by a `..` part, on either flavour."""
+    return any((flavour(path).is_absolute() or '..' in flavour(path).parts or flavour(path).drive or flavour(path).root for flavour in (_chock_PurePosixPath, _chock_PureWindowsPath)))
+
+def _member_fault(member, root):
+    """Why one index member cannot be trusted (an escaping path, a file off its pin, an unreadable shape), else None."""
+    named = [*member['files'], *(a for a in member['argv'] if isinstance(a, str) and (not a.startswith('-')))]
+    for relative in named:
+        if not isinstance(relative, str) or _escapes(relative):
+            return f'the policy index names {relative!r}, which is outside the repository root'
+    for relative, expected in member['files'].items():
+        if sha256_of(_chock_Path(root) / relative) != expected:
+            return f'{relative} does not match the hash the policy index pins'
+    if not isinstance(member['argv'], list) or not float(member.get('timeout', MEMBER_DEFAULT_SECONDS)) > 0:
+        return 'the policy index holds a member chock cannot read'
+    return None
+
+def _rooted(member, root):
+    """`member` with each path its argv names joined to `root`: a plugin's members are paths relative to its root."""
+    argv = [a if not isinstance(a, str) or a.startswith('-') else str(_chock_Path(root) / a) for a in member['argv']]
+    return {**member, 'argv': argv}
+
+def load_index(path, pin, root, *, rooted=False):
+    """(members, None) when the index matches its pin and every member's files match theirs; else (None, why).
+
+    `root` is where the member paths resolve; `rooted` (a plugin's `--root`) also joins it to each argv path.
+    """
+    try:
+        if not root:
+            return (None, 'the hook command names an empty plugin root, so its policy index cannot be checked')
+        if not pin or sha256_of(path) != pin:
+            return (None, f'the policy index {path} does not match the hash the hook pins')
+        members = json.loads(_chock_Path(path).read_text(encoding='utf-8'))['members']
+        if not isinstance(members, list) or not members:
+            return (None, f'the policy index {path} lists no policies, which is a build fault, never an allow')
+        for member in members:
+            why = _member_fault(member, root)
+            if why:
+                return (None, why)
+        if rooted:
+            members = [_rooted(member, root) for member in members]
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        return (None, f'the policy index {path} cannot be read ({type(exc).__name__})')
+    return (members, None)
+
+def _fault(member, exc):
+    return (VERDICT_DENY, f'chock could not check this call with {member_name(member)} ({type(exc).__name__}: {exc}). Refusing rather than reporting an allow it never established.')
+
+def member_name(member):
+    """A member's policy, as its argv names it (the file after its first flag)."""
+    return next((arg for arg in member['argv'][1:2]), 'a policy')
+
+def _member_thread(member, judge_one, slot):
+    MEMBER_DEADLINE.set(_chock_time.monotonic() + float(member.get('timeout', MEMBER_DEFAULT_SECONDS)))
+    try:
+        slot['verdict'] = judge_one(member['argv'])
+    except (Exception, SystemExit) as exc:
+        slot['verdict'] = _fault(member, exc)
+    slot['done'] = True
+
+def settle(verdict, *, can_ask=True, warn_speaks=True):
+    """One member's verdict as the client can honour it: an ask the client ignores is a deny, a warn it never shows is nothing."""
+    if verdict is None:
+        return None
+    kind, reason = verdict
+    if kind == VERDICT_ESCALATE and (not can_ask):
+        return (VERDICT_DENY, reason)
+    if kind == VERDICT_WARN and (not warn_speaks):
+        return None
+    return verdict
+
+def run_members(members, judge_one, *, can_ask=True, warn_speaks=True, said=None):
+    """Each member's settled verdict (or None), in index order. A member past its own deadline refuses its own call.
+
+    The members share this process's streams, so they get none: stdin is empty and what they print on stdout is
+    dropped. What they write to stderr (a stop's warning, a note that a worktree went unchecked) is appended to `said`.
+    """
+    started = _chock_time.monotonic()
+    saved = (sys.stdin, sys.stdout, sys.stderr)
+    sys.stdin, sys.stdout, sys.stderr = (_chock_io.StringIO(''), _chock_io.StringIO(), _chock_io.StringIO())
+    try:
+        running = []
+        for member in members:
+            slot = {'done': False, 'verdict': None}
+            thread = _chock_threading.Thread(target=_member_thread, args=(member, judge_one, slot), daemon=True)
+            thread.start()
+            running.append((member, thread, slot))
+        verdicts = []
+        for member, thread, slot in running:
+            allowed = float(member.get('timeout', MEMBER_DEFAULT_SECONDS))
+            thread.join(max(started + allowed - _chock_time.monotonic(), 0.0))
+            if slot['done']:
+                verdicts.append(settle(slot['verdict'], can_ask=can_ask, warn_speaks=warn_speaks))
+            else:
+                verdicts.append((VERDICT_DENY, f'{member_name(member)} gave no verdict within {allowed:g}s, so it refuses this call.'))
+    finally:
+        written = sys.stderr.getvalue() if isinstance(sys.stderr, _chock_io.StringIO) else ''
+        sys.stdin, sys.stdout, sys.stderr = saved
+        if said is not None and written:
+            said.append(written)
+    return verdicts
+
+def combine(verdicts):
+    """One verdict from many, in index order: any deny wins, then any ask, then the warns; None when all allow."""
+    for outcome in (VERDICT_DENY, VERDICT_ESCALATE, VERDICT_WARN):
+        reasons = [reason for verdict in verdicts if verdict is not None for kind, reason in [verdict] if kind == outcome]
+        if reasons:
+            return (outcome, _MEMBER_SEPARATOR.join(reasons))
+    return None
+
+def flush_and_exit(code):
+    """End every child tree a member left running, write what was said, then leave without waiting for its thread."""
+    kill_live_trees()
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(OSError, ValueError):
+            stream.flush()
+    _chock_os._exit(code)

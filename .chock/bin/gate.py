@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import contextvars
 import difflib
 import fnmatch
 import hashlib
@@ -13,6 +14,7 @@ import os
 import queue
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -56,9 +58,83 @@ PATTERN_JUDGE_SOURCE = (
 )
 
 
+MEMBER_DEADLINE = contextvars.ContextVar("chock_member_deadline", default=None)
+
+
 def engine_deadline():
-    """The monotonic instant this invocation's budget runs out."""
-    return time.monotonic() + ENGINE_BUDGET_SECONDS
+    """The monotonic instant this invocation's budget runs out: the member's own deadline when one is set."""
+    member = MEMBER_DEADLINE.get()
+    return member if member is not None else time.monotonic() + ENGINE_BUDGET_SECONDS
+
+
+def last_state(var):
+    """This thread's mutable record in the ContextVar `var`: a thread starts with none, so none is shared."""
+    state = var.get(None)
+    if state is None:
+        state = {}
+        var.set(state)
+    return state
+
+
+LIVE_TREES = {}
+
+
+def track_tree(proc):
+    """Record `proc` (started with `tree_spawn_options`) as a tree to end if the hook leaves while it runs."""
+    LIVE_TREES[proc.pid] = proc
+
+
+def untrack_tree(proc):
+    """Forget `proc`: it ended, or its tree was killed."""
+    LIVE_TREES.pop(proc.pid, None)
+
+
+def kill_live_trees():
+    """Kill every tree still recorded, whichever thread started it."""
+    for proc in tuple(LIVE_TREES.copy().values()):
+        kill_tree(proc)
+        untrack_tree(proc)
+
+
+def tree_spawn_options():
+    """Popen options that put a child in its own process group (POSIX session; Windows new process group)."""
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def kill_tree(proc):
+    """Kill `proc` and everything it started: killpg on POSIX, `taskkill /T /F` on Windows."""
+    with contextlib.suppress(OSError):
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, check=False)  # noqa: S603, S607 -- the OS tool that ends a process tree
+        else:
+            os.killpg(proc.pid, signal.SIGKILL)
+    with contextlib.suppress(OSError):
+        proc.kill()
+
+
+def run_tree(argv, *, timeout=None, **options):
+    """`subprocess.run` that, on a timeout, kills the child's whole process tree before raising."""
+    options.pop("check", None)
+    stdin_text = options.pop("input", None)
+    if options.pop("capture_output", False):
+        options.update(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if stdin_text is not None:
+        options["stdin"] = subprocess.PIPE
+    if "text" in options or "encoding" in options:
+        options["text"] = True
+    with subprocess.Popen(argv, **options, **tree_spawn_options()) as proc:  # noqa: S603 -- callers pass their own fixed argv
+        track_tree(proc)
+        try:
+            out, err = proc.communicate(stdin_text, timeout=timeout)
+        except BaseException:
+            kill_tree(proc)
+            proc.communicate()
+            raise
+        finally:
+            untrack_tree(proc)
+    return subprocess.CompletedProcess(argv, proc.returncode, out, err)
 
 
 def engine_remaining(deadline):
@@ -98,10 +174,12 @@ def _start_judge(judge):
         stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
+        **tree_spawn_options(),
     )
     lines = queue.Queue()
     threading.Thread(target=_pump_lines, args=(proc, lines), daemon=True).start()
     judge["proc"], judge["lines"] = proc, lines
+    track_tree(proc)
     try:
         ready = lines.get(timeout=PATTERN_START_SECONDS)
     except queue.Empty:
@@ -119,8 +197,9 @@ def close_judge(judge):
     if proc is None:
         return ""
     if proc.poll() is None:
-        proc.kill()  # before closing stdout: the reader thread holds it until the child's EOF
+        kill_tree(proc)  # before closing stdout: the reader thread holds it until the child's EOF
     proc.wait()
+    untrack_tree(proc)
     try:
         spoken = proc.stderr.read()
     except (OSError, ValueError):
@@ -220,14 +299,18 @@ class GateContext:
         #: Path prefixes this gate never judges: its own policy's source and compiled folders.
         self.own = tuple(own)
 
-    def in_scope(self, path: str) -> bool:
+    def is_own(self, path: str) -> bool:
+        """Whether `path` is in this policy's own source or compiled folder."""
+        return bool(self.own) and path.startswith(self.own)
+
+    def in_scope(self, path: str, *, judge_own: bool = False) -> bool:
         """Whether this policy may judge this file at all.
 
         fnmatch semantics, so `*` crosses `/` and `.github/workflows/*` covers nested files.
         A gate with no scope sees every changed file, which is what every gate did before
         applies_to.paths was read.
         """
-        if path.startswith(self.own):
+        if not judge_own and self.is_own(path):
             return False
         if _is_outside(path):
             return True
@@ -277,9 +360,9 @@ class GateContext:
         """True when `ref` resolves to a commit. Used to fail CI closed on a missing base."""
         return bool(self._git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").strip())
 
-    def staged_paths(self, diff_filter: str = "ACMRT") -> list[str]:
+    def staged_paths(self, diff_filter: str = "ACMRT", *, judge_own: bool = False) -> list[str]:
         paths = self._listing("diff", *self._range(), "--name-only", f"--diff-filter={diff_filter}")
-        return [path for path in paths if self.in_scope(path)]
+        return [path for path in paths if self.in_scope(path, judge_own=judge_own)]
 
     def _diff_text(self, path: str) -> str:
         """`path`'s `-U0` diff as git writes it, unconverted; raises DiffError when git fails."""
@@ -382,11 +465,11 @@ class WriteContext(GateContext):
         self._added = dict(added or {})
         self._stop = stop
 
-    def staged_paths(self, diff_filter: str = "ACMRT") -> list[str]:
+    def staged_paths(self, diff_filter: str = "ACMRT", *, judge_own: bool = False) -> list[str]:
         """Every write is a present file, so a filter asking only for deletions finds none."""
         if not set(diff_filter) & set("ACMRT"):
             return []
-        return [path for path in self._writes if self.in_scope(path)]
+        return [path for path in self._writes if self.in_scope(path, judge_own=judge_own)]
 
     def staged_blob(self, path: str) -> str:
         return self._writes.get(path, "")
@@ -407,7 +490,8 @@ class WriteContext(GateContext):
 
     def committed_blob(self, path: str) -> str:
         """HEAD's file, named from `repo_root` (`./`), which may sit below the git top-level."""
-        return self._git("show", f"HEAD:./{path}")
+        shown = _head_show(self.repo_root, f"./{path}")
+        return "" if shown is None else _text_mode(shown, "replace")
 
     def head_blob(self, path: str) -> str:
         """The baseline: HEAD at the turn's end, else what is on disk now, which this write would replace."""
@@ -587,9 +671,16 @@ def _config_rollout(repo_root: Path) -> str:
 
 def _committed_config(repo_root: Path, ref: str) -> str | None:
     """`.chock/config.yaml` as committed at `ref`; None when git cannot show it."""
+    spec = "/".join(_CONFIG_PATH)
+    if ref == "HEAD":
+        shown = _head_show(repo_root, spec)
+        try:
+            return None if shown is None else _text_mode(shown)
+        except UnicodeDecodeError:
+            return None
     try:
         shown = subprocess.run(  # noqa: S603 -- reading one committed file
-            ["git", "-C", str(repo_root), "show", f"{ref}:{'/'.join(_CONFIG_PATH)}"],  # noqa: S607
+            ["git", "-C", str(repo_root), "show", f"{ref}:{spec}"],  # noqa: S607
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -678,14 +769,15 @@ def _kind_content_regex(ctx: GateContext, params: dict, event: str) -> GateResul
     pragma = _waiver_pattern(params, event)
     agent = event in HEAD_WAIVER_EVENTS
     whole = params.get("scan", "added_lines") == "staged_blob"
-    paths = ctx.staged_paths(params.get("diff_filter", "ACMRT"))
+    paths = ctx.staged_paths(params.get("diff_filter", "ACMRT"), judge_own=True)
     judge = pattern_judge()
     try:
         forbidden = sorted(_hits(judge, [(_path_pattern(params, ctx), paths)])[0])
         heads = {path: ctx.committed_blob(path) if agent else "" for path in paths}
         blobs = [heads[paths[index]] if agent else ctx.staged_blob(paths[index]) for index in forbidden]
         spans, texts = _lines(
-            paths, lambda path: ctx.staged_blob(path).splitlines() if whole else ctx.added_lines(path)
+            [path for path in paths if not ctx.is_own(path)],
+            lambda path: ctx.staged_blob(path).splitlines() if whole else ctx.added_lines(path),
         )
         jobs = [(pragma, blobs), (pragma, texts), (params["content_pattern"], texts)]
         blob_waivers, line_waivers, hits = _hits(judge, jobs)
@@ -696,7 +788,7 @@ def _kind_content_regex(ctx: GateContext, params: dict, event: str) -> GateResul
         if index in forbidden and forbidden.index(index) not in blob_waivers:
             matches.append(f"{path}: forbidden path")
         head = frozenset(heads[path].splitlines()) if agent else None
-        if any(n in hits and not _waived(n, texts[n], line_waivers, head) for n in spans[path]):
+        if any(n in hits and not _waived(n, texts[n], line_waivers, head) for n in spans.get(path, ())):
             matches.append(f"{path}: content pattern")
     return GateResult(allowed=not matches, matches=matches)
 
@@ -869,7 +961,7 @@ _FINDINGS_KEY = "findings"
 
 
 def _spawn(script: Path, ctx: GateContext, payload: dict, timeout: float) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # noqa: S603 -- the script is the policy's own, named in its manifest
+    return run_tree(
         [sys.executable, str(script)],
         input=json.dumps(payload),
         capture_output=True,
@@ -1210,6 +1302,7 @@ _AGENT_WAIVER_HINT = "If this must stay, ask a person to review it; an agent can
 _CUSTOMISE_POINTER = (
     "A person customises this policy's rules in .agents/policies/{policy}/manifest.yaml; an agent cannot loosen them."
 )
+_SCRIPT_KIND = "script"
 
 
 def _for_agent(text: str) -> str:
@@ -1239,10 +1332,15 @@ def _reason(result: GateResult, spec: dict, event: str = "commit", policy_id: st
     return "\n".join([*matches, _summary(result, policy_id), policy])
 
 
+def _may_waive(spec: dict, event: str) -> bool:
+    """Whether the policy can honour a waiver: an `allowlist_pragma`, or a script that reads its own."""
+    return spec.get("kind") == _SCRIPT_KIND or bool(_waiver_pattern(spec.get("params") or {}, event))
+
+
 def _report_refusal(result: GateResult, spec: dict, judged: str, signal: str | None, policy_id: str | None) -> None:
     reason = _reason(result, spec, judged, policy_id)
     print(_encodable(ci_inert(reason) if judged == "ci" else reason, sys.stderr), file=sys.stderr)
-    if judged == AGENT_COMMIT_EVENT and signal:
+    if judged == AGENT_COMMIT_EVENT and signal and _may_waive(spec, judged):
         print(_AGENT_COMMIT_NOTE.format(signal=signal), file=sys.stderr)
 
 
@@ -1826,7 +1924,8 @@ def log_settings_read(path):
         problems.append(f"{path}: max_bytes must be {_LOG_BYTES_RANGE}, not {size!r}; using the next scope or 1048576")
     unknown = sorted(set(doc) - set(LOG_SETTINGS_KEYS))
     if unknown:
-        problems.append(f"{path}: unknown key(s) {', '.join(map(str, unknown))}; only level and max_bytes are read")
+        names = ", ".join(map(str, unknown))
+        problems.append(f"{path}: unknown key(s) {names}; only level and max_bytes are read")
     return found, problems
 
 
@@ -2445,6 +2544,61 @@ def log_require_safe(path):
     """Raise OSError unless `log_path_safe(path)`."""
     if not log_path_safe(path):
         raise OSError(LOG_UNSAFE)
+
+
+_HEAD_GIT = shutil.which("git") or "git"
+
+#: Per process: HEAD resolved once per repo root, and each `git show HEAD:<spec>` run once per (root, HEAD, spec).
+#: A failure is stored as None and read back as the same failure.
+_HEAD_SHA: dict[str, str | None] = {}
+_HEAD_SHOWN: dict[tuple[str, str | None, str], bytes | None] = {}
+
+
+def _head_sha(root: str) -> str | None:
+    if root not in _HEAD_SHA:
+        try:
+            proc = subprocess.run(  # noqa: S603 -- resolving HEAD once is this cache's key
+                [_HEAD_GIT, "-C", root, "rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+            sha = proc.stdout.strip() if proc.returncode == 0 else ""
+        except (OSError, subprocess.SubprocessError, UnicodeError):
+            sha = ""
+        _HEAD_SHA[root] = sha or None
+    return _HEAD_SHA[root]
+
+
+def _head_show(repo_root: Path, spec: str) -> bytes | None:
+    """The bytes of `git show HEAD:<spec>` run from `repo_root`, read once per process; None when git cannot show it."""
+    root = str(repo_root)
+    key = (root, _head_sha(root), spec)
+    if key not in _HEAD_SHOWN:
+        try:
+            proc = subprocess.run(  # noqa: S603 -- reading one committed file
+                [_HEAD_GIT, "-C", root, "show", f"HEAD:{spec}"],
+                capture_output=True,
+                check=False,
+                timeout=10,
+            )
+            shown = proc.stdout if proc.returncode == 0 else None
+        except (OSError, subprocess.SubprocessError):
+            shown = None
+        _HEAD_SHOWN[key] = shown
+    return _HEAD_SHOWN[key]
+
+
+def _head_forget() -> None:
+    """Drop what was read, for a process that sees HEAD move."""
+    _HEAD_SHA.clear()
+    _HEAD_SHOWN.clear()
+
+
+def _text_mode(raw: bytes, errors: str = "strict") -> str:
+    """`raw` as a text-mode pipe reads it: utf-8, universal newlines."""
+    return raw.decode("utf-8", errors).replace("\r\n", "\n").replace("\r", "\n")
 
 
 #: The git hook a merge's own commit runs: judged as a commit.

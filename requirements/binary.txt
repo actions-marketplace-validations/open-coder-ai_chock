@@ -4,8 +4,9 @@
 #
 #    pip-compile --allow-unsafe --generate-hashes --output-file=requirements/binary.txt --strip-extras requirements/binary.in
 #
-agentseam @ https://github.com/open-coder-ai/agentseam/archive/683f95b5f2784dc3446acb1c91636ebc5ee7bee6.tar.gz \
-    --hash=sha256:87e52fd9e92963f1d8feb4db7af1b6069ca15c3eb6d633245544850aef9c2f59
+agentseam==0.4.1 \
+    --hash=sha256:78e992b2032bb4633d4e63cf03a1b89de0309292acaeca80c98441b29fbb8c43 \
+    --hash=sha256:ba91b956648c0468e13a5fd8bbe4df7abc9d74dc67c7616a2e743f98f0e0e26e
     # via -r requirements/runtime.in
 altgraph==0.17.5 \
     --hash=sha256:c87b395dd12fabde9c99573a9749d67da8d29ef9de0125c7f536699b4a9bc9e7 \
@@ -283,9 +284,9 @@ typing-extensions==4.16.0 \
     # via referencing
 
 # The following packages are considered to be unsafe in a requirements file:
-setuptools==84.0.0 \
-    --hash=sha256:51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670 \
-    --hash=sha256:f4695c21257f0d9b537ec2692c941d02ee143b7cc1276941349a546573b2ef73
+setuptools==84.2.1 \
+    --hash=sha256:3ff8b3b5492a0aa66960f4419365a86b84e013070d4313e4d4a6894f5d64d6bc \
+    --hash=sha256:ca140b45d5325a9478f880e351484f62fef15f336462e449ca0c03c873d589c2
     # via
     #   -r requirements/runtime.in
     #   pyinstaller

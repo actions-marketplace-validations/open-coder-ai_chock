@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 import yaml
 from conftest import guarded_launch
+from jsonschema import Draft202012Validator
+from multi_support import argvs, folded_members
 
 from chock import vendors
 from chock.gate import runtime_bundle
@@ -82,13 +84,14 @@ def test_hook_lives_in_the_copilot_namespace(policy, tmp_path: Path) -> None:
     entry = hooks["hooks"]["PreToolUse"][0]
     assert entry["matcher"] == vendors.shell_matcher("vscode_copilot")
     command = entry["hooks"][0]["command"]
-    assert command == (
+    head = (
         'r="${PLUGIN_ROOT:-}"; [ -n "$r" ] || exit 0; [ -f "$r/scripts/vscode_copilot.py" ] || '
         "{ echo 'chock: the plugin root is set but the bundled hook is missing, so this call cannot be checked. "
         "Refusing rather than allowing it unchecked.' >&2; exit 2; }; "
-        "exec " + guarded_launch("$r/scripts/launch.sh") + '"$r/scripts/vscode_copilot.py" '
-        '--guard "$r/scripts/block-destructive-commands.sh"'
+        "exec " + guarded_launch("$r/scripts/launch.sh") + '"$r/scripts/vscode_copilot.py"'
     )
+    members = folded_members(command, head, lambda rel: (out / rel).read_text(encoding="utf-8"))
+    assert argvs(members) == [["--guard", "scripts/block-destructive-commands.sh"]]
 
 
 def test_adapter_and_guard_are_verbatim_copies(policy, tmp_path: Path) -> None:
@@ -224,3 +227,17 @@ def test_cli_all_builds_the_copilot_tree_too(policy, tmp_path: Path) -> None:
     assert plugin_main(["build", "--repo", str(tmp_path), "--format", "all", "--out-dir", str(dist), "--check"]) == 0
     (root / "plugin.json").write_text("{}", encoding="utf-8")
     assert plugin_main(["build", "--repo", str(tmp_path), "--format", "all", "--out-dir", str(dist), "--check"]) == 1
+
+
+SCHEMA_PATH = (
+    Path(__file__).resolve().parents[1] / "src/chock/validation/schemas/agent-plugins-1.0.0.plugin.schema.json"
+)
+
+
+@pytest.mark.parametrize("manifest", [GUARD_MANIFEST, RULE_MANIFEST])
+def test_manifest_carries_the_documented_homepage_and_conforms(policy, tmp_path: Path, manifest: dict) -> None:
+    """Copilot's plugin reference documents `homepage`; the manifest still validates as Agent Plugins 1.0."""
+    files = copilot_plugin_files(policy(manifest, guard=manifest is GUARD_MANIFEST), manifest, tmp_path)
+    data = json.loads(files[Path("plugin.json")])
+    assert data["homepage"] == "https://chock.sh"
+    Draft202012Validator(json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))).validate(data)

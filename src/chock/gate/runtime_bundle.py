@@ -9,6 +9,7 @@ from agentseam import bundler, contract
 from chock.gate.plugin_manifests import plugin_manifests
 from chock.gate.wire_shapes import EVENT_KEYS as _EVENT_KEYS
 from chock.gate.wire_shapes import wire_raw as _wire_raw
+from chock.hooks.launch import MIN_PYTHON
 from chock.resources import package_data_dir
 from chock.vendors import entry, in_agent_vendors
 
@@ -59,8 +60,18 @@ def _unreadable_source(agent: str) -> str:
 
 
 #: agentseam's `main` allows a payload it cannot read; the replacement refuses in the client's dialect.
-_UNREADABLE_BRANCH = """    except Exception:
+_UNREADABLE_BRANCH = """    except json.JSONDecodeError:
         # Malformed input is not the agent's fault to pay for: allow, stay silent.
+        if exit:
+            sys.exit(0)
+        return 0
+    except (ValueError, RecursionError, MemoryError):
+        # Valid JSON this file cannot decode: nothing to judge, so the blocking exit code.
+        _report(traceback.format_exc())
+        if exit:
+            sys.exit(2)
+        return 2
+    except Exception:
         if exit:
             sys.exit(0)
         return 0
@@ -159,7 +170,16 @@ def _entry_handler(agent: str) -> str:
     return "".join(parts)
 
 
+#: The end of agentseam's `main`: a multi-policy hook leaves through `_chock_leave`, which ends what a hung member left behind.
+_MAIN_EXIT = "        _emit(out, text)\n    if exit:\n        sys.exit(code)\n    return code\n"
+_MAIN_LEAVE = "        _emit(out, text)\n    if exit:\n        _chock_leave(code)\n    return code\n"
+
 _FUTURE = "from __future__ import annotations\n\n"
+
+#: Run first in every entry: a Python below the minimum exits silently, and the launcher's marker fd is written to.
+_START_MARKER = (
+    _DATA_DIR.joinpath("start_marker.py.tmpl").read_text(encoding="utf-8").replace("__MIN_PYTHON__", repr(MIN_PYTHON))
+)
 
 #: chock's imports go right after this line of agentseam's hoisted block. Anchored on the one
 #: line, not the whole block: agentseam 0.3.4 hoists contextlib/io/os around json and sys, and
@@ -194,6 +214,8 @@ def render(agent: str) -> str:
         raise ValueError("%s: bundle() output has no top-imports anchor to hoist onto" % agent)
     handler = _entry_handler(agent)
     source = source[:at] + "\n" + _needed_imports(handler) + source[at:]
+    future = source.find(_FUTURE) + len(_FUTURE)
+    source = source[:future] + _START_MARKER + source[future:]
     head, sep, rest = source.partition(BEGIN)
     if not sep:
         raise ValueError("%s: bundle() output has no %r marker" % (agent, BEGIN))
@@ -213,4 +235,7 @@ def render(agent: str) -> str:
     if _UNREADABLE_BRANCH not in tail:
         raise ValueError("%s: bundle() output has no unreadable-payload branch to refuse on" % agent)
     tail = tail.replace(_UNREADABLE_BRANCH, _UNREADABLE_REFUSAL)
+    if tail.count(_MAIN_EXIT) != 1:
+        raise ValueError("%s: bundle() output has no single exit of main to route through _chock_leave" % agent)
+    tail = tail.replace(_MAIN_EXIT, _MAIN_LEAVE)
     return "%s%s\n%s%s%s" % (head, BEGIN, handler, END, tail)

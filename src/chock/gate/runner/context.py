@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .constants import _PUSH_LINE_MIN_PARTS, CASE_BLIND_PLATFORMS
 from .gitparse import DiffError, ListingError, _diff_sides, _nul_paths
+from .headread import _head_show, _text_mode
 
 # >>> gate.py 01
 _GIT = shutil.which("git") or "git"
@@ -67,14 +68,18 @@ class GateContext:
         #: Path prefixes this gate never judges: its own policy's source and compiled folders.
         self.own = tuple(own)
 
-    def in_scope(self, path: str) -> bool:
+    def is_own(self, path: str) -> bool:
+        """Whether `path` is in this policy's own source or compiled folder."""
+        return bool(self.own) and path.startswith(self.own)
+
+    def in_scope(self, path: str, *, judge_own: bool = False) -> bool:
         """Whether this policy may judge this file at all.
 
         fnmatch semantics, so `*` crosses `/` and `.github/workflows/*` covers nested files.
         A gate with no scope sees every changed file, which is what every gate did before
         applies_to.paths was read.
         """
-        if path.startswith(self.own):
+        if not judge_own and self.is_own(path):
             return False
         if _is_outside(path):
             return True
@@ -124,9 +129,9 @@ class GateContext:
         """True when `ref` resolves to a commit. Used to fail CI closed on a missing base."""
         return bool(self._git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").strip())
 
-    def staged_paths(self, diff_filter: str = "ACMRT") -> list[str]:
+    def staged_paths(self, diff_filter: str = "ACMRT", *, judge_own: bool = False) -> list[str]:
         paths = self._listing("diff", *self._range(), "--name-only", f"--diff-filter={diff_filter}")
-        return [path for path in paths if self.in_scope(path)]
+        return [path for path in paths if self.in_scope(path, judge_own=judge_own)]
 
     def _diff_text(self, path: str) -> str:
         """`path`'s `-U0` diff as git writes it, unconverted; raises DiffError when git fails."""
@@ -229,11 +234,11 @@ class WriteContext(GateContext):
         self._added = dict(added or {})
         self._stop = stop
 
-    def staged_paths(self, diff_filter: str = "ACMRT") -> list[str]:
+    def staged_paths(self, diff_filter: str = "ACMRT", *, judge_own: bool = False) -> list[str]:
         """Every write is a present file, so a filter asking only for deletions finds none."""
         if not set(diff_filter) & set("ACMRT"):
             return []
-        return [path for path in self._writes if self.in_scope(path)]
+        return [path for path in self._writes if self.in_scope(path, judge_own=judge_own)]
 
     def staged_blob(self, path: str) -> str:
         return self._writes.get(path, "")
@@ -254,7 +259,8 @@ class WriteContext(GateContext):
 
     def committed_blob(self, path: str) -> str:
         """HEAD's file, named from `repo_root` (`./`), which may sit below the git top-level."""
-        return self._git("show", f"HEAD:./{path}")
+        shown = _head_show(self.repo_root, f"./{path}")
+        return "" if shown is None else _text_mode(shown, "replace")
 
     def head_blob(self, path: str) -> str:
         """The baseline: HEAD at the turn's end, else what is on disk now, which this write would replace."""

@@ -12,7 +12,7 @@ from chock.compile.emitters.in_agent import GATE_FILE
 from chock.compile.emitters.in_agent_hooks import hooks_map_file
 from chock.gate import runtime_bundle
 from chock.hooks import launch, stop_check
-from chock.plugin import gate_package, guard_gate, store
+from chock.plugin import gate_package, guard_gate, multi_plugin, store
 from chock.plugin.build import (
     LICENSE_REL,
     _author,
@@ -24,6 +24,7 @@ from chock.plugin.build import (
     plugin_name,
     skill_assets,
 )
+from chock.plugin.listing import homepage
 from chock.plugin.store import SCRIPTS_TEMPLATE as _SCRIPTS_TEMPLATE
 
 _MANIFEST_REL = packaging.layout("claude_code")["manifest"]
@@ -106,6 +107,7 @@ def build_claude_manifest(
     author = _author(provenance)
     if author:
         data["author"] = author
+    data["homepage"] = homepage()
     if provenance.get("license"):
         data["license"] = str(provenance["license"])
     if provenance.get("source_repo"):
@@ -113,7 +115,9 @@ def build_claude_manifest(
     return data
 
 
-def claude_plugin_files(policy_dir: Path, manifest: dict[str, Any], repo_root: Path) -> dict[Path, str]:
+def claude_plugin_files(
+    policy_dir: Path, manifest: dict[str, Any], repo_root: Path, *, folded: bool = True
+) -> dict[Path, str]:
     """The Claude plugin's files as {relative path: content}, writing nothing."""
     policy_dir = Path(policy_dir)
     policy_id = manifest.get("id") or policy_dir.name
@@ -151,7 +155,11 @@ def claude_plugin_files(policy_dir: Path, manifest: dict[str, Any], repo_root: P
         guard_gate.place(files, store.guard_files(policy_dir, script))
     if gate:
         guard_gate.place(files, gate_package.packaged_gate_files(policy_dir, gate, _SCRIPTS_TEMPLATE))
-    return files
+    return (
+        multi_plugin.fold_files(files, Path(packaging.supports("claude_code", packaging.HOOKS)), "claude_code")
+        if folded
+        else files
+    )
 
 
 def stale_claude_files(policy_dir: Path, manifest: dict[str, Any], repo_root: Path, out_dir: Path) -> list[Path]:

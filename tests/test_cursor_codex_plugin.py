@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 from conftest import guarded_launch
+from multi_support import argvs, folded_members
 
 from chock.gate import runtime_bundle
 from chock.plugin.cli import main as plugin_main
@@ -58,7 +59,7 @@ def policy(tmp_path: Path):
 
 def test_cursor_guard_policy_layout_and_hook(policy, tmp_path: Path) -> None:
     files = cursor_plugin_files(policy(GUARD_MANIFEST, guard=True), GUARD_MANIFEST, tmp_path)
-    assert set(files) == {
+    assert {rel for rel in files if rel.parts[:2] != ("scripts", "chock_index")} == {
         Path(".cursor-plugin/plugin.json"),
         Path("skills/block-destructive-commands/SKILL.md"),
         Path("hooks/hooks.json"),
@@ -74,10 +75,9 @@ def test_cursor_guard_policy_layout_and_hook(policy, tmp_path: Path) -> None:
     assert len(entries) == 1
     entry = entries[0]
     assert set(entry) == {"command", "timeout", "failClosed"}
-    assert entry["command"] == (
-        guarded_launch("${CURSOR_PLUGIN_ROOT}/scripts/launch.sh") + '"${CURSOR_PLUGIN_ROOT}/scripts/cursor.py" '
-        '--guard "${CURSOR_PLUGIN_ROOT}/scripts/block-destructive-commands.sh"'
-    )
+    head = guarded_launch("${CURSOR_PLUGIN_ROOT}/scripts/launch.sh") + '"${CURSOR_PLUGIN_ROOT}/scripts/cursor.py"'
+    members = folded_members(entry["command"], head, lambda rel: files[Path(rel)])
+    assert argvs(members) == [["--guard", "scripts/block-destructive-commands.sh"]]
 
 
 def test_cursor_hook_carries_no_matcher(policy, tmp_path: Path) -> None:
@@ -108,7 +108,7 @@ def test_cursor_rule_policy_gets_no_hook(policy, tmp_path: Path) -> None:
 
 def test_codex_guard_policy_layout_and_hook(policy, tmp_path: Path) -> None:
     files = codex_plugin_files(policy(GUARD_MANIFEST, guard=True), GUARD_MANIFEST, tmp_path)
-    assert set(files) == {
+    assert {rel for rel in files if rel.parts[:2] != ("scripts", "chock_index")} == {
         Path(".codex-plugin/plugin.json"),
         Path("skills/block-destructive-commands/SKILL.md"),
         Path("hooks/hooks.json"),
@@ -126,10 +126,9 @@ def test_codex_guard_policy_layout_and_hook(policy, tmp_path: Path) -> None:
     inner = entry["hooks"][0]
     assert inner["type"] == "command"
     assert "async" not in inner, "Codex only honours a blocking decision from a sync hook"
-    assert inner["command"] == (
-        guarded_launch("${PLUGIN_ROOT}/scripts/launch.sh")
-        + '"${PLUGIN_ROOT}/scripts/codex_cli.py" --guard "${PLUGIN_ROOT}/scripts/block-destructive-commands.sh"'
-    )
+    head = guarded_launch("${PLUGIN_ROOT}/scripts/launch.sh") + '"${PLUGIN_ROOT}/scripts/codex_cli.py"'
+    members = folded_members(inner["command"], head, lambda rel: files[Path(rel)])
+    assert argvs(members) == [["--guard", "scripts/block-destructive-commands.sh"]]
 
 
 def test_codex_manifest_is_legacy_format_not_agent_plugins(policy, tmp_path: Path) -> None:
@@ -144,7 +143,7 @@ def test_codex_manifest_is_legacy_format_not_agent_plugins(policy, tmp_path: Pat
 
 def test_codex_rule_policy_gets_no_hook(policy, tmp_path: Path) -> None:
     files = codex_plugin_files(policy(RULE_MANIFEST), RULE_MANIFEST, tmp_path)
-    assert set(files) == {
+    assert {rel for rel in files if rel.parts[:2] != ("scripts", "chock_index")} == {
         Path(".codex-plugin/plugin.json"),
         Path("skills/code-safety/SKILL.md"),
         Path("assets/icon.svg"),
@@ -239,3 +238,14 @@ def test_each_vendor_claims_only_what_was_witnessed(policy, tmp_path: Path) -> N
     assert "update voids that trust" in POSTURE_ENFORCED_CODEX, "the upgrade fail-open must be named"
     assert "OPEN" in POSTURE_ENFORCED_CODEX, "hook failures fail open and the posture says so"
     assert "`chock sync`" in POSTURE_ENFORCED_CODEX, "repo-level enforcement still pointed at"
+
+
+@pytest.mark.parametrize(
+    ("files_of", "manifest_rel"),
+    [(cursor_plugin_files, ".cursor-plugin/plugin.json"), (codex_plugin_files, ".codex-plugin/plugin.json")],
+)
+@pytest.mark.parametrize("manifest", [GUARD_MANIFEST, RULE_MANIFEST])
+def test_manifest_carries_the_documented_homepage(policy, tmp_path: Path, files_of, manifest_rel, manifest) -> None:
+    """Cursor's plugin reference and Codex's example manifest both document `homepage`."""
+    files = files_of(policy(manifest, guard=manifest is GUARD_MANIFEST), manifest, tmp_path)
+    assert json.loads(files[Path(manifest_rel)])["homepage"] == "https://chock.sh"

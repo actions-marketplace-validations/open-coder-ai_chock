@@ -10,9 +10,10 @@ from agentseam import packaging
 
 from chock.compile.emitters.in_agent_hooks import hooks_map_file
 from chock.hooks import launch, stop_check
-from chock.plugin import gate_package, guard_gate, store
+from chock.plugin import gate_package, guard_gate, multi_plugin, store
 from chock.plugin.build import (
     LICENSE_REL,
+    MANIFEST_KEYS,
     NAMESPACE,
     advisory_note,
     build_manifest,
@@ -22,6 +23,7 @@ from chock.plugin.build import (
     skill_assets,
 )
 from chock.plugin.claude import POSTURE_ADVISORY, _runtime_files
+from chock.plugin.listing import homepage
 from chock.plugin.store import SCRIPTS_TEMPLATE as _SCRIPTS_TEMPLATE
 
 _LAYOUT = packaging.layout("copilot")
@@ -103,7 +105,8 @@ def build_copilot_manifest(
     manifest: dict[str, Any], policy_dir: Path, *, enforced: bool, gate: bool = False, guard: bool = False
 ) -> dict[str, Any]:
     """Derive the root `plugin.json` from a policy manifest."""
-    data = build_manifest(manifest, policy_dir)
+    built = {**build_manifest(manifest, policy_dir), "homepage": homepage()}
+    data = {key: built[key] for key in MANIFEST_KEYS if key in built}
     posture = manifest_posture(enforced=enforced, gate=gate, guard=guard)
     data["description"] = f"{data['description']} [{posture}]".strip()
     extension = data["extensions"][NAMESPACE]
@@ -114,7 +117,9 @@ def build_copilot_manifest(
     return data
 
 
-def copilot_plugin_files(policy_dir: Path, manifest: dict[str, Any], repo_root: Path) -> dict[Path, str]:
+def copilot_plugin_files(
+    policy_dir: Path, manifest: dict[str, Any], repo_root: Path, *, folded: bool = True
+) -> dict[Path, str]:
     """The Copilot plugin's files as {relative path: content}, writing nothing."""
     policy_dir = Path(policy_dir)
     policy_id = manifest.get("id") or policy_dir.name
@@ -158,7 +163,7 @@ def copilot_plugin_files(policy_dir: Path, manifest: dict[str, Any], repo_root: 
         guard_gate.place(files, store.guard_files(policy_dir, script))
     if gate:
         guard_gate.place(files, gate_package.packaged_gate_files(policy_dir, gate, _SCRIPTS_TEMPLATE))
-    return files
+    return multi_plugin.fold_files(files, Path(HOOKS_REL), "vscode_copilot") if folded else files
 
 
 def stale_copilot_files(policy_dir: Path, manifest: dict[str, Any], repo_root: Path, out_dir: Path) -> list[Path]:
